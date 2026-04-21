@@ -1,0 +1,246 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { loadGasRuntime } from '../helpers/gasHarness.mjs';
+import { createBaseDataset } from '../helpers/fixtures.mjs';
+
+async function createAdminApp() {
+  const runtime = await loadGasRuntime();
+  const seed = createBaseDataset();
+  seed.line_accounts = [
+    {
+      id: 'line-002',
+      user_id: 'user-mg-001',
+      line_user_id: 'line-user-002',
+      display_name: '山田LINE',
+      linked_at: '2026-04-20T00:00:00Z'
+    },
+    {
+      id: 'line-003',
+      user_id: 'user-ad-001',
+      line_user_id: 'line-user-003',
+      display_name: '本部LINE',
+      linked_at: '2026-04-20T00:00:00Z'
+    }
+  ];
+  seed.checklist_runs = [
+    {
+      id: 'run-001',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-21',
+      status: 'open',
+      notified_at: '2026-04-21T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-21T01:30:00Z'
+    }
+  ];
+  seed.checklist_run_items = [
+    {
+      id: 'run-item-001',
+      run_id: 'run-001',
+      template_item_id: 'tmpl-item-001',
+      title: '開店準備',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_at: '',
+      updated_at: '2026-04-21T01:30:00Z'
+    }
+  ];
+
+  return runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    identityClient: {
+      verifyIdToken(idToken) {
+        const map = {
+          'valid-manager': { lineUserId: 'line-user-002', displayName: '山田LINE' },
+          'valid-admin': { lineUserId: 'line-user-003', displayName: '本部LINE' }
+        };
+        if (!map[idToken]) {
+          throw new Error('invalid token');
+        }
+        return map[idToken];
+      }
+    },
+    lineClient: {
+      pushMessage() {
+        return { status: 'sent' };
+      }
+    },
+    clock: {
+      now() {
+        return new Date('2026-04-21T03:00:00Z');
+      },
+      today() {
+        return '2026-04-21';
+      },
+      yesterday() {
+        return '2026-04-20';
+      }
+    }
+  });
+}
+
+test('管理者でないユーザーの項目追加は拒否する', async () => {
+  const runtime = await loadGasRuntime();
+  const seed = createBaseDataset();
+  seed.line_accounts = [
+    {
+      id: 'line-001',
+      user_id: 'user-pt-001',
+      line_user_id: 'line-user-001',
+      display_name: '田中LINE',
+      linked_at: '2026-04-20T00:00:00Z'
+    }
+  ];
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    identityClient: {
+      verifyIdToken() {
+        return { lineUserId: 'line-user-001', displayName: '田中LINE' };
+      }
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/templates/tmpl-001/items',
+    query: { idToken: 'valid-part-time' },
+    body: {
+      title: 'レジ確認',
+      description: '',
+      sortOrder: 3,
+      isRequired: true
+    }
+  });
+
+  assert.equal(response.statusCode, 403);
+});
+
+test('テンプレート新規作成・更新・項目 CRUD が成功する', async () => {
+  const app = await createAdminApp();
+
+  const createTemplate = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/templates',
+    query: { idToken: 'valid-manager' },
+    body: {
+      name: '閉店チェックリスト'
+    }
+  });
+  assert.equal(createTemplate.statusCode, 201);
+
+  const templateId = createTemplate.body.template.id;
+  const updateTemplate = app.handleApiRequest({
+    method: 'PUT',
+    path: `/api/admin/templates/${templateId}`,
+    query: { idToken: 'valid-manager' },
+    body: {
+      name: '閉店チェックリスト改'
+    }
+  });
+  assert.equal(updateTemplate.statusCode, 200);
+
+  const addItem = app.handleApiRequest({
+    method: 'POST',
+    path: `/api/admin/templates/${templateId}/items`,
+    query: { idToken: 'valid-manager' },
+    body: {
+      title: '施錠確認',
+      description: '',
+      sortOrder: 1,
+      isRequired: true
+    }
+  });
+  assert.equal(addItem.statusCode, 201);
+
+  const itemId = addItem.body.item.id;
+  const editItem = app.handleApiRequest({
+    method: 'PUT',
+    path: `/api/admin/templates/${templateId}/items/${itemId}`,
+    query: { idToken: 'valid-manager' },
+    body: {
+      title: '最終施錠確認',
+      description: '閉店時',
+      sortOrder: 1,
+      isRequired: true
+    }
+  });
+  assert.equal(editItem.statusCode, 200);
+
+  const deleteItem = app.handleApiRequest({
+    method: 'DELETE',
+    path: `/api/admin/templates/${templateId}/items/${itemId}`,
+    query: { idToken: 'valid-manager' },
+    body: {}
+  });
+  assert.equal(deleteItem.statusCode, 200);
+});
+
+test('空タイトルはバリデーションエラーになる', async () => {
+  const app = await createAdminApp();
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/templates',
+    query: { idToken: 'valid-manager' },
+    body: {
+      name: ''
+    }
+  });
+
+  assert.equal(response.statusCode, 400);
+});
+
+test('編集と削除の変更履歴ログが残る', async () => {
+  const app = await createAdminApp();
+
+  const addItem = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/templates/tmpl-001/items',
+    query: { idToken: 'valid-admin' },
+    body: {
+      title: 'レジ確認',
+      description: '',
+      sortOrder: 3,
+      isRequired: true
+    }
+  });
+  const itemId = addItem.body.item.id;
+
+  app.handleApiRequest({
+    method: 'PUT',
+    path: `/api/admin/templates/tmpl-001/items/${itemId}`,
+    query: { idToken: 'valid-admin' },
+    body: {
+      title: 'レジ締め確認',
+      description: '',
+      sortOrder: 3,
+      isRequired: true
+    }
+  });
+  app.handleApiRequest({
+    method: 'DELETE',
+    path: `/api/admin/templates/tmpl-001/items/${itemId}`,
+    query: { idToken: 'valid-admin' },
+    body: {}
+  });
+
+  const logs = app.repository.listTable('checklist_item_logs');
+  assert.equal(logs.filter((log) => log.action === 'edit').length, 1);
+  assert.equal(logs.filter((log) => log.action === 'delete').length, 1);
+});
+
+test('手動通知 API は管理者のみ実行でき、manual_reminder を保存する', async () => {
+  const app = await createAdminApp();
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/checklists/run-001/notify-incomplete',
+    query: { idToken: 'valid-manager' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.notifications[0].type, 'manual_reminder');
+});
