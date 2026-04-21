@@ -4,9 +4,192 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>管理者画面</title>
+    <script>
+      window.OGAWAYA_APP_BASE_URL = <?!= JSON.stringify(String(appBaseUrl)).replace(/</g, '\\u003c') ?>;
+      window.OGAWAYA_LIFF_ID = <?!= JSON.stringify(String(liffId)).replace(/</g, '\\u003c') ?>;
+    </script>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <?!= HtmlService.createHtmlOutputFromFile('liff/shared/style').getContent(); ?>
   </head>
   <body>
-    <h1>管理者向けLIFF</h1>
-    <p>テンプレート管理、履歴、未完了通知送信をここに実装します。</p>
+    <main class="page-shell">
+      <section class="hero-card">
+        <span class="eyebrow" id="screen-mode">管理者 LIFF</span>
+        <h1 class="hero-title">未完了、履歴、更新判断を、<br />一画面で追う。</h1>
+        <p class="hero-copy">同一店舗の運用状況確認、手動通知、テンプレート CRUD をまとめた管理画面です。</p>
+        <div class="error-box" id="error-message" data-visible="false" role="alert" aria-atomic="true"></div>
+        <div class="status-box" id="status-message" data-visible="false" role="status" aria-atomic="true"></div>
+        <div class="meta-grid">
+          <div class="meta-card">
+            <div class="meta-label">Store</div>
+            <div class="meta-value" id="store-name">-</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Target Date</div>
+            <div class="meta-value" id="target-date">-</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Progress</div>
+            <div class="meta-value" id="progress-summary">-</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Control Room</div>
+              <h2 class="panel-title">当日チェックリスト</h2>
+            </div>
+            <div class="button-row">
+              <span class="role-badge" id="role-badge">-</span>
+              <button class="action-button ghost-button" id="refresh-button" type="button">最新状態に更新</button>
+            </div>
+          </div>
+          <div class="status-strip">
+            <div class="meta-line">管理者は他人のチェック取消も含めて、最新状態から操作します。</div>
+          </div>
+          <ul class="checklist-list" id="checklist-items"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Incomplete</div>
+              <h2 class="panel-title">未完了通知</h2>
+            </div>
+            <div class="button-row">
+              <div class="meta-line" id="incomplete-summary">未完了 0 件</div>
+              <button class="action-button" id="notify-button" type="button">未完了を手動通知</button>
+            </div>
+          </div>
+          <ul class="checklist-list" id="incomplete-items"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Logs</div>
+              <h2 class="panel-title">操作履歴</h2>
+            </div>
+            <div class="control-row">
+              <select class="select-input" id="log-action-filter">
+                <option value="">すべて</option>
+                <option value="check">check</option>
+                <option value="uncheck">uncheck</option>
+                <option value="edit">edit</option>
+                <option value="delete">delete</option>
+              </select>
+              <button class="action-button ghost-button" id="load-logs-button" type="button">履歴を再取得</button>
+            </div>
+          </div>
+          <ul class="checklist-list" id="logs-list"></ul>
+        </section>
+
+        <section class="panel panel-stack" id="admin-panel">
+          <div>
+            <div class="eyebrow">Template Control</div>
+            <h2 class="panel-title">テンプレート管理</h2>
+            <p class="panel-copy">テンプレート名の更新、項目の追加 / 更新 / 削除をここから行います。</p>
+          </div>
+
+          <div class="sub-panel">
+            <div class="field-label">新規テンプレート</div>
+            <div class="control-row">
+              <input class="text-input" id="new-template-name-input" type="text" placeholder="閉店チェックリスト" />
+              <button class="action-button" id="create-template-button" type="button">テンプレート作成</button>
+            </div>
+          </div>
+
+          <div class="sub-panel">
+            <div class="form-grid">
+              <label class="field-card">
+                <span class="field-label">対象テンプレート</span>
+                <select class="select-input" id="template-select"></select>
+              </label>
+              <label class="field-card">
+                <span class="field-label">テンプレート名</span>
+                <input class="text-input" id="template-name-input" type="text" />
+              </label>
+            </div>
+            <div class="button-row" style="margin-top: 12px;">
+              <button class="action-button ghost-button" id="update-template-button" type="button">テンプレート名を更新</button>
+            </div>
+          </div>
+
+          <div class="sub-panel">
+            <div class="field-label">現在の項目</div>
+            <ul class="checklist-list" id="template-items"></ul>
+          </div>
+
+          <div class="sub-panel">
+            <div class="form-grid">
+              <label class="field-card">
+                <span class="field-label">更新対象項目</span>
+                <select class="select-input" id="template-item-select"></select>
+              </label>
+              <label class="field-card">
+                <span class="field-label">項目名</span>
+                <input class="text-input" id="template-item-title-input" type="text" />
+              </label>
+              <label class="field-card">
+                <span class="field-label">説明</span>
+                <input class="text-input" id="template-item-description-input" type="text" />
+              </label>
+              <label class="field-card">
+                <span class="field-label">並び順</span>
+                <input class="text-input" id="template-item-sort-order-input" type="number" min="1" />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="template-item-required-input" type="checkbox" />
+              必須項目として扱う
+            </label>
+            <div class="button-row" style="margin-top: 12px;">
+              <button class="action-button ghost-button" id="update-template-item-button" type="button">項目を更新</button>
+              <button class="action-button danger-button" id="delete-template-item-button" type="button">項目を削除</button>
+            </div>
+          </div>
+
+          <div class="sub-panel">
+            <div class="field-label">新規項目追加</div>
+            <div class="form-grid">
+              <label class="field-card">
+                <span class="field-label">項目名</span>
+                <input class="text-input" id="new-item-title-input" type="text" placeholder="レジ確認" />
+              </label>
+              <label class="field-card">
+                <span class="field-label">説明</span>
+                <input class="text-input" id="new-item-description-input" type="text" placeholder="朝礼前" />
+              </label>
+              <label class="field-card">
+                <span class="field-label">並び順</span>
+                <input class="text-input" id="new-item-sort-order-input" type="number" min="1" />
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="new-item-required-input" type="checkbox" />
+              必須項目として追加する
+            </label>
+            <div class="button-row" style="margin-top: 12px;">
+              <button class="action-button" id="add-template-item-button" type="button">項目を追加</button>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+    <?!= HtmlService.createHtmlOutputFromFile('liff/shared/client').getContent(); ?>
+    <script>
+      window.addEventListener('DOMContentLoaded', function () {
+        var controller = window.OgawayaLiff.createController({
+          document: document,
+          auth: window.OgawayaLiff.createAuth(),
+          api: window.OgawayaLiff.createApi(window.OGAWAYA_APP_BASE_URL),
+          mode: 'admin'
+        });
+        controller.init();
+      });
+    </script>
   </body>
 </html>
