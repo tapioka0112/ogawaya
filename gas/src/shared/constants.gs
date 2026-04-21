@@ -243,7 +243,11 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var query = ns.clone((e && e.parameter) || {});
     var body = {};
     if (e && e.postData && e.postData.contents) {
-      body = JSON.parse(e.postData.contents);
+      try {
+        body = JSON.parse(e.postData.contents);
+      } catch (error) {
+        throw ns.createError('invalid_request', 'リクエストボディが不正な JSON です。', 400);
+      }
     }
     if (query._method) {
       method = query._method;

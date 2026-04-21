@@ -15,3 +15,20 @@ test('GAS 応答 JSON に statusCode と ok を含める', async () => {
   assert.equal(payload.statusCode, 401);
   assert.equal(payload.message, '未認証です');
 });
+
+test('不正な JSON ボディは invalid_request として 400 を返す', async () => {
+  const runtime = await loadGasRuntime();
+
+  assert.throws(() => {
+    runtime.Ogawaya.extractRequest({
+      postData: {
+        contents: '{broken'
+      },
+      parameter: {}
+    }, 'POST');
+  }, (error) => {
+    assert.equal(error.code, 'invalid_request');
+    assert.equal(error.statusCode, 400);
+    return true;
+  });
+});

@@ -394,7 +394,7 @@
           state[sheetName] = [];
           return;
         }
-        var values = sheet.getDataRange().getValues();
+        var values = sheet.getDataRange().getDisplayValues();
         if (values.length === 0) {
           state[sheetName] = [];
           return;
@@ -405,7 +405,7 @@
         }).map(function (row) {
           var record = {};
           headers.forEach(function (header, index) {
-            record[header] = String(row[index] || '');
+            record[header] = row[index] == null ? '' : String(row[index]);
           });
           return record;
         });

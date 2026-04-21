@@ -8,6 +8,7 @@
   function buildDefaultIdentityClient(channelId) {
     return {
       verifyIdToken: function (idToken) {
+        ns.assert(channelId, 'config_error', 'LINE_CHANNEL_ID が未設定です', 500);
         ns.assert(idToken, 'unauthorized', 'LIFF 認証コンテキストがありません', 401);
         var response = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify', {
           method: 'post',
@@ -16,7 +17,9 @@
             client_id: channelId
           }
         });
+        ns.assert(response.getResponseCode() === 200, 'unauthorized', 'LIFF 認証の検証に失敗しました', 401);
         var payload = JSON.parse(response.getContentText());
+        ns.assert(payload.sub, 'internal_error', 'LINE verify 応答に sub が含まれていません', 500);
         return {
           lineUserId: payload.sub,
           displayName: payload.name || ''
@@ -88,6 +91,9 @@
       try {
         return identityClient.verifyIdToken(query.idToken);
       } catch (error) {
+        if (error && (error.statusCode || error.code)) {
+          throw error;
+        }
         throw ns.createError('unauthorized', 'LIFF 認証コンテキストがありません', 401);
       }
     }
