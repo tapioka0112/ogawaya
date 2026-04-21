@@ -17,6 +17,12 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - `/api/link` のリクエストボディは `employeeCode` と `passcode` の2項目のみを受け付ける。
 - 性能目標は `today` 取得2秒以内、チェック操作1秒以内。
 
+## 実装上の補足
+- GAS Web App の `doPost(e)` は公式ドキュメント上ヘッダーを受け取らないため、LIFF の `idToken` はクエリパラメータ `idToken` として受け取り、サーバー側で LINE の verify API に送って `sub` を取得する。
+- Webhook 署名は内部実装では `signature` 入力として扱い、GAS 入口ではクエリパラメータ経由で処理する。直接本番運用する場合は `X-Line-Signature` を転送するプロキシを挟む前提。
+- `users` シートには `/api/link` 用の `passcode` 列を持たせる。
+- GAS Web App は `GET` / `POST` だけを直接受けるため、`PUT` / `DELETE` は `_method` クエリでメソッドオーバーライドして扱う。
+
 ## 目的
 - 店舗別の日次チェックリストをLINE上で共有する。
 - チェック・取消・履歴を時系列で記録する。
@@ -30,6 +36,8 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - データストア: Spreadsheet (`gas/src/storage`)
 - LIFF: GAS Web App (`gas/src/liff/user`, `gas/src/liff/admin`)
 - 共通設定: `gas/appsscript.json`, `gas/.clasp.json`
+- テスト: Node 標準テストランナー (`tests/`)
+- CI: GitHub Actions (`.github/workflows/test.yml`)
 
 ## ディレクトリ
 - [gas/](/home/sota411/Documents/project/ogawaya/gas)
@@ -57,6 +65,14 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - `clasp` にログインする。
   - `clasp login`
 
+## ローカルテスト
+- テスト基盤は `tests/` 配下に配置している。
+- 実行コマンドは `npm test`。
+- 主な対象:
+  - `tests/gas`: デプロイ前チェック、Spreadsheet 制約、API、Webhook、Scheduler、性能
+  - `tests/ui`: LIFF 共通初期化、ロール分岐、更新ボタン
+  - `tests/docs`: 仕様文書の必須記載
+
 ## デプロイ準備
 1. [gas/.clasp.json](/home/sota411/Documents/project/ogawaya/gas/.clasp.json) の `scriptId` を設定する。
 2. [gas/appsscript.json](/home/sota411/Documents/project/ogawaya/gas/appsscript.json) の必要権限（External Request / Spreadsheet）を設定する。
@@ -67,10 +83,13 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
    - 0:00: `runDailyClosing`
 6. LIFF URLをLINEリッチメニューに紐づける。
 
+詳細な初期データ投入と運用手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照する。
+
 ## テスト運用（TDD）
 - 実装順は `失敗するテスト追加 → 実装 → リファクタ` を厳守する。
 - 各タスクで `正常系 / 異常系 / 境界値` を最低1件ずつ含める。
-- `tasks.md` の「共通テスト基盤（事前準備）」完了までは、テストディレクトリと実行コマンドは未固定。固定後はこのREADMEに追記する。
+- `tests/` と `npm test` を固定の実行方法とする。
+- CI でも `npm test` を実行する。
 
 ## 参照
 - [tasks.md](/home/sota411/Documents/project/ogawaya/tasks.md) を実装の正とする。

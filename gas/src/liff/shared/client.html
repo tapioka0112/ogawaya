@@ -1,0 +1,184 @@
+<script>
+  (function (global) {
+    function normalizeBaseUrl(baseUrl) {
+      return String(baseUrl || '').replace(/\/+$/, '');
+    }
+
+    function createApi(baseUrl) {
+      var normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+
+      async function request(method, path, idToken, body) {
+        var url = normalizedBaseUrl + path;
+        var options = {
+          method: method === 'GET' ? 'GET' : 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        };
+
+        if (idToken) {
+          url += (url.indexOf('?') === -1 ? '?' : '&') + 'idToken=' + encodeURIComponent(idToken);
+        }
+        if (method === 'PUT' || method === 'DELETE') {
+          url += (url.indexOf('?') === -1 ? '?' : '&') + '_method=' + method;
+        }
+        if (method !== 'GET') {
+          options.body = JSON.stringify(body || {});
+        }
+
+        var response = await global.fetch(url, options);
+        var payload = await response.json();
+        if (!response.ok || payload.ok === false || payload.statusCode >= 400) {
+          throw new Error(payload.message || 'API request failed');
+        }
+        return payload;
+      }
+
+      return {
+        getMe: function (idToken) {
+          return request('GET', '/api/me', idToken);
+        },
+        getTodayChecklist: function (idToken) {
+          return request('GET', '/api/checklists/today', idToken);
+        }
+      };
+    }
+
+    function createAuth() {
+      return {
+        initialize: async function () {
+          if (global.__OGAWAYA_MOCK__ && global.__OGAWAYA_MOCK__.idToken) {
+            return { idToken: global.__OGAWAYA_MOCK__.idToken };
+          }
+          if (!global.liff) {
+            throw new Error('LIFF SDK が読み込まれていません');
+          }
+          if (!global.OGAWAYA_LIFF_ID) {
+            throw new Error('LIFF ID が未設定です');
+          }
+          await global.liff.init({ liffId: global.OGAWAYA_LIFF_ID });
+          var idToken = global.liff.getIDToken();
+          if (!idToken) {
+            throw new Error('LIFF 認証コンテキストを取得できません');
+          }
+          return { idToken: idToken };
+        }
+      };
+    }
+
+    function createController(options) {
+      var state = {
+        idToken: '',
+        me: null,
+        checklist: null
+      };
+      var documentRef = options.document;
+      var auth = options.auth;
+      var api = options.api;
+      var mode = options.mode;
+      var errorBox = documentRef.getElementById('error-message');
+      var roleBadge = documentRef.getElementById('role-badge');
+      var storeName = documentRef.getElementById('store-name');
+      var targetDate = documentRef.getElementById('target-date');
+      var progressSummary = documentRef.getElementById('progress-summary');
+      var checklistItems = documentRef.getElementById('checklist-items');
+      var refreshButton = documentRef.getElementById('refresh-button');
+      var adminPanel = documentRef.getElementById('admin-panel');
+      var screenMode = documentRef.getElementById('screen-mode');
+
+      function setError(message) {
+        errorBox.textContent = message;
+        errorBox.dataset.visible = 'true';
+      }
+
+      function clearError() {
+        errorBox.textContent = '';
+        errorBox.dataset.visible = 'false';
+      }
+
+      function renderRole(role) {
+        roleBadge.textContent = role;
+        adminPanel.hidden = role === 'part_time';
+      }
+
+      function renderChecklist(checklist) {
+        state.checklist = checklist;
+        storeName.textContent = checklist.storeName;
+        targetDate.textContent = checklist.targetDate;
+        progressSummary.textContent = checklist.progress.checked + ' / ' + checklist.progress.total;
+        checklistItems.innerHTML = '';
+
+        checklist.items.forEach(function (item) {
+          var listItem = documentRef.createElement('li');
+          listItem.className = 'checklist-item';
+
+          var bullet = documentRef.createElement('span');
+          bullet.className = 'check-bullet';
+          bullet.dataset.status = item.status;
+
+          var body = documentRef.createElement('div');
+
+          var title = documentRef.createElement('div');
+          title.className = 'item-title';
+          title.textContent = item.title;
+
+          var meta = documentRef.createElement('div');
+          meta.className = 'item-meta';
+          meta.textContent = item.status === 'checked'
+            ? item.checkedBy + ' / ' + item.checkedAt
+            : '未チェック';
+
+          body.appendChild(title);
+          body.appendChild(meta);
+          listItem.appendChild(bullet);
+          listItem.appendChild(body);
+          checklistItems.appendChild(listItem);
+        });
+      }
+
+      async function refresh() {
+        clearError();
+        var checklist = await api.getTodayChecklist(state.idToken);
+        renderChecklist(checklist);
+      }
+
+      async function init() {
+        screenMode.textContent = mode === 'admin' ? '管理者 LIFF' : '従業員 LIFF';
+        if (!refreshButton.__bound) {
+          refreshButton.addEventListener('click', function () {
+            return refresh().catch(function (error) {
+              setError(error.message || '最新状態の取得に失敗しました');
+            });
+          });
+          refreshButton.__bound = true;
+        }
+
+        try {
+          clearError();
+          var authResult = await auth.initialize();
+          state.idToken = authResult.idToken;
+          state.me = await api.getMe(state.idToken);
+          renderRole(state.me.role);
+          await refresh();
+        } catch (error) {
+          setError(error.message || 'LIFF の初期化に失敗しました');
+        }
+      }
+
+      return {
+        init: init,
+        refresh: refresh,
+        renderRole: renderRole,
+        getState: function () {
+          return state;
+        }
+      };
+    }
+
+    global.OgawayaLiff = {
+      createApi: createApi,
+      createAuth: createAuth,
+      createController: createController
+    };
+  })(globalThis);
+</script>

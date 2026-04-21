@@ -8,6 +8,7 @@
 - 初期版は `1ユーザー = 1店舗` 前提で運用し、複数店舗の横断閲覧は扱いません。
 - ロールは `part_time / manager / admin` を使い、履歴閲覧は同一店舗の認証済みユーザーに許可します。
 - `POST /api/link` は `employeeCode + passcode` のみを受け付け、`lineUserId` は LIFF 認証コンテキストから取得します。
+- GAS Web App ではヘッダーが `doPost(e)` に露出しないため、LIFF の `idToken` と Webhook 署名はクエリ経由で入口に渡し、サーバー側検証に回します。
 
 ## 1. 全体構成図
 
@@ -117,6 +118,7 @@ sequenceDiagram
   - 権限判定
   - チェック操作、履歴保存、通知判定
   - 定時トリガーの実行
+  - LIFF `idToken` の verify と LINE Webhook 署名検証
 - Spreadsheet 側の責務
   - 店舗、ユーザー、日別チェックリスト、履歴、通知結果の保存
 
@@ -124,6 +126,7 @@ sequenceDiagram
 
 - 要件上、LINE だけでは状態共有と履歴保存が完結しないため、保存先が必要です。
 - MVP では GAS + Spreadsheet に寄せることで、Webhook、LIFF 配信、定時処理を単一基盤に集約できます。
+- ただし GAS Web App にはヘッダー参照制約があるため、LINE 由来の署名や ID token は入口で受け渡し方法を明示し、サーバー側 verify を必須にします。
 - 将来 DB を外出しする場合も、`handlers -> services -> storage` の責務分割を先に置いておけば差し替えやすくなります。
 
 ## 根拠
