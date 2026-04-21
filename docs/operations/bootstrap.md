@@ -16,6 +16,8 @@
 
 `users` シートは `/api/link` に必要なため、`passcode` 列を含める。
 
+そのまま import したい場合は [docs/operations/import/](/home/sota411/Documents/project/ogawaya/docs/operations/import) 配下の同名 CSV を使う。
+
 ## 2. Script Properties
 
 最低限以下を設定する。
@@ -25,6 +27,8 @@
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LIFF_ID`
+
+コピペ用のテンプレートは [script-properties.example.json](/home/sota411/Documents/project/ogawaya/docs/operations/import/script-properties.example.json) を使う。
 
 ## 3. デプロイ前チェック
 
@@ -48,6 +52,14 @@
    - 店舗ごとの有効テンプレート
 4. `checklist_template_items`
    - テンプレートに紐づく日次項目
+
+最短で始めるなら以下の順に import する。
+
+1. `stores.csv`
+2. `users.csv`
+3. `checklist_templates.csv`
+4. `checklist_template_items.csv`
+5. 残りの CSV はヘッダーのみ import する
 
 ## 5. Webhook / LIFF
 

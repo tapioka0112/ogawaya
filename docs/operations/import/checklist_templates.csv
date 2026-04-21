@@ -1,0 +1,2 @@
+id,store_id,name,notify_time,closing_time,is_active,created_by,created_at,updated_at
+tmpl-001,store-001,日次チェックリスト,10:30,00:00,true,user-mg-001,2026-04-22T00:00:00Z,2026-04-22T00:00:00Z
