@@ -4,15 +4,45 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>会社共有チェックリスト LIFF</title>
+    <?!= HtmlService.createHtmlOutputFromFile('liff/shared/style').getContent(); ?>
   </head>
   <body>
-    <main>
-      <h1>会社共有チェックリスト LIFF</h1>
-      <p>この配下にユーザー/管理者用のLIFF画面を分割実装します。</p>
-      <ul>
-        <li><a href="./?mode=user">従業員画面</a></li>
-        <li><a href="./?mode=admin">管理者画面</a></li>
-      </ul>
+    <main class="page-shell">
+      <section class="hero-card">
+        <span class="eyebrow">Ogawaya Daily Ops</span>
+        <h1 class="hero-title">店舗の確認作業を、<br />その日の状態でそろえる。</h1>
+        <p class="hero-copy">
+          LINE からそのまま開ける LIFF 画面です。<br />
+          従業員は今日の状態を確認し、管理者は未完了やテンプレート更新を追えます。
+        </p>
+        <div class="meta-grid">
+          <div class="meta-card">
+            <div class="meta-label">Daily Start</div>
+            <div class="meta-value">10:30 に当日分を生成</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Daily Close</div>
+            <div class="meta-value">0:00 に前日分を締切</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Roles</div>
+            <div class="meta-value">part_time / manager / admin</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mode-grid">
+        <a class="mode-card" href="<?= appBaseUrl ?>?mode=user">
+          <div class="eyebrow">User</div>
+          <h2 class="mode-title">従業員画面</h2>
+          <p class="panel-copy">当日の進捗確認、最新状態の再取得、未完了の共有に絞った画面です。</p>
+        </a>
+        <a class="mode-card" href="<?= appBaseUrl ?>?mode=admin">
+          <div class="eyebrow">Admin</div>
+          <h2 class="mode-title">管理者画面</h2>
+          <p class="panel-copy">同一店舗の状況確認、テンプレート調整、手動通知の判断に使う画面です。</p>
+        </a>
+      </section>
     </main>
   </body>
 </html>

@@ -4,9 +4,79 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>管理者画面</title>
+    <script>
+      window.OGAWAYA_APP_BASE_URL = '<?= appBaseUrl ?>';
+      window.OGAWAYA_LIFF_ID = '<?= liffId ?>';
+    </script>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <?!= HtmlService.createHtmlOutputFromFile('liff/shared/style').getContent(); ?>
   </head>
   <body>
-    <h1>管理者向けLIFF</h1>
-    <p>テンプレート管理、履歴、未完了通知送信をここに実装します。</p>
+    <main class="page-shell">
+      <section class="hero-card">
+        <span class="eyebrow" id="screen-mode">管理者 LIFF</span>
+        <h1 class="hero-title">未完了、履歴、更新判断を、<br />一画面で追う。</h1>
+        <p class="hero-copy">
+          同一店舗の今日の状態を確認しつつ、テンプレート更新や手動通知の判断を行うための管理画面です。
+        </p>
+        <div class="error-box" id="error-message" data-visible="false"></div>
+        <div class="meta-grid">
+          <div class="meta-card">
+            <div class="meta-label">Store</div>
+            <div class="meta-value" id="store-name">-</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Target Date</div>
+            <div class="meta-value" id="target-date">-</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Progress</div>
+            <div class="meta-value" id="progress-summary">-</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Control Room</div>
+              <h2 class="panel-title">運用状況</h2>
+            </div>
+            <div class="button-row">
+              <span class="role-badge" id="role-badge">-</span>
+              <button class="action-button ghost-button" id="refresh-button" type="button">最新状態に更新</button>
+            </div>
+          </div>
+          <div class="status-strip">
+            <div class="meta-line">同一店舗の進捗、締切後運用、履歴確認の起点になる画面です。</div>
+          </div>
+          <ul class="checklist-list" id="checklist-items"></ul>
+        </section>
+
+        <section class="panel" id="admin-panel">
+          <div class="eyebrow">Admin Actions</div>
+          <h2 class="panel-title">管理者用メモ</h2>
+          <ul class="note-list">
+            <li>未完了通知は管理者 API から手動送信できます。</li>
+            <li>テンプレート項目の追加・編集・削除は同一店舗の管理者のみ実行できます。</li>
+            <li>締切後の操作は履歴上で区別されます。</li>
+          </ul>
+          <p class="footer-note">API 契約は README と要件定義書に記載しています。</p>
+        </section>
+      </section>
+    </main>
+    <?!= HtmlService.createHtmlOutputFromFile('liff/shared/client').getContent(); ?>
+    <script>
+      window.addEventListener('DOMContentLoaded', function () {
+        var controller = window.OgawayaLiff.createController({
+          document: document,
+          auth: window.OgawayaLiff.createAuth(),
+          api: window.OgawayaLiff.createApi(window.OGAWAYA_APP_BASE_URL),
+          mode: 'admin'
+        });
+        controller.init();
+      });
+    </script>
   </body>
 </html>
