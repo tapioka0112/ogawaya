@@ -35,6 +35,7 @@
       title: item.title,
       status: item.status,
       checkedBy: checkedUser ? checkedUser.name : null,
+      checkedByUserId: checkedUser ? checkedUser.id : null,
       checkedAt: item.checked_at || null
     };
   }
@@ -45,6 +46,8 @@
     }).length;
 
     return {
+      runId: run.id,
+      templateId: run.template_id,
       storeName: store.name,
       targetDate: run.target_date,
       status: run.status,
@@ -55,6 +58,27 @@
       items: items.map(function (item) {
         return buildRunItemResponse(repository, item);
       })
+    };
+  }
+
+  function buildTemplateItemResponse(item) {
+    return {
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      sortOrder: Number(item.sort_order),
+      isRequired: ns.parseBoolean(item.is_required)
+    };
+  }
+
+  function buildTemplateResponse(repository, template) {
+    return {
+      id: template.id,
+      name: template.name,
+      notifyTime: template.notify_time,
+      closingTime: template.closing_time,
+      isActive: ns.parseBoolean(template.is_active),
+      items: repository.listTemplateItems(template.id).map(buildTemplateItemResponse)
     };
   }
 
@@ -331,6 +355,18 @@
           updated_at: now
         });
         return { template: template };
+      },
+
+      listTemplates: function (query) {
+        var currentUser = requireAuthenticatedUser(query);
+        ensureManager(currentUser.user);
+        return {
+          templates: repository.listActiveTemplates().filter(function (template) {
+            return template.store_id === currentUser.user.store_id;
+          }).map(function (template) {
+            return buildTemplateResponse(repository, template);
+          })
+        };
       },
 
       updateTemplate: function (query, templateId, body) {

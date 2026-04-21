@@ -60,6 +60,9 @@
     if (method === 'POST' && path === '/api/admin/templates') {
       return ns.createJsonResponse(201, service.createTemplate(request.query, request.body));
     }
+    if (method === 'GET' && path === '/api/admin/templates') {
+      return ns.createJsonResponse(200, service.listTemplates(request.query));
+    }
 
     var templateMatch = path.match(/^\/api\/admin\/templates\/([^/]+)$/);
     if (method === 'PUT' && templateMatch) {
