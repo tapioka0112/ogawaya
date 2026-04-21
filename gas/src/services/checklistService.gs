@@ -71,14 +71,14 @@
     };
   }
 
-  function buildTemplateResponse(repository, template) {
+  function buildTemplateResponse(template, items) {
     return {
       id: template.id,
       name: template.name,
       notifyTime: template.notify_time,
       closingTime: template.closing_time,
       isActive: ns.parseBoolean(template.is_active),
-      items: repository.listTemplateItems(template.id).map(buildTemplateItemResponse)
+      items: items.map(buildTemplateItemResponse)
     };
   }
 
@@ -361,10 +361,8 @@
         var currentUser = requireAuthenticatedUser(query);
         ensureManager(currentUser.user);
         return {
-          templates: repository.listActiveTemplates().filter(function (template) {
-            return template.store_id === currentUser.user.store_id;
-          }).map(function (template) {
-            return buildTemplateResponse(repository, template);
+          templates: repository.listActiveTemplatesWithItems(currentUser.user.store_id).map(function (entry) {
+            return buildTemplateResponse(entry.template, entry.items);
           })
         };
       },

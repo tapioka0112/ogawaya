@@ -191,6 +191,33 @@
       }));
     }
 
+    function listActiveTemplatesWithItems(storeId) {
+      var state = readState();
+      var groupedItems = {};
+
+      state.checklist_template_items.forEach(function (item) {
+        if (!ns.parseBoolean(item.is_active)) {
+          return;
+        }
+        if (!groupedItems[item.template_id]) {
+          groupedItems[item.template_id] = [];
+        }
+        groupedItems[item.template_id].push(ns.clone(item));
+      });
+
+      return state.checklist_templates.filter(function (template) {
+        if (!ns.parseBoolean(template.is_active)) {
+          return false;
+        }
+        return !storeId || template.store_id === storeId;
+      }).map(function (template) {
+        return {
+          template: ns.clone(template),
+          items: ns.sortBySortOrder(groupedItems[template.id] || [])
+        };
+      });
+    }
+
     function findRunById(runId) {
       return findRowById('checklist_runs', runId);
     }
@@ -351,6 +378,7 @@
       findUserByEmployeeCodeAndPasscode: findUserByEmployeeCodeAndPasscode,
       findRowById: findRowById,
       listActiveTemplates: listActiveTemplates,
+      listActiveTemplatesWithItems: listActiveTemplatesWithItems,
       listLinkedUsersByStore: listLinkedUsersByStore,
       listLogsByRunId: listLogsByRunId,
       listRunItems: listRunItems,
