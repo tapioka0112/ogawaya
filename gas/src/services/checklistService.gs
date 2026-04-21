@@ -356,7 +356,9 @@
         var currentUser = requireAuthenticatedUser(query);
         var run = getRunWithScope(runId, currentUser.user);
         var items = repository.listRunItems(run.id);
-        var allLogs = repository.listLogsByRunId(runId);
+        var allLogs = repository.listLogsByRunItemIds(items.map(function (item) {
+          return item.id;
+        }));
         var logs = allLogs.filter(function (log) {
           return !action || log.action === action;
         }).sort(function (left, right) {

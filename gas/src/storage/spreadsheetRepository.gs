@@ -283,6 +283,10 @@
       var runItemIds = listRunItems(runId).map(function (item) {
         return item.id;
       });
+      return listLogsByRunItemIds(runItemIds);
+    }
+
+    function listLogsByRunItemIds(runItemIds) {
       return listTable('checklist_item_logs').filter(function (log) {
         return runItemIds.indexOf(log.run_item_id) !== -1;
       });
@@ -380,6 +384,7 @@
       listActiveTemplates: listActiveTemplates,
       listActiveTemplatesWithItems: listActiveTemplatesWithItems,
       listLinkedUsersByStore: listLinkedUsersByStore,
+      listLogsByRunItemIds: listLogsByRunItemIds,
       listLogsByRunId: listLogsByRunId,
       listRunItems: listRunItems,
       listRunsByDate: listRunsByDate,
