@@ -43,6 +43,7 @@
       linear-gradient(rgba(28, 43, 34, 0.025) 1px, transparent 1px),
       linear-gradient(90deg, rgba(28, 43, 34, 0.025) 1px, transparent 1px);
     background-size: 22px 22px;
+    -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
     mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
   }
 
@@ -60,6 +61,7 @@
   .hero-card,
   .panel,
   .mode-card {
+    -webkit-backdrop-filter: blur(18px);
     backdrop-filter: blur(18px);
     background: var(--surface);
     border: 1px solid var(--line);

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>管理者画面</title>
     <script>
-      window.OGAWAYA_APP_BASE_URL = '<?= appBaseUrl ?>';
-      window.OGAWAYA_LIFF_ID = '<?= liffId ?>';
+      window.OGAWAYA_APP_BASE_URL = <?!= JSON.stringify(String(appBaseUrl)).replace(/</g, '\\u003c') ?>;
+      window.OGAWAYA_LIFF_ID = <?!= JSON.stringify(String(liffId)).replace(/</g, '\\u003c') ?>;
     </script>
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <?!= HtmlService.createHtmlOutputFromFile('liff/shared/style').getContent(); ?>
@@ -19,7 +19,7 @@
         <p class="hero-copy">
           同一店舗の今日の状態を確認しつつ、テンプレート更新や手動通知の判断を行うための管理画面です。
         </p>
-        <div class="error-box" id="error-message" data-visible="false"></div>
+        <div class="error-box" id="error-message" data-visible="false" role="alert" aria-atomic="true"></div>
         <div class="meta-grid">
           <div class="meta-card">
             <div class="meta-label">Store</div>
