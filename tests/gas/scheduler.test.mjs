@@ -64,6 +64,23 @@ test('daily start は当日分を作成し、既存時は二重作成しない',
   assert.ok(app.repository.listTable('checklist_run_items').every((item) => item.status === 'unchecked'));
 });
 
+test('daily start は通知送信対象が 0 件でもスキップして異常終了しない', async () => {
+  let pushCount = 0;
+  const app = await createSchedulerApp({
+    pushMessage() {
+      pushCount += 1;
+      return { status: 'sent' };
+    }
+  });
+  app.repository.replaceTable('line_accounts', []);
+
+  const response = app.runDailyStart();
+
+  assert.equal(response.createdRuns.length, 1);
+  assert.equal(pushCount, 0);
+  assert.equal(app.repository.listTable('notifications').length, 0);
+});
+
 test('daily start の通知失敗は notifications に failed で残る', async () => {
   const app = await createSchedulerApp({
     pushMessage() {

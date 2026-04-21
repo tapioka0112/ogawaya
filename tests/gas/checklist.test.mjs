@@ -6,6 +6,22 @@ import { createBaseDataset } from '../helpers/fixtures.mjs';
 async function createChecklistApp() {
   const runtime = await loadGasRuntime();
   const seed = createBaseDataset();
+  seed.stores.push({
+    id: 'store-002',
+    name: '銀座店',
+    status: 'active',
+    created_at: '2026-04-20T00:00:00Z'
+  });
+  seed.users.push({
+    id: 'user-mg-002',
+    store_id: 'store-002',
+    name: '佐藤 次郎',
+    employee_code: 'MG002',
+    passcode: '444444',
+    role: 'manager',
+    status: 'active',
+    created_at: '2026-04-20T00:00:00Z'
+  });
   seed.line_accounts = [
     {
       id: 'line-001',
@@ -19,6 +35,13 @@ async function createChecklistApp() {
       user_id: 'user-mg-001',
       line_user_id: 'line-user-002',
       display_name: '山田LINE',
+      linked_at: '2026-04-20T00:00:00Z'
+    },
+    {
+      id: 'line-003',
+      user_id: 'user-mg-002',
+      line_user_id: 'line-user-003',
+      display_name: '佐藤LINE',
       linked_at: '2026-04-20T00:00:00Z'
     }
   ];
@@ -65,7 +88,8 @@ async function createChecklistApp() {
       verifyIdToken(idToken) {
         const map = {
           'valid-pt': { lineUserId: 'line-user-001', displayName: '田中LINE' },
-          'valid-mg': { lineUserId: 'line-user-002', displayName: '山田LINE' }
+          'valid-mg': { lineUserId: 'line-user-002', displayName: '山田LINE' },
+          'valid-other-store': { lineUserId: 'line-user-003', displayName: '佐藤LINE' }
         };
         if (!map[idToken]) {
           throw new Error('invalid token');
@@ -260,4 +284,50 @@ test('GET /api/checklists/{runId}/logs は最新順と action フィルタを提
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.logs[0].action, 'uncheck');
   assert.equal(response.body.logs.length, 1);
+  assert.deepEqual(response.body.alerts, []);
+});
+
+test('GET /api/checklists/{runId}/logs は未認証と所属外ユーザーを拒否する', async () => {
+  const app = await createChecklistApp();
+
+  const unauthorized = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/run-001/logs',
+    query: {},
+    body: {}
+  });
+  const forbidden = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/run-001/logs',
+    query: { idToken: 'valid-other-store' },
+    body: {}
+  });
+
+  assert.equal(unauthorized.statusCode, 401);
+  assert.equal(forbidden.statusCode, 403);
+});
+
+test('GET /api/checklists/{runId}/logs は操作ログ欠落時に alerts を返す', async () => {
+  const app = await createChecklistApp();
+
+  app.repository.updateRunItem('run-item-001', {
+    status: 'checked',
+    checked_by: 'user-pt-001',
+    checked_at: '2026-04-21T01:45:00Z',
+    updated_at: '2026-04-21T01:45:00Z'
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/run-001/logs',
+    query: { idToken: 'valid-mg' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.logs.length, 0);
+  assert.equal(response.body.alerts.length, 1);
+  assert.equal(response.body.alerts[0].type, 'missing_log');
+  assert.equal(response.body.alerts[0].runItemId, 'run-item-001');
+  assert.match(response.body.alerts[0].message, /開店準備/);
 });

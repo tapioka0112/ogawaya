@@ -170,6 +170,33 @@
       };
     }
 
+    function buildLogAlerts(run, items, logs) {
+      var loggedRunItemIds = {};
+      logs.forEach(function (log) {
+        loggedRunItemIds[log.run_item_id] = true;
+      });
+
+      return items.filter(function (item) {
+        if (loggedRunItemIds[item.id]) {
+          return false;
+        }
+        if (item.status === ns.ITEM_STATUS.CHECKED) {
+          return true;
+        }
+        if (item.checked_by || item.checked_at) {
+          return true;
+        }
+        return item.updated_at !== run.created_at;
+      }).map(function (item) {
+        return {
+          type: 'missing_log',
+          runItemId: item.id,
+          title: item.title,
+          message: item.title + ' の操作履歴が欠落しています'
+        };
+      });
+    }
+
     function buildIncompleteMessage(store, run, items) {
       var lines = items.map(function (item) {
         return '・' + item.title;
@@ -327,14 +354,17 @@
 
       getLogs: function (query, runId, action) {
         var currentUser = requireAuthenticatedUser(query);
-        getRunWithScope(runId, currentUser.user);
-        var logs = repository.listLogsByRunId(runId).filter(function (log) {
+        var run = getRunWithScope(runId, currentUser.user);
+        var items = repository.listRunItems(run.id);
+        var allLogs = repository.listLogsByRunId(runId);
+        var logs = allLogs.filter(function (log) {
           return !action || log.action === action;
         }).sort(function (left, right) {
           return right.created_at.localeCompare(left.created_at);
         });
         return {
-          logs: logs.map(mapLog)
+          logs: logs.map(mapLog),
+          alerts: buildLogAlerts(run, items, allLogs)
         };
       },
 
