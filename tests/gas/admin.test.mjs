@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { loadGasRuntime } from '../helpers/gasHarness.mjs';
 import { createBaseDataset } from '../helpers/fixtures.mjs';
 
-async function createAdminApp() {
+async function createAdminApp(lineClient = {
+  pushMessage() {
+    return { status: 'sent' };
+  }
+}) {
   const runtime = await loadGasRuntime();
   const seed = createBaseDataset();
   seed.line_accounts = [
@@ -62,11 +66,7 @@ async function createAdminApp() {
         return map[idToken];
       }
     },
-    lineClient: {
-      pushMessage() {
-        return { status: 'sent' };
-      }
-    },
+    lineClient,
     clock: {
       now() {
         return new Date('2026-04-21T03:00:00Z');
@@ -259,4 +259,34 @@ test('手動通知 API は管理者のみ実行でき、manual_reminder を保�
 
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.notifications[0].type, 'manual_reminder');
+});
+
+test('手動通知の再試行では同一対象へ重複送信しない', async () => {
+  const calls = [];
+  const app = await createAdminApp({
+    pushMessage(lineUserId, message) {
+      calls.push({ lineUserId, message });
+      return { status: 'sent' };
+    }
+  });
+
+  const first = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/checklists/run-001/notify-incomplete',
+    query: { idToken: 'valid-manager' },
+    body: {}
+  });
+  const second = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/checklists/run-001/notify-incomplete',
+    query: { idToken: 'valid-manager' },
+    body: {}
+  });
+
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.body.notifications.length, 2);
+  assert.equal(second.statusCode, 200);
+  assert.equal(second.body.notifications.length, 0);
+  assert.equal(calls.length, 2);
+  assert.equal(app.repository.listTable('notifications').length, 2);
 });

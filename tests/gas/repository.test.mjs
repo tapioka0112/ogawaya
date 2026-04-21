@@ -152,3 +152,62 @@ test('テンプレートと項目の一括取得は storage.load を 1 回に抑
   assert.equal(templates[0].template.id, 'tmpl-001');
   assert.equal(templates[0].items.length, 2);
 });
+
+test('runItemIds が既知ならログ一括取得は storage.load を 1 回に抑える', async () => {
+  const runtime = await loadGasRuntime();
+  let state = createBaseDataset();
+  let loadCount = 0;
+  state.checklist_runs = [
+    {
+      id: 'run-001',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-21',
+      status: 'open',
+      notified_at: '2026-04-21T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-21T01:30:00Z'
+    }
+  ];
+  state.checklist_run_items = [
+    {
+      id: 'run-item-001',
+      run_id: 'run-001',
+      template_item_id: 'tmpl-item-001',
+      title: '開店準備',
+      sort_order: '1',
+      status: 'checked',
+      checked_by: 'user-pt-001',
+      checked_at: '2026-04-21T01:35:00Z',
+      updated_at: '2026-04-21T01:35:00Z'
+    }
+  ];
+  state.checklist_item_logs = [
+    {
+      id: 'log-001',
+      run_item_id: 'run-item-001',
+      action: 'check',
+      user_id: 'user-pt-001',
+      before_value: '{}',
+      after_value: '{}',
+      is_after_close: 'false',
+      created_at: '2026-04-21T01:35:00Z'
+    }
+  ];
+  const storage = {
+    load() {
+      loadCount += 1;
+      return JSON.parse(JSON.stringify(state));
+    },
+    save(nextState) {
+      state = JSON.parse(JSON.stringify(nextState));
+    }
+  };
+  const repository = runtime.Ogawaya.createSpreadsheetRepository({ storage });
+
+  const logs = repository.listLogsByRunItemIds(['run-item-001']);
+
+  assert.equal(loadCount, 1);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].id, 'log-001');
+});
