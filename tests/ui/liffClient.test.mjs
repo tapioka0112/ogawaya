@@ -284,6 +284,84 @@ test('/api/me 取得失敗時はエラーを表示する', async () => {
   assert.match(documentRef.elements['error-message'].textContent, /未認証/);
 });
 
+test('データストアアクセス失敗時はユーザー向けエラーを表示する', async () => {
+  const { client } = await loadClientModule();
+  const documentRef = createFakeDocument();
+  const controller = client.createController({
+    document: documentRef,
+    auth: {
+      async initialize() {
+        return { idToken: 'token' };
+      }
+    },
+    api: {
+      async getMe() {
+        return {
+          userId: 'user-pt-001',
+          role: 'part_time',
+          store: { id: 'store-001', name: '青山店' }
+        };
+      },
+      async getTodayChecklist() {
+        throw new Error('Spreadsheet の読み込みに失敗しました');
+      }
+    },
+    mode: 'user'
+  });
+
+  await controller.init();
+
+  assert.equal(documentRef.elements['error-message'].dataset.visible, 'true');
+  assert.match(documentRef.elements['error-message'].textContent, /Spreadsheet/);
+});
+
+test('更新ボタンは失敗後の再試行導線として使える', async () => {
+  const { client } = await loadClientModule();
+  const documentRef = createFakeDocument();
+  let checklistCallCount = 0;
+  const controller = client.createController({
+    document: documentRef,
+    auth: {
+      async initialize() {
+        return { idToken: 'token' };
+      }
+    },
+    api: {
+      async getMe() {
+        return {
+          userId: 'user-pt-001',
+          role: 'part_time',
+          store: { id: 'store-001', name: '青山店' }
+        };
+      },
+      async getTodayChecklist() {
+        checklistCallCount += 1;
+        if (checklistCallCount === 1) {
+          throw new Error('Spreadsheet の読み込みに失敗しました');
+        }
+        return createChecklistPayload();
+      },
+      async getTodayIncomplete() {
+        return createIncompletePayload();
+      },
+      async getLogs() {
+        return createLogsPayload();
+      }
+    },
+    mode: 'user'
+  });
+
+  await controller.init();
+  assert.equal(documentRef.elements['error-message'].dataset.visible, 'true');
+
+  await documentRef.elements['refresh-button'].click();
+
+  assert.equal(checklistCallCount, 2);
+  assert.equal(documentRef.elements['error-message'].dataset.visible, 'false');
+  assert.equal(documentRef.elements['progress-summary'].textContent, '1 / 2');
+  assert.equal(documentRef.elements['store-name'].textContent, '青山店');
+});
+
 test('ロール別表示に分岐する', async () => {
   const { client } = await loadClientModule();
   const documentRef = createFakeDocument();
