@@ -4,9 +4,102 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>従業員画面</title>
+    <script>
+      window.OGAWAYA_APP_BASE_URL = <?!= JSON.stringify(String(appBaseUrl)).replace(/</g, '\\u003c') ?>;
+      window.OGAWAYA_LIFF_ID = <?!= JSON.stringify(String(liffId)).replace(/</g, '\\u003c') ?>;
+    </script>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <?!= HtmlService.createHtmlOutputFromFile('liff/shared/style').getContent(); ?>
   </head>
   <body>
-    <h1>従業員向けLIFF</h1>
-    <p>店舗別日次チェックリスト画面をここに実装します。</p>
+    <main class="page-shell">
+      <section class="hero-card">
+        <span class="eyebrow" id="screen-mode">従業員 LIFF</span>
+        <h1 class="hero-title">今日の店舗状態を、<br />その場で合わせる。</h1>
+        <p class="hero-copy">チェック、取消、未完了確認、履歴参照を同じ導線で扱います。</p>
+        <div class="error-box" id="error-message" data-visible="false" role="alert" aria-atomic="true"></div>
+        <div class="status-box" id="status-message" data-visible="false" role="status" aria-atomic="true"></div>
+        <div class="meta-grid">
+          <div class="meta-card">
+            <div class="meta-label">Store</div>
+            <div class="meta-value" id="store-name">-</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Target Date</div>
+            <div class="meta-value" id="target-date">-</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Progress</div>
+            <div class="meta-value" id="progress-summary">-</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Today</div>
+              <h2 class="panel-title">当日チェックリスト</h2>
+            </div>
+            <div class="button-row">
+              <span class="role-badge" id="role-badge">-</span>
+              <button class="action-button ghost-button" id="refresh-button" type="button">最新状態に更新</button>
+            </div>
+          </div>
+          <div class="status-strip">
+            <div class="meta-line">チェックと取消は画面更新ではなく API 再取得で整合を取ります。</div>
+          </div>
+          <ul class="checklist-list" id="checklist-items"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Incomplete</div>
+              <h2 class="panel-title">未完了一覧</h2>
+            </div>
+            <div class="meta-line" id="incomplete-summary">未完了 0 件</div>
+          </div>
+          <ul class="checklist-list" id="incomplete-items"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Logs</div>
+              <h2 class="panel-title">操作履歴</h2>
+            </div>
+            <div class="control-row">
+              <select class="select-input" id="log-action-filter">
+                <option value="">すべて</option>
+                <option value="check">check</option>
+                <option value="uncheck">uncheck</option>
+              </select>
+              <button class="action-button ghost-button" id="load-logs-button" type="button">履歴を再取得</button>
+            </div>
+          </div>
+          <ul class="checklist-list" id="logs-list"></ul>
+        </section>
+
+        <section class="panel" id="admin-panel" hidden>
+          <div class="eyebrow">Manager Notice</div>
+          <h2 class="panel-title">管理者向け導線</h2>
+          <p class="panel-copy">manager / admin ロールでは管理者画面から未完了通知とテンプレート更新を扱えます。</p>
+        </section>
+      </section>
+    </main>
+    <?!= HtmlService.createHtmlOutputFromFile('liff/shared/client').getContent(); ?>
+    <script>
+      window.addEventListener('DOMContentLoaded', function () {
+        var controller = window.OgawayaLiff.createController({
+          document: document,
+          auth: window.OgawayaLiff.createAuth(),
+          api: window.OgawayaLiff.createApi(window.OGAWAYA_APP_BASE_URL),
+          mode: 'user'
+        });
+        controller.init();
+      });
+    </script>
   </body>
 </html>

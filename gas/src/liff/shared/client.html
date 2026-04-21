@@ -4,25 +4,49 @@
       return String(baseUrl || '').replace(/\/+$/, '');
     }
 
+    function appendQuery(url, query) {
+      var pairs = [];
+      Object.keys(query || {}).forEach(function (key) {
+        var value = query[key];
+        if (value === '' || value == null) {
+          return;
+        }
+        pairs.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
+      });
+      if (pairs.length === 0) {
+        return url;
+      }
+      return url + (url.indexOf('?') === -1 ? '?' : '&') + pairs.join('&');
+    }
+
     function createApi(baseUrl) {
       var normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
-      async function request(method, path, idToken, body) {
+      async function request(method, path, idToken, body, query) {
+        var queryParams = {};
+        var actualMethod = method;
         var url = normalizedBaseUrl + path;
         var options = {
-          method: method === 'GET' ? 'GET' : 'POST',
+          method: method,
           headers: {
             'Content-Type': 'application/json'
           }
         };
 
         if (idToken) {
-          url += (url.indexOf('?') === -1 ? '?' : '&') + 'idToken=' + encodeURIComponent(idToken);
+          queryParams.idToken = idToken;
         }
+        Object.keys(query || {}).forEach(function (key) {
+          queryParams[key] = query[key];
+        });
         if (method === 'PUT' || method === 'DELETE') {
-          url += (url.indexOf('?') === -1 ? '?' : '&') + '_method=' + method;
+          actualMethod = 'POST';
+          queryParams._method = method;
         }
-        if (method !== 'GET') {
+        url = appendQuery(url, queryParams);
+        options.method = actualMethod;
+
+        if (actualMethod !== 'GET') {
           options.body = JSON.stringify(body || {});
         }
 
@@ -40,6 +64,51 @@
         },
         getTodayChecklist: function (idToken) {
           return request('GET', '/api/checklists/today', idToken);
+        },
+        getTodayIncomplete: function (idToken) {
+          return request('GET', '/api/checklists/today/incomplete', idToken);
+        },
+        checkItem: function (idToken, runItemId, body) {
+          return request('POST', '/api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, body);
+        },
+        uncheckItem: function (idToken, runItemId, body) {
+          return request('POST', '/api/checklist-items/' + encodeURIComponent(runItemId) + '/uncheck', idToken, body);
+        },
+        getLogs: function (idToken, runId, action) {
+          return request('GET', '/api/checklists/' + encodeURIComponent(runId) + '/logs', idToken, null, {
+            action: action || ''
+          });
+        },
+        listTemplates: function (idToken) {
+          return request('GET', '/api/admin/templates', idToken);
+        },
+        createTemplate: function (idToken, body) {
+          return request('POST', '/api/admin/templates', idToken, body);
+        },
+        updateTemplate: function (idToken, templateId, body) {
+          return request('PUT', '/api/admin/templates/' + encodeURIComponent(templateId), idToken, body);
+        },
+        createTemplateItem: function (idToken, templateId, body) {
+          return request('POST', '/api/admin/templates/' + encodeURIComponent(templateId) + '/items', idToken, body);
+        },
+        updateTemplateItem: function (idToken, templateId, itemId, body) {
+          return request(
+            'PUT',
+            '/api/admin/templates/' + encodeURIComponent(templateId) + '/items/' + encodeURIComponent(itemId),
+            idToken,
+            body
+          );
+        },
+        deleteTemplateItem: function (idToken, templateId, itemId) {
+          return request(
+            'DELETE',
+            '/api/admin/templates/' + encodeURIComponent(templateId) + '/items/' + encodeURIComponent(itemId),
+            idToken,
+            {}
+          );
+        },
+        notifyIncomplete: function (idToken, runId) {
+          return request('POST', '/api/admin/checklists/' + encodeURIComponent(runId) + '/notify-incomplete', idToken, {});
         }
       };
     }
@@ -70,45 +139,163 @@
       var state = {
         idToken: '',
         me: null,
-        checklist: null
+        checklist: null,
+        incomplete: null,
+        logs: [],
+        templates: [],
+        selectedTemplateId: '',
+        selectedTemplateItemId: ''
       };
       var documentRef = options.document;
       var auth = options.auth;
       var api = options.api;
       var mode = options.mode;
-      var errorBox = documentRef.getElementById('error-message');
-      var roleBadge = documentRef.getElementById('role-badge');
-      var storeName = documentRef.getElementById('store-name');
-      var targetDate = documentRef.getElementById('target-date');
-      var progressSummary = documentRef.getElementById('progress-summary');
-      var checklistItems = documentRef.getElementById('checklist-items');
-      var refreshButton = documentRef.getElementById('refresh-button');
-      var adminPanel = documentRef.getElementById('admin-panel');
-      var screenMode = documentRef.getElementById('screen-mode');
+      var elements = {
+        errorBox: documentRef.getElementById('error-message'),
+        statusBox: documentRef.getElementById('status-message'),
+        roleBadge: documentRef.getElementById('role-badge'),
+        storeName: documentRef.getElementById('store-name'),
+        targetDate: documentRef.getElementById('target-date'),
+        progressSummary: documentRef.getElementById('progress-summary'),
+        checklistItems: documentRef.getElementById('checklist-items'),
+        refreshButton: documentRef.getElementById('refresh-button'),
+        adminPanel: documentRef.getElementById('admin-panel'),
+        screenMode: documentRef.getElementById('screen-mode'),
+        incompleteSummary: documentRef.getElementById('incomplete-summary'),
+        incompleteItems: documentRef.getElementById('incomplete-items'),
+        loadLogsButton: documentRef.getElementById('load-logs-button'),
+        logActionFilter: documentRef.getElementById('log-action-filter'),
+        logsList: documentRef.getElementById('logs-list'),
+        notifyButton: documentRef.getElementById('notify-button'),
+        templateSelect: documentRef.getElementById('template-select'),
+        templateNameInput: documentRef.getElementById('template-name-input'),
+        updateTemplateButton: documentRef.getElementById('update-template-button'),
+        newTemplateNameInput: documentRef.getElementById('new-template-name-input'),
+        createTemplateButton: documentRef.getElementById('create-template-button'),
+        templateItems: documentRef.getElementById('template-items'),
+        templateItemSelect: documentRef.getElementById('template-item-select'),
+        templateItemTitleInput: documentRef.getElementById('template-item-title-input'),
+        templateItemDescriptionInput: documentRef.getElementById('template-item-description-input'),
+        templateItemSortOrderInput: documentRef.getElementById('template-item-sort-order-input'),
+        templateItemRequiredInput: documentRef.getElementById('template-item-required-input'),
+        updateTemplateItemButton: documentRef.getElementById('update-template-item-button'),
+        deleteTemplateItemButton: documentRef.getElementById('delete-template-item-button'),
+        newItemTitleInput: documentRef.getElementById('new-item-title-input'),
+        newItemDescriptionInput: documentRef.getElementById('new-item-description-input'),
+        newItemSortOrderInput: documentRef.getElementById('new-item-sort-order-input'),
+        newItemRequiredInput: documentRef.getElementById('new-item-required-input'),
+        addTemplateItemButton: documentRef.getElementById('add-template-item-button')
+      };
+
+      function normalizeArray(value) {
+        return Array.isArray(value) ? value : [];
+      }
+
+      function isManagerRole(role) {
+        return role === 'manager' || role === 'admin';
+      }
+
+      function canManageTemplates() {
+        return !!(state.me && isManagerRole(state.me.role) && mode === 'admin');
+      }
+
+      function setBoxMessage(element, message) {
+        if (!element) {
+          return;
+        }
+        element.textContent = message || '';
+        element.dataset.visible = message ? 'true' : 'false';
+      }
+
+      function setText(element, value) {
+        if (!element) {
+          return;
+        }
+        element.textContent = value == null ? '' : String(value);
+      }
+
+      function clearList(element) {
+        if (!element) {
+          return;
+        }
+        element.innerHTML = '';
+      }
 
       function setError(message) {
-        errorBox.textContent = message;
-        errorBox.dataset.visible = 'true';
+        setBoxMessage(elements.errorBox, message);
       }
 
       function clearError() {
-        errorBox.textContent = '';
-        errorBox.dataset.visible = 'false';
+        setError('');
+      }
+
+      function setStatus(message) {
+        setBoxMessage(elements.statusBox, message);
+      }
+
+      function clearStatus() {
+        setStatus('');
+      }
+
+      function createMessageListItem(text, className) {
+        var item = documentRef.createElement('li');
+        item.className = className;
+        item.textContent = text;
+        return item;
+      }
+
+      function createActionButton(label, action, itemId, handler, className) {
+        var button = documentRef.createElement('button');
+        button.type = 'button';
+        button.className = className || 'action-button';
+        button.dataset.action = action;
+        button.dataset.runItemId = itemId;
+        button.textContent = label;
+        button.addEventListener('click', handler);
+        return button;
       }
 
       function renderRole(role) {
-        roleBadge.textContent = role;
-        adminPanel.hidden = role === 'part_time';
+        setText(elements.roleBadge, role || '-');
+        if (elements.adminPanel) {
+          elements.adminPanel.hidden = !isManagerRole(role);
+        }
+      }
+
+      function renderOverview(checklist) {
+        state.checklist = checklist;
+        setText(elements.storeName, checklist.storeName || (state.me && state.me.store && state.me.store.name) || '-');
+        setText(elements.targetDate, checklist.targetDate || '-');
+        if (checklist.progress) {
+          setText(elements.progressSummary, checklist.progress.checked + ' / ' + checklist.progress.total);
+        }
+      }
+
+      function canUncheck(item) {
+        if (!state.me || item.status !== 'checked') {
+          return false;
+        }
+        if (state.me.role !== 'part_time') {
+          return true;
+        }
+        return item.checkedByUserId === state.me.userId;
+      }
+
+      async function handleCheck(runItemId) {
+        await api.checkItem(state.idToken, runItemId, { comment: '' });
+        await refresh();
+        setStatus('チェックを更新しました');
+      }
+
+      async function handleUncheck(runItemId) {
+        await api.uncheckItem(state.idToken, runItemId, { reason: '' });
+        await refresh();
+        setStatus('チェックを取り消しました');
       }
 
       function renderChecklist(checklist) {
-        state.checklist = checklist;
-        storeName.textContent = checklist.storeName;
-        targetDate.textContent = checklist.targetDate;
-        progressSummary.textContent = checklist.progress.checked + ' / ' + checklist.progress.total;
-        checklistItems.innerHTML = '';
-
-        checklist.items.forEach(function (item) {
+        clearList(elements.checklistItems);
+        normalizeArray(checklist.items).forEach(function (item) {
           var listItem = documentRef.createElement('li');
           listItem.className = 'checklist-item';
 
@@ -117,6 +304,7 @@
           bullet.dataset.status = item.status;
 
           var body = documentRef.createElement('div');
+          body.className = 'item-body';
 
           var title = documentRef.createElement('div');
           title.className = 'item-title';
@@ -128,33 +316,435 @@
             ? item.checkedBy + ' / ' + item.checkedAt
             : '未チェック';
 
+          var actions = documentRef.createElement('div');
+          actions.className = 'button-row item-actions';
+          if (item.status === 'unchecked' && api.checkItem) {
+            actions.appendChild(createActionButton('チェックする', 'check', item.id, function () {
+              return runAction(function () {
+                return handleCheck(item.id);
+              });
+            }));
+          }
+          if (canUncheck(item) && api.uncheckItem) {
+            actions.appendChild(createActionButton('取消', 'uncheck', item.id, function () {
+              return runAction(function () {
+                return handleUncheck(item.id);
+              });
+            }, 'action-button ghost-button'));
+          }
+
           body.appendChild(title);
           body.appendChild(meta);
+          if (actions.children.length > 0) {
+            body.appendChild(actions);
+          }
           listItem.appendChild(bullet);
           listItem.appendChild(body);
-          checklistItems.appendChild(listItem);
+          elements.checklistItems.appendChild(listItem);
         });
+
+        if (elements.checklistItems.children.length === 0) {
+          elements.checklistItems.appendChild(createMessageListItem('当日の項目はありません。', 'empty-item'));
+        }
+      }
+
+      function renderIncomplete(incomplete) {
+        state.incomplete = incomplete;
+        setText(elements.incompleteSummary, '未完了 ' + normalizeArray(incomplete.items).length + ' 件');
+        clearList(elements.incompleteItems);
+
+        normalizeArray(incomplete.items).forEach(function (item) {
+          elements.incompleteItems.appendChild(createMessageListItem(item.title, 'plain-item'));
+        });
+        if (elements.incompleteItems.children.length === 0) {
+          elements.incompleteItems.appendChild(createMessageListItem('未完了はありません。', 'empty-item'));
+        }
+        if (elements.notifyButton) {
+          elements.notifyButton.disabled = !canManageTemplates() || normalizeArray(incomplete.items).length === 0;
+        }
+      }
+
+      function renderLogs(logs) {
+        state.logs = normalizeArray(logs);
+        clearList(elements.logsList);
+        state.logs.forEach(function (log) {
+          var suffix = log.isAfterClose ? ' / 締切後' : '';
+          elements.logsList.appendChild(createMessageListItem(
+            log.action + ' / ' + log.createdAt + suffix,
+            'plain-item'
+          ));
+        });
+        if (elements.logsList && elements.logsList.children.length === 0) {
+          elements.logsList.appendChild(createMessageListItem('履歴はありません。', 'empty-item'));
+        }
+      }
+
+      function clearSelect(element) {
+        if (!element) {
+          return;
+        }
+        element.innerHTML = '';
+        element.value = '';
+      }
+
+      function appendSelectOptions(select, options, selectedValue) {
+        if (!select) {
+          return;
+        }
+        clearSelect(select);
+        normalizeArray(options).forEach(function (option) {
+          var element = documentRef.createElement('option');
+          element.value = option.value;
+          element.textContent = option.label;
+          select.appendChild(element);
+        });
+        if (selectedValue) {
+          select.value = selectedValue;
+        }
+      }
+
+      function getSelectedTemplate() {
+        var selectedTemplate = normalizeArray(state.templates).find(function (template) {
+          return template.id === state.selectedTemplateId;
+        });
+        if (selectedTemplate) {
+          return selectedTemplate;
+        }
+        return normalizeArray(state.templates)[0] || null;
+      }
+
+      function getSelectedTemplateItem() {
+        var template = getSelectedTemplate();
+        if (!template) {
+          return null;
+        }
+        var selectedItem = normalizeArray(template.items).find(function (item) {
+          return item.id === state.selectedTemplateItemId;
+        });
+        if (selectedItem) {
+          return selectedItem;
+        }
+        return normalizeArray(template.items)[0] || null;
+      }
+
+      function resetTemplateItemEditor() {
+        if (elements.templateItemTitleInput) {
+          elements.templateItemTitleInput.value = '';
+        }
+        if (elements.templateItemDescriptionInput) {
+          elements.templateItemDescriptionInput.value = '';
+        }
+        if (elements.templateItemSortOrderInput) {
+          elements.templateItemSortOrderInput.value = '';
+        }
+        if (elements.templateItemRequiredInput) {
+          elements.templateItemRequiredInput.checked = false;
+        }
+        if (elements.updateTemplateItemButton) {
+          elements.updateTemplateItemButton.disabled = true;
+        }
+        if (elements.deleteTemplateItemButton) {
+          elements.deleteTemplateItemButton.disabled = true;
+        }
+      }
+
+      function renderTemplateItemEditor(template) {
+        var items = template ? normalizeArray(template.items) : [];
+        appendSelectOptions(elements.templateItemSelect, items.map(function (item) {
+          return {
+            value: item.id,
+            label: item.title
+          };
+        }), state.selectedTemplateItemId);
+        state.selectedTemplateItemId = elements.templateItemSelect && elements.templateItemSelect.value
+          ? elements.templateItemSelect.value
+          : '';
+
+        var selectedItem = getSelectedTemplateItem();
+        if (!selectedItem) {
+          resetTemplateItemEditor();
+          return;
+        }
+
+        elements.templateItemTitleInput.value = selectedItem.title;
+        elements.templateItemDescriptionInput.value = selectedItem.description || '';
+        elements.templateItemSortOrderInput.value = String(selectedItem.sortOrder);
+        elements.templateItemRequiredInput.checked = !!selectedItem.isRequired;
+        elements.updateTemplateItemButton.disabled = false;
+        elements.deleteTemplateItemButton.disabled = false;
+      }
+
+      function renderTemplates() {
+        if (!elements.templateSelect) {
+          return;
+        }
+
+        appendSelectOptions(elements.templateSelect, normalizeArray(state.templates).map(function (template) {
+          return {
+            value: template.id,
+            label: template.name
+          };
+        }), state.selectedTemplateId);
+        state.selectedTemplateId = elements.templateSelect.value || '';
+
+        clearList(elements.templateItems);
+        var template = getSelectedTemplate();
+        if (!template) {
+          if (elements.templateNameInput) {
+            elements.templateNameInput.value = '';
+          }
+          resetTemplateItemEditor();
+          if (elements.templateItems) {
+            elements.templateItems.appendChild(createMessageListItem('テンプレートはまだありません。', 'empty-item'));
+          }
+          return;
+        }
+
+        state.selectedTemplateId = template.id;
+        if (elements.templateSelect) {
+          elements.templateSelect.value = template.id;
+        }
+        if (elements.templateNameInput) {
+          elements.templateNameInput.value = template.name;
+        }
+        normalizeArray(template.items).forEach(function (item) {
+          elements.templateItems.appendChild(createMessageListItem(
+            item.sortOrder + '. ' + item.title,
+            'plain-item'
+          ));
+        });
+        if (elements.templateItems.children.length === 0) {
+          elements.templateItems.appendChild(createMessageListItem('項目はまだありません。', 'empty-item'));
+        }
+
+        renderTemplateItemEditor(template);
+      }
+
+      function requireStringValue(element, fieldName) {
+        var value = String((element && element.value) || '').trim();
+        if (!value) {
+          throw new Error(fieldName + ' を入力してください');
+        }
+        return value;
+      }
+
+      function requirePositiveInteger(element, fieldName) {
+        var value = Number((element && element.value) || '');
+        if (!isFinite(value) || value < 1 || Math.floor(value) !== value) {
+          throw new Error(fieldName + ' は 1 以上の整数で入力してください');
+        }
+        return value;
+      }
+
+      async function loadLogs() {
+        if (!api.getLogs || !state.checklist || !state.checklist.runId) {
+          return;
+        }
+        var logResponse = await api.getLogs(
+          state.idToken,
+          state.checklist.runId,
+          elements.logActionFilter ? elements.logActionFilter.value : ''
+        );
+        renderLogs(logResponse.logs);
+      }
+
+      async function loadTemplates() {
+        if (!canManageTemplates() || !api.listTemplates) {
+          return;
+        }
+        var templateResponse = await api.listTemplates(state.idToken);
+        state.templates = normalizeArray(templateResponse.templates);
+        renderTemplates();
       }
 
       async function refresh() {
         clearError();
         var checklist = await api.getTodayChecklist(state.idToken);
+        renderOverview(checklist);
         renderChecklist(checklist);
+
+        if (api.getTodayIncomplete) {
+          var incomplete = await api.getTodayIncomplete(state.idToken);
+          renderIncomplete(incomplete);
+        }
+        if (canManageTemplates()) {
+          await loadTemplates();
+        }
+        await loadLogs();
+      }
+
+      async function createTemplate() {
+        var response = await api.createTemplate(state.idToken, {
+          name: requireStringValue(elements.newTemplateNameInput, '新規テンプレート名')
+        });
+        if (elements.newTemplateNameInput) {
+          elements.newTemplateNameInput.value = '';
+        }
+        await loadTemplates();
+        if (response.template && response.template.id) {
+          state.selectedTemplateId = response.template.id;
+          renderTemplates();
+        }
+        setStatus('テンプレートを作成しました');
+      }
+
+      async function updateTemplate() {
+        var template = getSelectedTemplate();
+        if (!template) {
+          throw new Error('更新対象のテンプレートがありません');
+        }
+        await api.updateTemplate(state.idToken, template.id, {
+          name: requireStringValue(elements.templateNameInput, 'テンプレート名')
+        });
+        await loadTemplates();
+        setStatus('テンプレート名を更新しました');
+      }
+
+      async function createTemplateItem() {
+        var template = getSelectedTemplate();
+        if (!template) {
+          throw new Error('追加先のテンプレートがありません');
+        }
+        await api.createTemplateItem(state.idToken, template.id, {
+          title: requireStringValue(elements.newItemTitleInput, '新規項目名'),
+          description: String((elements.newItemDescriptionInput && elements.newItemDescriptionInput.value) || '').trim(),
+          sortOrder: requirePositiveInteger(elements.newItemSortOrderInput, '並び順'),
+          isRequired: !!(elements.newItemRequiredInput && elements.newItemRequiredInput.checked)
+        });
+        if (elements.newItemTitleInput) {
+          elements.newItemTitleInput.value = '';
+        }
+        if (elements.newItemDescriptionInput) {
+          elements.newItemDescriptionInput.value = '';
+        }
+        if (elements.newItemSortOrderInput) {
+          elements.newItemSortOrderInput.value = '';
+        }
+        if (elements.newItemRequiredInput) {
+          elements.newItemRequiredInput.checked = false;
+        }
+        await loadTemplates();
+        setStatus('テンプレート項目を追加しました');
+      }
+
+      async function updateTemplateItem() {
+        var template = getSelectedTemplate();
+        var item = getSelectedTemplateItem();
+        if (!template || !item) {
+          throw new Error('更新対象の項目がありません');
+        }
+        await api.updateTemplateItem(state.idToken, template.id, item.id, {
+          title: requireStringValue(elements.templateItemTitleInput, '項目名'),
+          description: String((elements.templateItemDescriptionInput && elements.templateItemDescriptionInput.value) || '').trim(),
+          sortOrder: requirePositiveInteger(elements.templateItemSortOrderInput, '並び順'),
+          isRequired: !!(elements.templateItemRequiredInput && elements.templateItemRequiredInput.checked)
+        });
+        await loadTemplates();
+        setStatus('テンプレート項目を更新しました');
+      }
+
+      async function deleteTemplateItem() {
+        var template = getSelectedTemplate();
+        var item = getSelectedTemplateItem();
+        if (!template || !item) {
+          throw new Error('削除対象の項目がありません');
+        }
+        await api.deleteTemplateItem(state.idToken, template.id, item.id);
+        await loadTemplates();
+        setStatus('テンプレート項目を削除しました');
+      }
+
+      async function notifyIncomplete() {
+        if (!state.checklist || !state.checklist.runId) {
+          throw new Error('対象のチェックリストがありません');
+        }
+        await api.notifyIncomplete(state.idToken, state.checklist.runId);
+        setStatus('手動通知を送信しました');
+      }
+
+      async function runAction(action) {
+        clearError();
+        clearStatus();
+        try {
+          await action();
+        } catch (error) {
+          setError(error.message || '処理に失敗しました');
+        }
+      }
+
+      function bindButton(element, handler) {
+        if (!element || element.__bound) {
+          return;
+        }
+        element.addEventListener('click', handler);
+        element.__bound = true;
+      }
+
+      function bindChange(element, handler) {
+        if (!element || element.__boundChange) {
+          return;
+        }
+        element.addEventListener('change', handler);
+        element.__boundChange = true;
+      }
+
+      function bindEvents() {
+        bindButton(elements.refreshButton, function () {
+          return runAction(function () {
+            return refresh();
+          });
+        });
+        bindButton(elements.loadLogsButton, function () {
+          return runAction(function () {
+            return loadLogs();
+          });
+        });
+        bindButton(elements.notifyButton, function () {
+          return runAction(function () {
+            return notifyIncomplete();
+          });
+        });
+        bindButton(elements.createTemplateButton, function () {
+          return runAction(function () {
+            return createTemplate();
+          });
+        });
+        bindButton(elements.updateTemplateButton, function () {
+          return runAction(function () {
+            return updateTemplate();
+          });
+        });
+        bindButton(elements.addTemplateItemButton, function () {
+          return runAction(function () {
+            return createTemplateItem();
+          });
+        });
+        bindButton(elements.updateTemplateItemButton, function () {
+          return runAction(function () {
+            return updateTemplateItem();
+          });
+        });
+        bindButton(elements.deleteTemplateItemButton, function () {
+          return runAction(function () {
+            return deleteTemplateItem();
+          });
+        });
+        bindChange(elements.templateSelect, function (event) {
+          state.selectedTemplateId = event.target.value;
+          renderTemplates();
+        });
+        bindChange(elements.templateItemSelect, function (event) {
+          state.selectedTemplateItemId = event.target.value;
+          renderTemplateItemEditor(getSelectedTemplate());
+        });
       }
 
       async function init() {
-        screenMode.textContent = mode === 'admin' ? '管理者 LIFF' : '従業員 LIFF';
-        if (!refreshButton.__bound) {
-          refreshButton.addEventListener('click', function () {
-            return refresh().catch(function (error) {
-              setError(error.message || '最新状態の取得に失敗しました');
-            });
-          });
-          refreshButton.__bound = true;
-        }
-
+        bindEvents();
+        setText(elements.screenMode, mode === 'admin' ? '管理者 LIFF' : '従業員 LIFF');
         try {
           clearError();
+          clearStatus();
           var authResult = await auth.initialize();
           state.idToken = authResult.idToken;
           state.me = await api.getMe(state.idToken);

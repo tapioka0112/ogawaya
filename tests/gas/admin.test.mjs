@@ -177,6 +177,22 @@ test('テンプレート新規作成・更新・項目 CRUD が成功する', as
   assert.equal(deleteItem.statusCode, 200);
 });
 
+test('管理者は同一店舗のテンプレート一覧を取得できる', async () => {
+  const app = await createAdminApp();
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/admin/templates',
+    query: { idToken: 'valid-manager' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.templates.length, 1);
+  assert.equal(response.body.templates[0].id, 'tmpl-001');
+  assert.equal(response.body.templates[0].items.length, 2);
+});
+
 test('空タイトルはバリデーションエラーになる', async () => {
   const app = await createAdminApp();
 
