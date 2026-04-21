@@ -133,6 +133,24 @@
   - [ ] 各コミットが関連テストを同時に緑色にすること。
   - [ ] `git log` 上でプレフィックス付き（add:/feat:/fix:）かつ日本語要約が揃っていること。
 
+## 16. `main` への LIFF 本番導線反映
+- 背景: デプロイ対象の `main` に、実際に使う LIFF 画面と操作導線が入っていないと LINE Bot として完成しない。
+- 完了条件（TDD）:
+  - [ ] `main` 上で従業員/管理者 LIFF 画面がプレースホルダではなく、本番利用する UI になっている。
+  - [ ] LIFF 共通クライアントから `GET /api/checklists/today` だけでなく、`check` / `uncheck` / `today/incomplete` / `logs` を呼べるテストを追加する。
+  - [ ] 管理者 LIFF からテンプレート CRUD と手動通知の主要導線を呼べるテストを追加する。
+  - [ ] `main` 上で主要 LIFF 導線の表示・操作確認を行う（Playwright などのブラウザ確認を含む）。
+
+## 17. LINE Developers / GAS / Spreadsheet 外部設定
+- 背景: コードが揃っていても、LINE Developers と GAS と Spreadsheet の設定が完了しないと LINE Bot として稼働しない。
+- 完了条件（運用確認）:
+  - [ ] GAS Web App の `scriptId`、Script Properties、デプロイ URL を本番用に設定する。
+  - [ ] Spreadsheet の初期シート作成と初期データ投入を完了する。
+  - [ ] Time-driven Trigger を 2 本作成する（`runDailyStart` 10:30 / `runDailyClosing` 0:00）。
+  - [ ] LINE Developers 側で LIFF アプリ、リッチメニュー、Messaging API 設定を完了する。
+  - [ ] Webhook 署名転送を含む前段プロキシまたは同等の受信経路を用意する。
+  - [ ] 実機または本番相当環境で `/api/link`、LIFF 起動、通知、Webhook の疎通確認を完了する。
+
 ## 補足（運用ルール）
 - 全タスクはまず「失敗するテスト」を1件以上作成してから実装を開始。
 - テスト未整備のまま機能追加しない。
