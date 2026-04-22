@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 
 const GAS_FILE_PATHS = [
   'gas/src/shared/constants.gs',
+  'gas/src/shared/bootstrap.gs',
   'gas/src/storage/spreadsheetRepository.gs',
   'gas/src/services/notificationService.gs',
   'gas/src/services/checklistService.gs',

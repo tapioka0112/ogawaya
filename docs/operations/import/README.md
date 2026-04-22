@@ -1,6 +1,6 @@
 # import 用アセット
 
-Spreadsheet は XML よりシート単位の CSV import のほうが速いため、このディレクトリに各シート用 CSV を置いています。
+最短は Apps Script エディタから `bootstrapSpreadsheetTemplates` を 1 回実行して、9 シートのヘッダーと最小サンプル行をまとめて入れる方法です。CSV import は手動 fallback として、このディレクトリに残しています。
 
 ## 含まれるファイル
 
@@ -17,13 +17,23 @@ Spreadsheet は XML よりシート単位の CSV import のほうが速いため
 
 ## 使い方
 
-1. Google Spreadsheet を新規作成する。
-2. CSV 名と同じ名前のシートを作る。
-3. 各シートで対応する CSV を import する。
-4. `line_accounts.csv` 以降の運用テーブルは、初期状態ではヘッダーのみでよい。
-5. GAS の Script Properties は `script-properties.example.json` を開いて、実値へ置き換えてから Apps Script の UI へ入力する。
+1. Google Spreadsheet を新規作成し、ID を控える。
+2. GAS の Script Properties に `SPREADSHEET_ID` だけ先に設定する。
+3. Apps Script エディタで `bootstrapSpreadsheetTemplates` を 1 回実行する。
+4. 実行後に `stores` `users` `checklist_templates` `checklist_template_items` のサンプル行を実データへ置き換える。
+5. 残りの Script Properties は `script-properties.example.json` を開いて、実値へ置き換えてから Apps Script の UI へ入力する。
 
-## 初期 import の順序
+## 一括初期化の注意
+
+- `bootstrapSpreadsheetTemplates` は、対象シートが空、またはヘッダーのみのときだけ実行できる。
+- `stores` `users` `checklist_templates` `checklist_template_items` には最小サンプル行が入る。
+- 既存データがあるシートでは fail-fast で停止し、上書きしない。
+
+## 手動 fallback
+
+Apps Script をまだ実行できない場合は、従来どおり CSV を手で import する。
+
+## 手動 import の順序
 
 1. `stores.csv`
 2. `users.csv`

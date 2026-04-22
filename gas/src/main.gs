@@ -35,3 +35,7 @@ function doPost(e) {
 function routePost_(e) {
   return doPost(e);
 }
+
+function bootstrapSpreadsheetTemplates() {
+  return Ogawaya.bootstrapSpreadsheetTemplates({});
+}

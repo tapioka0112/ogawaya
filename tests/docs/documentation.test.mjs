@@ -54,3 +54,12 @@ test('bootstrap は import アセットを相対リンクで参照する', async
   assert.match(bootstrap, /\[docs\/operations\/import\/\]\(\.\/import\/\)/);
   assert.match(bootstrap, /\[script-properties\.example\.json\]\(\.\/import\/script-properties\.example\.json\)/);
 });
+
+test('import 手順は一括初期化関数を案内し、CSV import を fallback として残す', async () => {
+  const importReadme = await readFile('docs/operations/import/README.md', 'utf8');
+  const bootstrap = await readFile('docs/operations/bootstrap.md', 'utf8');
+
+  assert.match(importReadme, /bootstrapSpreadsheetTemplates/);
+  assert.match(importReadme, /CSV import は手動 fallback/);
+  assert.match(bootstrap, /bootstrapSpreadsheetTemplates/);
+});
