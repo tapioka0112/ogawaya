@@ -27,15 +27,30 @@ test('README に権限・単一店舗前提・/api/link 契約・日次時刻が
 test('import 用アセットに CSV と Script Properties テンプレートが揃っている', async () => {
   const importReadme = await readFile('docs/operations/import/README.md', 'utf8');
   const scriptProperties = await readFile('docs/operations/import/script-properties.example.json', 'utf8');
+  const scriptPropertiesJson = JSON.parse(scriptProperties);
 
   assert.match(importReadme, /stores\.csv/);
   assert.match(importReadme, /script-properties\.example\.json/);
-  assert.match(scriptProperties, /SPREADSHEET_ID/);
-  assert.match(scriptProperties, /LINE_CHANNEL_ID/);
-  assert.match(scriptProperties, /LIFF_ID/);
+
+  for (const key of [
+    'SPREADSHEET_ID',
+    'LINE_CHANNEL_ID',
+    'LINE_CHANNEL_SECRET',
+    'LINE_CHANNEL_ACCESS_TOKEN',
+    'LIFF_ID'
+  ]) {
+    assert.ok(scriptPropertiesJson[key]);
+  }
 
   for (const [path, header] of Object.entries(importCsvHeaders)) {
     const content = await readFile(path, 'utf8');
-    assert.equal(content.split('\n')[0], header);
+    assert.equal(content.split(/\r?\n/)[0], header);
   }
+});
+
+test('bootstrap は import アセットを相対リンクで参照する', async () => {
+  const bootstrap = await readFile('docs/operations/bootstrap.md', 'utf8');
+
+  assert.match(bootstrap, /\[docs\/operations\/import\/\]\(\.\/import\/\)/);
+  assert.match(bootstrap, /\[script-properties\.example\.json\]\(\.\/import\/script-properties\.example\.json\)/);
 });
