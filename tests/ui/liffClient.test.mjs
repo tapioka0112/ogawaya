@@ -287,6 +287,44 @@ test('匿名アクセス有効でも LIFF idToken が取れる場合は認証コ
   assert.equal(result.context.isInClient, true);
 });
 
+test('匿名アクセス有効で LIFF_ID に URL を入れても ID を抽出して初期化できる', async () => {
+  const { client, context } = await loadClientModule();
+  let capturedLiffId = '';
+  context.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = true;
+  context.OGAWAYA_TRY_LIFF_AUTH_IN_ANONYMOUS = true;
+  context.OGAWAYA_LIFF_ID = 'https://liff.line.me/2000000000-test';
+  context.liff = {
+    async init(config) {
+      capturedLiffId = config.liffId;
+    },
+    getIDToken() {
+      return 'token-from-liff';
+    },
+    isInClient() {
+      return true;
+    },
+    isLoggedIn() {
+      return true;
+    },
+    getOS() {
+      return 'ios';
+    },
+    getLineVersion() {
+      return '1.0.0';
+    },
+    getLanguage() {
+      return 'ja';
+    }
+  };
+  const auth = client.createAuth();
+
+  const result = await auth.initialize();
+
+  assert.equal(capturedLiffId, '2000000000-test');
+  assert.equal(result.idToken, 'token-from-liff');
+  assert.equal(result.context.isAnonymous, false);
+});
+
 test('匿名アクセス有効かつ LIFF_ID が空白だけなら匿名へフォールバックする', async () => {
   const { client, context } = await loadClientModule();
   let initCalled = false;

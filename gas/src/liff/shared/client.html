@@ -169,8 +169,20 @@
     }
 
     function createAuth() {
+      function extractLiffId(value) {
+        var rawValue = String(value || '').replace(/\s+/g, '');
+        if (!rawValue) {
+          return '';
+        }
+        var extracted = rawValue.match(/(?:https?:\/\/liff\.line\.me\/|line:\/\/app\/)?([0-9]{10}-[A-Za-z0-9]+)/);
+        if (extracted && extracted[1]) {
+          return extracted[1];
+        }
+        return rawValue;
+      }
+
       function getNormalizedLiffId() {
-        return String(global.OGAWAYA_LIFF_ID || '').replace(/\s+/g, '');
+        return extractLiffId(global.OGAWAYA_LIFF_ID || '');
       }
 
       function buildAnonymousContext() {

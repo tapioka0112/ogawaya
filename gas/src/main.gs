@@ -3,10 +3,22 @@ function allowAnonymousAccessEnabled_() {
   return rawValue !== 'false';
 }
 
+function normalizeLiffId_(value) {
+  var rawValue = String(value || '').replace(/\s+/g, '');
+  if (!rawValue) {
+    return '';
+  }
+  var extracted = rawValue.match(/(?:https?:\/\/liff\.line\.me\/|line:\/\/app\/)?([0-9]{10}-[A-Za-z0-9]+)/);
+  if (extracted && extracted[1]) {
+    return extracted[1];
+  }
+  return rawValue;
+}
+
 function doGet(e) {
   var request = Ogawaya.extractRequest(e, 'GET');
   var appBaseUrl = ScriptApp.getService().getUrl();
-  var liffId = String(PropertiesService.getScriptProperties().getProperty('LIFF_ID') || '').replace(/\s+/g, '');
+  var liffId = normalizeLiffId_(PropertiesService.getScriptProperties().getProperty('LIFF_ID'));
   var allowAnonymousAccess = allowAnonymousAccessEnabled_();
   var queryKeys = Object.keys((e && e.parameter) || {});
   Ogawaya.writeDebugEvent('doGet', {
