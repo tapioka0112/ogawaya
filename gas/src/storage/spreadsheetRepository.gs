@@ -94,16 +94,22 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   }
 
   function createRepository(storage) {
+    var cachedState = null;
+
     function readState() {
-      return ensureStateShape(storage.load());
+      if (!cachedState) {
+        cachedState = ensureStateShape(storage.load());
+      }
+      return cachedState;
     }
 
     function commit(mutator) {
-      var currentState = readState();
+      var currentState = ns.clone(readState());
       var draftState = ns.clone(currentState);
       var result = mutator(draftState);
       validateState(draftState);
       storage.save(draftState);
+      cachedState = ensureStateShape(draftState);
       return result;
     }
 

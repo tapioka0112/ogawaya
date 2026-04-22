@@ -61,8 +61,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   }
 
-  function buildRunItemResponse(repository, item) {
-    var checkedUser = item.checked_by ? repository.findRowById('users', item.checked_by) : null;
+  function buildRunItemResponse(usersById, item) {
+    var checkedUser = item.checked_by ? usersById[item.checked_by] || null : null;
     return {
       id: item.id,
       title: item.title,
@@ -74,6 +74,11 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   }
 
   function buildChecklistResponse(repository, store, run, items) {
+    var usersById = {};
+    repository.listTable('users').forEach(function (user) {
+      usersById[user.id] = user;
+    });
+
     var checkedCount = items.filter(function (item) {
       return item.status === ns.ITEM_STATUS.CHECKED;
     }).length;
@@ -89,9 +94,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         checked: checkedCount
       },
       items: items.map(function (item) {
-        return buildRunItemResponse(repository, item);
+        return buildRunItemResponse(usersById, item);
       })
     };
+  }
+
+  function buildSingleUserMap(user) {
+    var usersById = {};
+    usersById[user.id] = user;
+    return usersById;
   }
 
   function buildTemplateItemResponse(item) {
@@ -450,7 +461,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
         if (item.status === ns.ITEM_STATUS.CHECKED) {
           return {
-            item: buildRunItemResponse(repository, item),
+            item: buildRunItemResponse(buildSingleUserMap(currentUser.user), item),
             logCreated: false
           };
         }
@@ -469,7 +480,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var log = buildLogPayload(clock, 'check', currentUser.user.id, run, item.id, beforeValue, afterValue);
         var updatedItem = repository.updateRunItemWithLog(item.id, changes, log);
         return {
-          item: buildRunItemResponse(repository, updatedItem),
+          item: buildRunItemResponse(buildSingleUserMap(currentUser.user), updatedItem),
           logCreated: true,
           comment: body.comment || ''
         };
@@ -484,7 +495,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
         if (item.status === ns.ITEM_STATUS.UNCHECKED) {
           return {
-            item: buildRunItemResponse(repository, item),
+            item: buildRunItemResponse(buildSingleUserMap(currentUser.user), item),
             logCreated: false
           };
         }
@@ -507,7 +518,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var log = buildLogPayload(clock, 'uncheck', currentUser.user.id, run, item.id, beforeValue, afterValue);
         var updatedItem = repository.updateRunItemWithLog(item.id, changes, log);
         return {
-          item: buildRunItemResponse(repository, updatedItem),
+          item: buildRunItemResponse(buildSingleUserMap(currentUser.user), updatedItem),
           logCreated: true,
           reason: body.reason || ''
         };

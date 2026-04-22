@@ -25,6 +25,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - GAS Web App は `GET` / `POST` だけを直接受けるため、`PUT` / `DELETE` は `_method` クエリでメソッドオーバーライドして扱う。
 - MVP では `ALLOW_ANONYMOUS_ACCESS=true` で LIFF 認証をスキップし、`users` の既存アカウント（優先順位: `admin > manager > part_time`）を実行ユーザーとして扱える。
 - MVP で `ALLOW_ANONYMOUS_ACCESS=true` の場合、当日チェックリストが未作成なら初回アクセス時に自動生成する。
+- `DEBUG_EVENT_SHEET_ENABLED=false` のときは `debug_events` への追記を止め、実行速度を優先する（Cloud Logs は継続）。
 
 ## 目的
 - 店舗別の日次チェックリストをLINE上で共有する。

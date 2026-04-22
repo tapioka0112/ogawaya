@@ -32,6 +32,7 @@
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LIFF_ID`
 - `ALLOW_ANONYMOUS_ACCESS`（MVP は `true` 推奨）
+- `DEBUG_EVENT_SHEET_ENABLED`（通常運用は `false` 推奨、調査時のみ `true`）
 
 コピペ用のテンプレートは [script-properties.example.json](./import/script-properties.example.json) を使う。
 

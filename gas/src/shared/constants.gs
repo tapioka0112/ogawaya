@@ -234,8 +234,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
     ns.logEvent('info', 'debug.event', payload);
 
+    var scriptProperties = PropertiesService.getScriptProperties();
+    if (scriptProperties.getProperty('DEBUG_EVENT_SHEET_ENABLED') !== 'true') {
+      return;
+    }
+
     try {
-      var spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+      var spreadsheetId = scriptProperties.getProperty('SPREADSHEET_ID');
       if (!spreadsheetId) {
         return;
       }
