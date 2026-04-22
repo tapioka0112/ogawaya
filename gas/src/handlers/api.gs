@@ -126,7 +126,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       storage: options.storage,
       spreadsheetId: options.spreadsheetId || scriptProperties.getProperty('SPREADSHEET_ID')
     });
-    repository.ensureSchema();
+    if (options.ensureSchema === true) {
+      repository.ensureSchema();
+    }
 
     var clock = options.clock || ns.defaultClock();
     var notificationService = ns.createNotificationService({
