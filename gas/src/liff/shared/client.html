@@ -1019,6 +1019,13 @@
         try {
           clearError();
           clearStatus();
+          emitClientEvent('init.auth.config', {
+            liffId: global.OGAWAYA_LIFF_ID ? String(global.OGAWAYA_LIFF_ID) : '',
+            liffIdLength: global.OGAWAYA_LIFF_ID ? String(global.OGAWAYA_LIFF_ID).length : 0,
+            hasLiffObject: !!global.liff,
+            hasLiffInit: !!(global.liff && typeof global.liff.init === 'function'),
+            href: global.location && global.location.href ? String(global.location.href) : ''
+          });
           emitClientEvent('init.auth.start', {});
           var authResult = await withTimeout(
             auth.initialize(),
