@@ -226,9 +226,51 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function getTodayRunForUser(user) {
-      var run = repository.findRunByStoreAndDate(user.store_id, clock.today());
-      ns.assert(run, 'not_found', '当日のチェックリストがありません', 404);
-      return run;
+      var targetDate = clock.today();
+      var run = repository.findRunByStoreAndDate(user.store_id, targetDate);
+      if (run) {
+        return run;
+      }
+
+      if (allowAnonymousAccess) {
+        var template = repository.listActiveTemplates().find(function (candidate) {
+          return candidate.store_id === user.store_id;
+        }) || null;
+        ns.assert(template, 'not_found', '有効なチェックリストテンプレートがありません', 404);
+        ns.logEvent('info', 'checklist.today.autocreate', {
+          storeId: user.store_id,
+          templateId: template.id,
+          targetDate: targetDate
+        });
+        var now = ns.toIsoString(clock.now());
+        var createdRun = repository.createChecklistRun({
+          id: Utilities.getUuid(),
+          template_id: template.id,
+          store_id: template.store_id,
+          target_date: targetDate,
+          status: ns.RUN_STATUS.OPEN,
+          notified_at: now,
+          closed_at: '',
+          created_at: now
+        });
+        var templateItems = repository.listTemplateItems(template.id);
+        repository.createRunItems(templateItems.map(function (templateItem) {
+          return {
+            id: Utilities.getUuid(),
+            run_id: createdRun.id,
+            template_item_id: templateItem.id,
+            title: templateItem.title,
+            sort_order: templateItem.sort_order,
+            status: ns.ITEM_STATUS.UNCHECKED,
+            checked_by: '',
+            checked_at: '',
+            updated_at: now
+          };
+        }));
+        return createdRun;
+      }
+
+      ns.assert(false, 'not_found', '当日のチェックリストがありません', 404);
     }
 
     function getRunWithScope(runId, user) {

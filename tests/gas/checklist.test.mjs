@@ -111,6 +111,35 @@ async function createChecklistApp() {
   });
 }
 
+async function createAnonymousChecklistApp() {
+  const runtime = await loadGasRuntime();
+  const seed = createBaseDataset();
+  seed.checklist_runs = [];
+  seed.checklist_run_items = [];
+  seed.line_accounts = [];
+
+  return runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    allowAnonymousAccess: true,
+    identityClient: {
+      verifyIdToken() {
+        throw new Error('should not be called');
+      }
+    },
+    clock: {
+      now() {
+        return new Date('2026-04-22T02:00:00Z');
+      },
+      today() {
+        return '2026-04-22';
+      },
+      yesterday() {
+        return '2026-04-21';
+      }
+    }
+  });
+}
+
 test('GET /api/checklists/today は未認証で拒否する', async () => {
   const app = await createChecklistApp();
 
@@ -137,6 +166,22 @@ test('同日チェックリストを返す', async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.targetDate, '2026-04-21');
   assert.equal(response.body.items.length, 2);
+});
+
+test('匿名アクセス有効時は当日 run が無ければ自動生成して返す', async () => {
+  const app = await createAnonymousChecklistApp();
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/today',
+    query: {},
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.targetDate, '2026-04-22');
+  assert.equal(response.body.items.length, 2);
+  assert.equal(app.repository.listRunsByDate('2026-04-22').length, 1);
 });
 
 test('check 後に checked へ遷移し、チェック者と時刻が保存される', async () => {
