@@ -32,6 +32,21 @@ function createVerifyResponse(statusCode, payload) {
   };
 }
 
+function createScriptCache() {
+  const entries = new Map();
+  return {
+    get(key) {
+      return entries.has(key) ? entries.get(key) : null;
+    },
+    put(key, value) {
+      entries.set(key, String(value));
+    },
+    remove(key) {
+      entries.delete(key);
+    }
+  };
+}
+
 test('LIFF 認証コンテキストがないとリンクに失敗する', async () => {
   const app = await createAuthApp();
 
@@ -210,4 +225,47 @@ test('LIFF verify 応答に sub が無い場合は 500 を返す', async () => {
 
   assert.equal(response.statusCode, 500);
   assert.equal(response.body.code, 'internal_error');
+});
+
+test('同じ idToken の連続 API は verify 結果を ScriptCache から再利用する', async () => {
+  let fetchCount = 0;
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      LINE_CHANNEL_ID: 'channel-001'
+    },
+    cacheFactory() {
+      return createScriptCache();
+    },
+    fetch() {
+      fetchCount += 1;
+      return createVerifyResponse(200, {
+        sub: 'line-user-001',
+        name: '田中LINE',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      });
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const linkResponse = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/link',
+    query: { idToken: 'valid-pt' },
+    body: {
+      employeeCode: 'PT001',
+      passcode: '111111'
+    }
+  });
+  assert.equal(linkResponse.statusCode, 200);
+
+  const meResponse = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: { idToken: 'valid-pt' },
+    body: {}
+  });
+  assert.equal(meResponse.statusCode, 200);
+  assert.equal(fetchCount, 1);
 });

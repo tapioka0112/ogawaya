@@ -1,6 +1,19 @@
 var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
 (function (ns) {
+  var cachedScriptAppUrl = null;
+
+  function resolveAppBaseUrl(explicitUrl) {
+    if (explicitUrl) {
+      return explicitUrl;
+    }
+    if (cachedScriptAppUrl) {
+      return cachedScriptAppUrl;
+    }
+    cachedScriptAppUrl = ScriptApp.getService().getUrl();
+    return cachedScriptAppUrl;
+  }
+
   function createLineClient(channelAccessToken) {
     return {
       pushMessage: function (lineUserId, message) {
@@ -136,17 +149,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       clock: clock,
       lineClient: options.lineClient || createLineClient(options.channelAccessToken || scriptProperties.getProperty('LINE_CHANNEL_ACCESS_TOKEN'))
     });
+    var appBaseUrl = resolveAppBaseUrl(options.appBaseUrl);
     var checklistService = ns.createChecklistService({
       repository: repository,
       clock: clock,
       identityClient: options.identityClient,
       notificationService: notificationService,
-      appBaseUrl: options.appBaseUrl || ScriptApp.getService().getUrl(),
+      appBaseUrl: appBaseUrl,
       lineChannelId: options.lineChannelId || scriptProperties.getProperty('LINE_CHANNEL_ID'),
       allowAnonymousAccess: allowAnonymousAccess
     });
     var webhookHandler = ns.createWebhookHandler({
-      appBaseUrl: options.appBaseUrl || ScriptApp.getService().getUrl(),
+      appBaseUrl: appBaseUrl,
       channelSecret: options.channelSecret || scriptProperties.getProperty('LINE_CHANNEL_SECRET')
     });
 
