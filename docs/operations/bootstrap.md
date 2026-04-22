@@ -67,10 +67,10 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 4. `checklist_template_items.csv`
 5. 残りの CSV はヘッダーのみ import する
 
-## 5. Webhook / LIFF
+## 5. LIFF
 
 - `/api/link` は `idToken` をクエリに付け、本文は `employeeCode` と `passcode` のみ送る。
-- Webhook 署名は GAS 入口では `signature` クエリとして受ける。直接 LINE から受ける場合は `X-Line-Signature` を転送するプロキシを用意する。
+- 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` にする。
 
 ## 6. Trigger
 
@@ -78,3 +78,10 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 
 - `runDailyStart` を毎日 `10:30`
 - `runDailyClosing` を毎日 `0:00`
+
+## 7. 任意: Webhook
+
+Webhook を将来使う場合のみ有効化する。
+
+- GAS 入口は `signature` クエリ受け取り前提。
+- 直接 LINE から受ける場合は `X-Line-Signature` を `signature` クエリへ転送する受信経路を用意する。

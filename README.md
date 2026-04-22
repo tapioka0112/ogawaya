@@ -19,7 +19,8 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 
 ## 実装上の補足
 - GAS Web App の `doPost(e)` は公式ドキュメント上ヘッダーを受け取らないため、LIFF の `idToken` はクエリパラメータ `idToken` として受け取り、サーバー側で LINE の verify API に送って `sub` を取得する。
-- Webhook 署名は内部実装では `signature` 入力として扱い、GAS 入口ではクエリパラメータ経由で処理する。直接本番運用する場合は `X-Line-Signature` を転送するプロキシを挟む前提。
+- 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` とする。
+- Webhook を将来使う場合のみ、`X-Line-Signature` を `signature` クエリとして渡せる受信経路を別途用意する。
 - `users` シートには `/api/link` 用の `passcode` 列を持たせる。
 - GAS Web App は `GET` / `POST` だけを直接受けるため、`PUT` / `DELETE` は `_method` クエリでメソッドオーバーライドして扱う。
 
@@ -82,6 +83,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
    - 10:30: `runDailyStart`
    - 0:00: `runDailyClosing`
 6. LIFF URLをLINEリッチメニューに紐づける。
+7. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
 
 詳細な初期データ投入と運用手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照する。
 
