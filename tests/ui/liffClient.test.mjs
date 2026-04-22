@@ -286,6 +286,28 @@ test('匿名アクセス有効でも LIFF idToken が取れる場合は認証コ
   assert.equal(result.context.isInClient, true);
 });
 
+test('匿名アクセス有効かつ LIFF_ID が空白だけなら匿名へフォールバックする', async () => {
+  const { client, context } = await loadClientModule();
+  let initCalled = false;
+  context.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = true;
+  context.OGAWAYA_LIFF_ID = '   ';
+  context.liff = {
+    async init() {
+      initCalled = true;
+    },
+    getIDToken() {
+      return 'token-from-liff';
+    }
+  };
+  const auth = client.createAuth();
+
+  const result = await auth.initialize();
+
+  assert.equal(initCalled, false);
+  assert.equal(result.idToken, '');
+  assert.equal(result.context.isAnonymous, true);
+});
+
 test('LIFF 初期化失敗時はユーザー向けエラーを表示する', async () => {
   const { client } = await loadClientModule();
   const documentRef = createFakeDocument();

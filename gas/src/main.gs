@@ -6,7 +6,7 @@ function allowAnonymousAccessEnabled_() {
 function doGet(e) {
   var request = Ogawaya.extractRequest(e, 'GET');
   var appBaseUrl = ScriptApp.getService().getUrl();
-  var liffId = PropertiesService.getScriptProperties().getProperty('LIFF_ID') || '';
+  var liffId = String(PropertiesService.getScriptProperties().getProperty('LIFF_ID') || '').trim();
   var allowAnonymousAccess = allowAnonymousAccessEnabled_();
   var queryKeys = Object.keys((e && e.parameter) || {});
   Ogawaya.writeDebugEvent('doGet', {

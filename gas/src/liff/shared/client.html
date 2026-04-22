@@ -169,6 +169,10 @@
     }
 
     function createAuth() {
+      function getNormalizedLiffId() {
+        return String(global.OGAWAYA_LIFF_ID || '').trim();
+      }
+
       function buildAnonymousContext() {
         return {
           idToken: '',
@@ -225,6 +229,7 @@
 
       return {
         initialize: async function () {
+          var normalizedLiffId = getNormalizedLiffId();
           if (global.__OGAWAYA_MOCK__ && global.__OGAWAYA_MOCK__.idToken) {
             return buildAuthenticatedContext(global.__OGAWAYA_MOCK__.idToken, {
               isInClient: true,
@@ -236,12 +241,12 @@
           }
 
           if (global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS === true) {
-            if (!global.liff || !global.OGAWAYA_LIFF_ID || typeof global.liff.init !== 'function') {
+            if (!global.liff || !normalizedLiffId || typeof global.liff.init !== 'function') {
               return buildAnonymousContext();
             }
             var anonymousPreContext = buildRuntimeContext();
             await global.liff.init({
-              liffId: global.OGAWAYA_LIFF_ID,
+              liffId: normalizedLiffId,
               withLoginOnExternalBrowser: !anonymousPreContext.isInClient
             });
             var anonymousPostContext = buildRuntimeContext();
@@ -257,13 +262,13 @@
           if (!global.liff) {
             throw new Error('LIFF SDK が読み込まれていません');
           }
-          if (!global.OGAWAYA_LIFF_ID) {
+          if (!normalizedLiffId) {
             throw new Error('LIFF ID が未設定です');
           }
 
           var preContext = buildRuntimeContext();
           await global.liff.init({
-            liffId: global.OGAWAYA_LIFF_ID,
+            liffId: normalizedLiffId,
             withLoginOnExternalBrowser: !preContext.isInClient
           });
           var postContext = buildRuntimeContext();
