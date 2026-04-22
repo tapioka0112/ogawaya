@@ -159,8 +159,17 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
   function buildChecklistResponse(repository, currentUser, run, items) {
     var usersById = {};
-    repository.listTable('users').forEach(function (user) {
-      usersById[user.id] = user;
+    var checkedUserIds = {};
+    items.forEach(function (item) {
+      if (item.checked_by) {
+        checkedUserIds[item.checked_by] = true;
+      }
+    });
+    Object.keys(checkedUserIds).forEach(function (userId) {
+      var user = repository.findRowById('users', userId);
+      if (user) {
+        usersById[user.id] = user;
+      }
     });
 
     var checkedCount = items.filter(function (item) {
@@ -515,10 +524,30 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       getTodayChecklist: function (query) {
+        var startedAt = nowMillis();
         var currentUser = requireAuthenticatedUser(query);
+        var authMs = nowMillis() - startedAt;
+
+        var runStartedAt = nowMillis();
         var run = getTodayRunForUser(currentUser.user);
+        var runMs = nowMillis() - runStartedAt;
+
+        var itemsStartedAt = nowMillis();
         var items = repository.listRunItems(run.id);
-        return buildChecklistResponse(repository, currentUser, run, items);
+        var itemsMs = nowMillis() - itemsStartedAt;
+
+        var buildStartedAt = nowMillis();
+        var response = buildChecklistResponse(repository, currentUser, run, items);
+        var buildMs = nowMillis() - buildStartedAt;
+        ns.logEvent('info', 'api.today.breakdown', {
+          authMs: authMs,
+          runMs: runMs,
+          itemsMs: itemsMs,
+          buildMs: buildMs,
+          totalMs: nowMillis() - startedAt,
+          itemsCount: items.length
+        });
+        return response;
       },
 
       getTodayIncomplete: function (query) {

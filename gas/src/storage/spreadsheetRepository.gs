@@ -117,10 +117,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return readState()[sheetName].map(ns.clone);
     }
 
+    function getTableRowsUnsafe(sheetName) {
+      return readState()[sheetName];
+    }
+
     function findRowById(sheetName, rowId) {
-      return listTable(sheetName).find(function (row) {
-        return row.id === rowId;
-      }) || null;
+      var rows = getTableRowsUnsafe(sheetName);
+      for (var index = 0; index < rows.length; index += 1) {
+        if (rows[index].id === rowId) {
+          return ns.clone(rows[index]);
+        }
+      }
+      return null;
     }
 
     function replaceTable(sheetName, rows) {
@@ -148,21 +156,36 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function findUserByEmployeeCodeAndPasscode(employeeCode, passcode) {
-      return listTable('users').find(function (user) {
-        return user.employee_code === employeeCode && user.passcode === passcode && user.status === 'active';
-      }) || null;
+      var users = getTableRowsUnsafe('users');
+      for (var index = 0; index < users.length; index += 1) {
+        var user = users[index];
+        if (user.employee_code === employeeCode && user.passcode === passcode && user.status === 'active') {
+          return ns.clone(user);
+        }
+      }
+      return null;
     }
 
     function findLineAccountByLineUserId(lineUserId) {
-      return listTable('line_accounts').find(function (lineAccount) {
-        return lineAccount.line_user_id === lineUserId;
-      }) || null;
+      var lineAccounts = getTableRowsUnsafe('line_accounts');
+      for (var index = 0; index < lineAccounts.length; index += 1) {
+        var lineAccount = lineAccounts[index];
+        if (lineAccount.line_user_id === lineUserId) {
+          return ns.clone(lineAccount);
+        }
+      }
+      return null;
     }
 
     function findLineAccountByUserId(userId) {
-      return listTable('line_accounts').find(function (lineAccount) {
-        return lineAccount.user_id === userId;
-      }) || null;
+      var lineAccounts = getTableRowsUnsafe('line_accounts');
+      for (var index = 0; index < lineAccounts.length; index += 1) {
+        var lineAccount = lineAccounts[index];
+        if (lineAccount.user_id === userId) {
+          return ns.clone(lineAccount);
+        }
+      }
+      return null;
     }
 
     function createLineAccountLink(lineAccount) {
@@ -188,15 +211,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function listActiveTemplates() {
-      return listTable('checklist_templates').filter(function (template) {
+      return getTableRowsUnsafe('checklist_templates').filter(function (template) {
         return ns.parseBoolean(template.is_active);
-      });
+      }).map(ns.clone);
     }
 
     function listTemplateItems(templateId) {
-      return ns.sortBySortOrder(listTable('checklist_template_items').filter(function (item) {
+      return ns.sortBySortOrder(getTableRowsUnsafe('checklist_template_items').filter(function (item) {
         return item.template_id === templateId && ns.parseBoolean(item.is_active);
-      }));
+      }).map(ns.clone));
     }
 
     function listActiveTemplatesWithItems(storeId) {
@@ -231,15 +254,20 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function findRunByStoreAndDate(storeId, targetDate) {
-      return listTable('checklist_runs').find(function (run) {
-        return run.store_id === storeId && run.target_date === targetDate;
-      }) || null;
+      var runs = getTableRowsUnsafe('checklist_runs');
+      for (var index = 0; index < runs.length; index += 1) {
+        var run = runs[index];
+        if (run.store_id === storeId && run.target_date === targetDate) {
+          return ns.clone(run);
+        }
+      }
+      return null;
     }
 
     function listRunsByDate(targetDate) {
-      return listTable('checklist_runs').filter(function (run) {
+      return getTableRowsUnsafe('checklist_runs').filter(function (run) {
         return run.target_date === targetDate;
-      });
+      }).map(ns.clone);
     }
 
     function createChecklistRun(run) {
@@ -257,9 +285,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function listRunItems(runId) {
-      return ns.sortBySortOrder(listTable('checklist_run_items').filter(function (item) {
+      return ns.sortBySortOrder(getTableRowsUnsafe('checklist_run_items').filter(function (item) {
         return item.run_id === runId;
-      }));
+      }).map(ns.clone));
     }
 
     function createRunItems(items) {
@@ -337,9 +365,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function listLogsByRunItemIds(runItemIds) {
-      return listTable('checklist_item_logs').filter(function (log) {
+      return getTableRowsUnsafe('checklist_item_logs').filter(function (log) {
         return runItemIds.indexOf(log.run_item_id) !== -1;
-      });
+      }).map(ns.clone);
     }
 
     function appendNotification(notification) {
@@ -347,9 +375,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function findMatchingNotification(type, userId, message) {
-      return listTable('notifications').find(function (notification) {
-        return notification.type === type && notification.user_id === userId && notification.message === message;
-      }) || null;
+      var notifications = getTableRowsUnsafe('notifications');
+      for (var index = 0; index < notifications.length; index += 1) {
+        var notification = notifications[index];
+        if (notification.type === type && notification.user_id === userId && notification.message === message) {
+          return ns.clone(notification);
+        }
+      }
+      return null;
     }
 
     function createTemplate(template) {
@@ -385,23 +418,38 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function listUsersByStore(storeId) {
-      return listTable('users').filter(function (user) {
+      return getTableRowsUnsafe('users').filter(function (user) {
         return user.store_id === storeId && user.status === 'active';
-      });
+      }).map(ns.clone);
     }
 
     function listLinkedUsersByStore(storeId, roles) {
-      var users = listUsersByStore(storeId);
-      return users.filter(function (user) {
-        if (roles && roles.indexOf(user.role) === -1) {
+      var allowedRoles = {};
+      if (roles && roles.length > 0) {
+        roles.forEach(function (role) {
+          allowedRoles[role] = true;
+        });
+      }
+
+      var linkedAccountByUserId = {};
+      getTableRowsUnsafe('line_accounts').forEach(function (lineAccount) {
+        if (!linkedAccountByUserId[lineAccount.user_id]) {
+          linkedAccountByUserId[lineAccount.user_id] = lineAccount;
+        }
+      });
+
+      return getTableRowsUnsafe('users').filter(function (user) {
+        if (user.store_id !== storeId || user.status !== 'active') {
           return false;
         }
-        return !!findLineAccountByUserId(user.id);
+        if (roles && roles.length > 0 && !allowedRoles[user.role]) {
+          return false;
+        }
+        return !!linkedAccountByUserId[user.id];
       }).map(function (user) {
-        var lineAccount = findLineAccountByUserId(user.id);
         return {
-          user: user,
-          lineAccount: lineAccount
+          user: ns.clone(user),
+          lineAccount: ns.clone(linkedAccountByUserId[user.id])
         };
       });
     }
