@@ -145,33 +145,20 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   }
 
-  function buildRunItemResponse(usersById, item) {
-    var checkedUser = item.checked_by ? usersById[item.checked_by] || null : null;
+  function buildRunItemResponse(item) {
+    var checkedByName = String(item.checked_by_name || '').trim();
+    var checkedByUserId = String(item.checked_by || '').trim();
     return {
       id: item.id,
       title: item.title,
       status: item.status,
-      checkedBy: checkedUser ? checkedUser.name : null,
-      checkedByUserId: checkedUser ? checkedUser.id : null,
+      checkedBy: checkedByName || null,
+      checkedByUserId: checkedByUserId || null,
       checkedAt: item.checked_at || null
     };
   }
 
   function buildChecklistResponse(repository, currentUser, run, items) {
-    var usersById = {};
-    var checkedUserIds = {};
-    items.forEach(function (item) {
-      if (item.checked_by) {
-        checkedUserIds[item.checked_by] = true;
-      }
-    });
-    Object.keys(checkedUserIds).forEach(function (userId) {
-      var user = repository.findRowById('users', userId);
-      if (user) {
-        usersById[user.id] = user;
-      }
-    });
-
     var checkedCount = items.filter(function (item) {
       return item.status === ns.ITEM_STATUS.CHECKED;
     }).length;
@@ -188,15 +175,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         checked: checkedCount
       },
       items: items.map(function (item) {
-        return buildRunItemResponse(usersById, item);
+        return buildRunItemResponse(item);
       })
     };
-  }
-
-  function buildSingleUserMap(user) {
-    var usersById = {};
-    usersById[user.id] = user;
-    return usersById;
   }
 
   function buildTemplateItemResponse(item) {
@@ -218,26 +199,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       isActive: ns.parseBoolean(template.is_active),
       items: items.map(buildTemplateItemResponse)
     };
-  }
-
-  function buildLogPayload(clock, action, userId, run, runItemId, beforeValue, afterValue) {
-    var now = ns.toIsoString(clock.now());
-    return {
-      id: Utilities.getUuid(),
-      run_item_id: runItemId,
-      action: action,
-      user_id: userId,
-      before_value: ns.jsonStringify(beforeValue),
-      after_value: ns.jsonStringify(afterValue),
-      is_after_close: run.closed_at && now > run.closed_at ? 'true' : 'false',
-      created_at: now
-    };
-  }
-
-  function buildLogRow(repository, clock, action, userId, run, runItemId, beforeValue, afterValue) {
-    return repository.appendLog(
-      buildLogPayload(clock, action, userId, run, runItemId, beforeValue, afterValue)
-    );
   }
 
   function ensureStoreScope(repository, user, storeId) {
@@ -272,40 +233,33 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }
     }
 
-    function pickAnonymousUser(storeId) {
-      var users = repository.listUsersByStore(storeId);
-      var prioritizedRoles = [ns.ROLES.ADMIN, ns.ROLES.MANAGER, ns.ROLES.PART_TIME];
-      var prioritizedUser = null;
-
-      prioritizedRoles.some(function (role) {
-        prioritizedUser = users.find(function (user) {
-          return user.role === role;
-        }) || null;
-        return !!prioritizedUser;
-      });
-
-      return prioritizedUser || users[0] || null;
+    function findCurrentStore() {
+      var stores = repository.listTable('stores');
+      var activeStore = stores.find(function (store) {
+        return store.status === 'active';
+      }) || null;
+      ns.assert(activeStore || stores[0], 'config_error', '有効な store がありません', 500);
+      return activeStore || stores[0];
     }
 
-    function resolveAnonymousUser() {
-      var store = repository.listTable('stores').find(function (candidate) {
-        return candidate.status === 'active';
-      }) || null;
-      ns.assert(store, 'config_error', '匿名アクセス用の active store がありません', 500);
-
-      var user = pickAnonymousUser(store.id);
-      ns.assert(user, 'config_error', '匿名アクセス用の active user がありません', 500);
-
-      ns.logEvent('info', 'auth.anonymous.resolve', {
+    function buildCurrentUserContext(identity) {
+      var store = findCurrentStore();
+      var lineUserId = String(identity && identity.lineUserId ? identity.lineUserId : 'anonymous');
+      var displayName = String(identity && identity.displayName ? identity.displayName : 'LINEユーザー');
+      var user = {
+        id: lineUserId,
+        store_id: store.id,
+        name: displayName,
+        role: ''
+      };
+      ns.logEvent('info', 'auth.current_user.resolve', {
         storeId: store.id,
-        userId: user.id,
-        role: user.role
+        userId: summarizeId(lineUserId)
       });
-
       return {
         identity: {
-          lineUserId: 'anonymous',
-          displayName: user.name
+          lineUserId: lineUserId,
+          displayName: displayName
         },
         user: user,
         store: store
@@ -316,24 +270,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       var safeQuery = query || {};
       if (!safeQuery.idToken) {
         if (allowAnonymousAccess) {
-          return resolveAnonymousUser();
+          return buildCurrentUserContext({
+            lineUserId: 'anonymous',
+            displayName: '匿名ユーザー'
+          });
         }
         throw ns.createError('unauthorized', 'LIFF 認証コンテキストがありません', 401);
       }
 
       var identity = resolveIdentity(safeQuery);
-      var user = repository.findLinkedUserByLineUserId(identity.lineUserId);
-      ns.logEvent('info', 'auth.user.lookup', {
-        lineUserId: summarizeId(identity.lineUserId),
-        linked: !!user,
-        userId: user ? user.id : ''
-      });
-      ns.assert(user, 'unauthorized', 'LINE 連携済みユーザーではありません', 401);
-      return {
-        identity: identity,
-        user: user,
-        store: repository.findStoreById(user.store_id)
-      };
+      return buildCurrentUserContext(identity);
     }
 
     function getTodayRunForUser(user) {
@@ -375,6 +321,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             sort_order: templateItem.sort_order,
             status: ns.ITEM_STATUS.UNCHECKED,
             checked_by: '',
+            checked_by_name: '',
             checked_at: '',
             updated_at: now
           };
@@ -402,46 +349,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         item: item,
         run: run
       };
-    }
-
-    function mapLog(log) {
-      return {
-        id: log.id,
-        runItemId: log.run_item_id,
-        action: log.action,
-        userId: log.user_id,
-        beforeValue: ns.safeJsonParse(log.before_value),
-        afterValue: ns.safeJsonParse(log.after_value),
-        isAfterClose: ns.parseBoolean(log.is_after_close),
-        createdAt: log.created_at
-      };
-    }
-
-    function buildLogAlerts(run, items, logs) {
-      var loggedRunItemIds = {};
-      logs.forEach(function (log) {
-        loggedRunItemIds[log.run_item_id] = true;
-      });
-
-      return items.filter(function (item) {
-        if (loggedRunItemIds[item.id]) {
-          return false;
-        }
-        if (item.status === ns.ITEM_STATUS.CHECKED) {
-          return true;
-        }
-        if (item.checked_by || item.checked_at) {
-          return true;
-        }
-        return item.updated_at !== run.created_at;
-      }).map(function (item) {
-        return {
-          type: 'missing_log',
-          runItemId: item.id,
-          title: item.title,
-          message: item.title + ' の操作履歴が欠落しています'
-        };
-      });
     }
 
     function buildIncompleteMessage(store, run, items) {
@@ -484,38 +391,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return {
       getCurrentUser: requireAuthenticatedUser,
 
-      linkAccount: function (query, body) {
-        var keys = Object.keys(body || {});
-        ns.assert(keys.length === 2 && keys.indexOf('employeeCode') !== -1 && keys.indexOf('passcode') !== -1, 'invalid_request', 'employeeCode と passcode のみ指定できます', 400);
-
-        var identity = resolveIdentity(query);
-        ns.logEvent('info', 'auth.link.request', {
-          employeeCode: body.employeeCode || '',
-          lineUserId: summarizeId(identity.lineUserId)
-        });
-        var user = repository.findUserByEmployeeCodeAndPasscode(body.employeeCode, body.passcode);
-        ns.logEvent('info', 'auth.link.userMatch', {
-          employeeCode: body.employeeCode || '',
-          matched: !!user,
-          userId: user ? user.id : ''
-        });
-        ns.assert(user, 'unauthorized', '社員コードまたはパスコードが不正です', 401);
-
-        repository.createLineAccountLink({
-          id: Utilities.getUuid(),
-          user_id: user.id,
-          line_user_id: identity.lineUserId,
-          display_name: identity.displayName || '',
-          linked_at: ns.toIsoString(clock.now())
-        });
-        ns.logEvent('info', 'auth.link.success', {
-          userId: user.id,
-          lineUserId: summarizeId(identity.lineUserId)
-        });
-
-        return {
-          user: ns.buildUserSummary(user, repository.findStoreById(user.store_id))
-        };
+      linkAccount: function () {
+        throw ns.createError('gone', 'LINE 連携フォームは廃止されました', 410);
       },
 
       getMe: function (query) {
@@ -572,13 +449,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var currentUser = requireAuthenticatedUser(query);
         var scopedRunItem = getRunItemWithScope(runItemId, currentUser.user);
         var item = scopedRunItem.item;
-        var run = scopedRunItem.run;
-        var beforeValue = ns.clone(item);
 
         if (item.status === ns.ITEM_STATUS.CHECKED) {
           return {
-            item: buildRunItemResponse(buildSingleUserMap(currentUser.user), item),
-            logCreated: false
+            item: buildRunItemResponse(item)
           };
         }
 
@@ -586,18 +460,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var changes = {
           status: ns.ITEM_STATUS.CHECKED,
           checked_by: currentUser.user.id,
+          checked_by_name: currentUser.identity.displayName || currentUser.user.name,
           checked_at: now,
           updated_at: now
         };
-        var afterValue = ns.clone(item);
-        Object.keys(changes).forEach(function (key) {
-          afterValue[key] = changes[key];
-        });
-        var log = buildLogPayload(clock, 'check', currentUser.user.id, run, item.id, beforeValue, afterValue);
-        var updatedItem = repository.updateRunItemWithLog(item.id, changes, log);
+        var updatedItem = repository.updateRunItem(item.id, changes);
         return {
-          item: buildRunItemResponse(buildSingleUserMap(currentUser.user), updatedItem),
-          logCreated: true,
+          item: buildRunItemResponse(updatedItem),
           comment: body.comment || ''
         };
       },
@@ -606,55 +475,25 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var currentUser = requireAuthenticatedUser(query);
         var scopedRunItem = getRunItemWithScope(runItemId, currentUser.user);
         var item = scopedRunItem.item;
-        var run = scopedRunItem.run;
-        var beforeValue = ns.clone(item);
 
         if (item.status === ns.ITEM_STATUS.UNCHECKED) {
           return {
-            item: buildRunItemResponse(buildSingleUserMap(currentUser.user), item),
-            logCreated: false
+            item: buildRunItemResponse(item)
           };
-        }
-
-        if (currentUser.user.role === ns.ROLES.PART_TIME) {
-          ns.assert(item.checked_by === currentUser.user.id, 'forbidden', '他人のチェックは取り消せません', 403);
         }
 
         var now = ns.toIsoString(clock.now());
         var changes = {
           status: ns.ITEM_STATUS.UNCHECKED,
           checked_by: '',
+          checked_by_name: '',
           checked_at: '',
           updated_at: now
         };
-        var afterValue = ns.clone(item);
-        Object.keys(changes).forEach(function (key) {
-          afterValue[key] = changes[key];
-        });
-        var log = buildLogPayload(clock, 'uncheck', currentUser.user.id, run, item.id, beforeValue, afterValue);
-        var updatedItem = repository.updateRunItemWithLog(item.id, changes, log);
+        var updatedItem = repository.updateRunItem(item.id, changes);
         return {
-          item: buildRunItemResponse(buildSingleUserMap(currentUser.user), updatedItem),
-          logCreated: true,
+          item: buildRunItemResponse(updatedItem),
           reason: body.reason || ''
-        };
-      },
-
-      getLogs: function (query, runId, action) {
-        var currentUser = requireAuthenticatedUser(query);
-        var run = getRunWithScope(runId, currentUser.user);
-        var items = repository.listRunItems(run.id);
-        var allLogs = repository.listLogsByRunItemIds(items.map(function (item) {
-          return item.id;
-        }));
-        var logs = allLogs.filter(function (log) {
-          return !action || log.action === action;
-        }).sort(function (left, right) {
-          return right.created_at.localeCompare(left.created_at);
-        });
-        return {
-          logs: logs.map(mapLog),
-          alerts: buildLogAlerts(run, items, allLogs)
         };
       },
 
@@ -729,8 +568,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
         ensureStoreScope(repository, currentUser.user, template.store_id);
 
-        var beforeValue = repository.findRowById('checklist_template_items', itemId);
-        ns.assert(beforeValue, 'not_found', 'テンプレート項目が見つかりません', 404);
         var updatedItem = repository.updateTemplateItem(itemId, {
           title: ns.requireString(body.title, 'title'),
           description: body.description || '',
@@ -738,9 +575,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           is_required: ns.boolToString(body.isRequired),
           updated_at: ns.toIsoString(clock.now())
         });
-        buildLogRow(repository, clock, 'edit', currentUser.user.id, {
-          closed_at: ''
-        }, itemId, beforeValue, updatedItem);
         return { item: updatedItem };
       },
 
@@ -751,12 +585,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
         ensureStoreScope(repository, currentUser.user, template.store_id);
 
-        var beforeValue = repository.findRowById('checklist_template_items', itemId);
-        ns.assert(beforeValue, 'not_found', 'テンプレート項目が見つかりません', 404);
         var deletedItem = repository.deleteTemplateItem(itemId);
-        buildLogRow(repository, clock, 'delete', currentUser.user.id, {
-          closed_at: ''
-        }, itemId, beforeValue, deletedItem);
         return { item: deletedItem };
       },
 
@@ -808,6 +637,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
               sort_order: templateItem.sort_order,
               status: ns.ITEM_STATUS.UNCHECKED,
               checked_by: '',
+              checked_by_name: '',
               checked_at: '',
               updated_at: now
             };

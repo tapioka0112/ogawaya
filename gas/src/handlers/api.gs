@@ -85,11 +85,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return ns.createJsonResponse(200, service.uncheckItem(request.query, uncheckMatch[1], request.body));
     }
 
-    var logsMatch = path.match(/^\/api\/checklists\/([^/]+)\/logs$/);
-    if (method === 'GET' && logsMatch) {
-      return ns.createJsonResponse(200, service.getLogs(request.query, logsMatch[1], request.query.action));
-    }
-
     if (method === 'POST' && path === '/api/admin/templates') {
       return ns.createJsonResponse(201, service.createTemplate(request.query, request.body));
     }

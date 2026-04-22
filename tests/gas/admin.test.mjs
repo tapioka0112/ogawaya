@@ -47,6 +47,7 @@ async function createAdminApp(lineClient = {
       sort_order: '1',
       status: 'unchecked',
       checked_by: '',
+      checked_by_name: '',
       checked_at: '',
       updated_at: '2026-04-21T01:30:00Z'
     }
@@ -57,6 +58,7 @@ async function createAdminApp(lineClient = {
     identityClient: {
       verifyIdToken(idToken) {
         const map = {
+          'valid-part-time': { lineUserId: 'line-user-001', displayName: '田中LINE' },
           'valid-manager': { lineUserId: 'line-user-002', displayName: '山田LINE' },
           'valid-admin': { lineUserId: 'line-user-003', displayName: '本部LINE' }
         };
@@ -81,26 +83,8 @@ async function createAdminApp(lineClient = {
   });
 }
 
-test('管理者でないユーザーの項目追加は拒否する', async () => {
-  const runtime = await loadGasRuntime();
-  const seed = createBaseDataset();
-  seed.line_accounts = [
-    {
-      id: 'line-001',
-      user_id: 'user-pt-001',
-      line_user_id: 'line-user-001',
-      display_name: '田中LINE',
-      linked_at: '2026-04-20T00:00:00Z'
-    }
-  ];
-  const app = runtime.Ogawaya.createApplication({
-    storage: runtime.Ogawaya.createArrayStorage(seed),
-    identityClient: {
-      verifyIdToken() {
-        return { lineUserId: 'line-user-001', displayName: '田中LINE' };
-      }
-    }
-  });
+test('ロール制限なしでテンプレート項目を追加できる', async () => {
+  const app = await createAdminApp();
 
   const response = app.handleApiRequest({
     method: 'POST',
@@ -114,7 +98,7 @@ test('管理者でないユーザーの項目追加は拒否する', async () =>
     }
   });
 
-  assert.equal(response.statusCode, 403);
+  assert.equal(response.statusCode, 201);
 });
 
 test('テンプレート新規作成・更新・項目 CRUD が成功する', async () => {
@@ -177,38 +161,7 @@ test('テンプレート新規作成・更新・項目 CRUD が成功する', as
   assert.equal(deleteItem.statusCode, 200);
 });
 
-test('管理者は同一店舗のテンプレート一覧を取得できる', async () => {
-  const app = await createAdminApp();
-
-  const response = app.handleApiRequest({
-    method: 'GET',
-    path: '/api/admin/templates',
-    query: { idToken: 'valid-manager' },
-    body: {}
-  });
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.templates.length, 1);
-  assert.equal(response.body.templates[0].id, 'tmpl-001');
-  assert.equal(response.body.templates[0].items.length, 2);
-});
-
-test('空タイトルはバリデーションエラーになる', async () => {
-  const app = await createAdminApp();
-
-  const response = app.handleApiRequest({
-    method: 'POST',
-    path: '/api/admin/templates',
-    query: { idToken: 'valid-manager' },
-    body: {
-      name: ''
-    }
-  });
-
-  assert.equal(response.statusCode, 400);
-});
-
-test('編集と削除の変更履歴ログが残る', async () => {
+test('テンプレート編集・削除で操作履歴ログを追加しない', async () => {
   const app = await createAdminApp();
 
   const addItem = app.handleApiRequest({
@@ -243,11 +196,10 @@ test('編集と削除の変更履歴ログが残る', async () => {
   });
 
   const logs = app.repository.listTable('checklist_item_logs');
-  assert.equal(logs.filter((log) => log.action === 'edit').length, 1);
-  assert.equal(logs.filter((log) => log.action === 'delete').length, 1);
+  assert.equal(logs.length, 0);
 });
 
-test('手動通知 API は管理者のみ実行でき、manual_reminder を保存する', async () => {
+test('手動通知 API は実行でき、manual_reminder を保存する', async () => {
   const app = await createAdminApp();
 
   const response = app.handleApiRequest({

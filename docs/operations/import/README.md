@@ -20,13 +20,13 @@
 1. Google Spreadsheet を新規作成し、ID を控える。
 2. GAS の Script Properties に `SPREADSHEET_ID` だけ先に設定する。
 3. Apps Script エディタで `bootstrapSpreadsheetTemplates` を 1 回実行する。
-4. 実行後に `stores` `users` `checklist_templates` `checklist_template_items` のサンプル行を実データへ置き換える。
+4. 実行後に `stores` `checklist_templates` `checklist_template_items` のサンプル行を実データへ置き換える。
 5. 残りの Script Properties は `script-properties.example.json` を開いて、実値へ置き換えてから Apps Script の UI へ入力する。
 
 ## 一括初期化の注意
 
 - `bootstrapSpreadsheetTemplates` は、対象シートが空、またはヘッダーのみのときだけ実行できる。
-- `stores` `users` `checklist_templates` `checklist_template_items` には最小サンプル行が入る。
+- `stores` `checklist_templates` `checklist_template_items` には最小サンプル行が入る。
 - 既存データがあるシートでは fail-fast で停止し、上書きしない。
 
 ## 手動 fallback
@@ -36,10 +36,9 @@ Apps Script をまだ実行できない場合は、従来どおり CSV を手で
 ## 手動 import の順序
 
 1. `stores.csv`
-2. `users.csv`
-3. `checklist_templates.csv`
-4. `checklist_template_items.csv`
-5. 残りの CSV はヘッダーだけ import する
+2. `checklist_templates.csv`
+3. `checklist_template_items.csv`
+4. 残りの CSV はヘッダーだけ import する
 
 ## 置き換える必要がある値
 
@@ -49,4 +48,4 @@ Apps Script をまだ実行できない場合は、従来どおり CSV を手で
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LIFF_ID`
 - `store-001` や `user-*-001` などのサンプル ID
-- 店舗名、社員コード、パスコード、テンプレート名、項目名
+- 店舗名、テンプレート名、項目名

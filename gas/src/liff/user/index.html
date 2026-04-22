@@ -17,7 +17,7 @@
       <section class="hero-card">
         <span class="eyebrow" id="screen-mode">従業員 LIFF</span>
         <h1 class="hero-title">今日の店舗状態を、<br />その場で合わせる。</h1>
-        <p class="hero-copy">チェック、取消、未完了確認、履歴参照を同じ導線で扱います。</p>
+        <p class="hero-copy">チェック、取消、未完了確認を同じ導線で扱います。</p>
         <div class="error-box" id="error-message" data-visible="false" role="alert" aria-atomic="true"></div>
         <div class="status-box" id="status-message" data-visible="false" role="status" aria-atomic="true"></div>
         <div class="meta-grid">
@@ -36,25 +36,6 @@
         </div>
       </section>
 
-      <section class="panel" id="link-panel" hidden>
-        <div class="eyebrow">First Link</div>
-        <h2 class="panel-title">LINE 連携</h2>
-        <p class="panel-copy">社員コードとパスコードを入力して、最初の連携を完了してください。</p>
-        <div class="form-grid">
-          <label class="field-card">
-            <span class="field-label">社員コード</span>
-            <input class="text-input" id="link-employee-code-input" type="text" autocomplete="username" />
-          </label>
-          <label class="field-card">
-            <span class="field-label">パスコード</span>
-            <input class="text-input" id="link-passcode-input" type="password" autocomplete="current-password" />
-          </label>
-        </div>
-        <div class="button-row" style="margin-top: 12px;">
-          <button class="action-button" id="link-account-button" type="button">連携する</button>
-        </div>
-      </section>
-
       <section class="content-grid" id="main-content">
         <section class="panel">
           <div class="panel-head">
@@ -63,7 +44,6 @@
               <h2 class="panel-title">当日チェックリスト</h2>
             </div>
             <div class="button-row">
-              <span class="role-badge" id="role-badge">-</span>
               <button class="action-button ghost-button" id="refresh-button" type="button">最新状態に更新</button>
             </div>
           </div>
@@ -82,30 +62,6 @@
             <div class="meta-line" id="incomplete-summary">未完了 0 件</div>
           </div>
           <ul class="checklist-list" id="incomplete-items"></ul>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">Logs</div>
-              <h2 class="panel-title">操作履歴</h2>
-            </div>
-            <div class="control-row">
-              <select class="select-input" id="log-action-filter">
-                <option value="">すべて</option>
-                <option value="check">check</option>
-                <option value="uncheck">uncheck</option>
-              </select>
-              <button class="action-button ghost-button" id="load-logs-button" type="button">履歴を再取得</button>
-            </div>
-          </div>
-          <ul class="checklist-list" id="logs-list"></ul>
-        </section>
-
-        <section class="panel" id="admin-panel" hidden>
-          <div class="eyebrow">Manager Notice</div>
-          <h2 class="panel-title">管理者向け導線</h2>
-          <p class="panel-copy">manager / admin ロールでは管理者画面から未完了通知とテンプレート更新を扱えます。</p>
         </section>
       </section>
     </main>

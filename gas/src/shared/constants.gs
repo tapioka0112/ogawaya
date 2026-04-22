@@ -25,7 +25,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   ns.MENU_ITEMS = [
     '今日のチェックリスト',
     '未完了一覧',
-    '履歴を見る',
     'ヘルプ'
   ];
   ns.REQUIRED_OAUTH_SCOPES = [
@@ -76,6 +75,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       'sort_order',
       'status',
       'checked_by',
+      'checked_by_name',
       'checked_at',
       'updated_at'
     ],

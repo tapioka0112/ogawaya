@@ -134,11 +134,6 @@
         uncheckItem: function (idToken, runItemId, body) {
           return request('POST', '/api/checklist-items/' + encodeURIComponent(runItemId) + '/uncheck', idToken, body);
         },
-        getLogs: function (idToken, runId, action) {
-          return request('GET', '/api/checklists/' + encodeURIComponent(runId) + '/logs', idToken, null, {
-            action: action || ''
-          });
-        },
         listTemplates: function (idToken) {
           return request('GET', '/api/admin/templates', idToken);
         },
@@ -271,7 +266,6 @@
         me: null,
         checklist: null,
         incomplete: null,
-        logs: [],
         templates: [],
         selectedTemplateId: '',
         selectedTemplateItemId: ''
@@ -285,7 +279,6 @@
       var elements = {
         errorBox: documentRef.getElementById('error-message'),
         statusBox: documentRef.getElementById('status-message'),
-        roleBadge: documentRef.getElementById('role-badge'),
         storeName: documentRef.getElementById('store-name'),
         targetDate: documentRef.getElementById('target-date'),
         progressSummary: documentRef.getElementById('progress-summary'),
@@ -296,13 +289,9 @@
         linkPasscodeInput: documentRef.getElementById('link-passcode-input'),
         linkAccountButton: documentRef.getElementById('link-account-button'),
         refreshButton: documentRef.getElementById('refresh-button'),
-        adminPanel: documentRef.getElementById('admin-panel'),
         screenMode: documentRef.getElementById('screen-mode'),
         incompleteSummary: documentRef.getElementById('incomplete-summary'),
         incompleteItems: documentRef.getElementById('incomplete-items'),
-        loadLogsButton: documentRef.getElementById('load-logs-button'),
-        logActionFilter: documentRef.getElementById('log-action-filter'),
-        logsList: documentRef.getElementById('logs-list'),
         notifyButton: documentRef.getElementById('notify-button'),
         templateSelect: documentRef.getElementById('template-select'),
         templateNameInput: documentRef.getElementById('template-name-input'),
@@ -328,12 +317,8 @@
         return Array.isArray(value) ? value : [];
       }
 
-      function isManagerRole(role) {
-        return role === 'manager' || role === 'admin';
-      }
-
       function canManageTemplates() {
-        return !!(state.me && isManagerRole(state.me.role) && mode === 'admin');
+        return false;
       }
 
       function isUnlinkedUserError(error) {
@@ -394,11 +379,12 @@
       }
 
       function setLinkMode(enabled) {
+        var hasLinkPanel = !!elements.linkPanel;
         if (elements.linkPanel) {
           elements.linkPanel.hidden = !enabled;
         }
         if (elements.mainContent) {
-          elements.mainContent.hidden = !!enabled;
+          elements.mainContent.hidden = hasLinkPanel && !!enabled;
         }
       }
 
@@ -444,7 +430,6 @@
         setText(elements.storeName, '-');
         setText(elements.targetDate, '-');
         setText(elements.progressSummary, '-');
-        setText(elements.roleBadge, '-');
       }
 
       function createMessageListItem(text, className) {
@@ -465,12 +450,7 @@
         return button;
       }
 
-      function renderRole(role) {
-        setText(elements.roleBadge, role || '-');
-        if (elements.adminPanel) {
-          elements.adminPanel.hidden = !isManagerRole(role);
-        }
-      }
+      function renderRole() {}
 
       function applyCurrentUser(currentUser) {
         if (!currentUser) {
@@ -500,13 +480,10 @@
       }
 
       function canUncheck(item) {
-        if (!state.me || item.status !== 'checked') {
+        if (item.status !== 'checked') {
           return false;
         }
-        if (state.me.role !== 'part_time') {
-          return true;
-        }
-        return item.checkedByUserId === state.me.userId;
+        return true;
       }
 
       function findChecklistItemById(runItemId) {
@@ -743,21 +720,6 @@
         }
       }
 
-      function renderLogs(logs) {
-        state.logs = normalizeArray(logs);
-        clearList(elements.logsList);
-        state.logs.forEach(function (log) {
-          var suffix = log.isAfterClose ? ' / 締切後' : '';
-          elements.logsList.appendChild(createMessageListItem(
-            log.action + ' / ' + log.createdAt + suffix,
-            'plain-item'
-          ));
-        });
-        if (elements.logsList && elements.logsList.children.length === 0) {
-          elements.logsList.appendChild(createMessageListItem('履歴はありません。', 'empty-item'));
-        }
-      }
-
       function clearSelect(element) {
         if (!element) {
           return;
@@ -950,23 +912,10 @@
         clearOverview();
         clearList(elements.checklistItems);
         clearList(elements.incompleteItems);
-        clearList(elements.logsList);
         setLinkMode(true);
         emitClientEvent('unlinked.rendered', {});
         clearError();
-        setStatus('社員コードとパスコードを入力して連携してください。');
-      }
-
-      async function loadLogs() {
-        if (!api.getLogs || !state.checklist || !state.checklist.runId) {
-          return;
-        }
-        var logResponse = await api.getLogs(
-          state.idToken,
-          state.checklist.runId,
-          elements.logActionFilter ? elements.logActionFilter.value : ''
-        );
-        renderLogs(logResponse.logs);
+        setStatus('LINE から再度開いてください。');
       }
 
       async function loadTemplates() {
@@ -1007,10 +956,8 @@
         renderChecklist(checklist);
         renderIncomplete(buildIncompleteFromChecklist(checklist));
 
-        var logsTask = null;
         var templatesTask = null;
         if (includeAncillary) {
-          logsTask = loadLogs();
           if (canManageTemplates()) {
             templatesTask = loadTemplates();
           }
@@ -1018,9 +965,6 @@
 
         if (templatesTask) {
           await templatesTask;
-        }
-        if (logsTask) {
-          await logsTask;
         }
       }
 
@@ -1150,11 +1094,6 @@
             return refresh();
           });
         });
-        bindButton(elements.loadLogsButton, function () {
-          return runAction(function () {
-            return loadLogs();
-          });
-        });
         bindButton(elements.notifyButton, function () {
           return runAction(function () {
             return notifyIncomplete();
@@ -1230,7 +1169,7 @@
       async function init() {
         bindEvents();
         var initStartedAt = typeof Date === 'function' && typeof Date.now === 'function' ? Date.now() : 0;
-        setText(elements.screenMode, mode === 'admin' ? '管理者 LIFF' : '従業員 LIFF');
+        setText(elements.screenMode, 'チェック LIFF');
         setLinkMode(false);
         emitClientEvent('init.start', {});
         var topHref = '';

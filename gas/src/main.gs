@@ -26,11 +26,8 @@ function doGet(e) {
 
   var mode = (e && e.parameter && e.parameter.mode) || 'user';
   var templateName = 'src/liff/index';
-  if (mode === 'user') {
+  if (mode === 'user' || mode === 'admin') {
     templateName = 'src/liff/user/index';
-  }
-  if (mode === 'admin') {
-    templateName = 'src/liff/admin/index';
   }
 
   return Ogawaya.renderTemplate(templateName, {

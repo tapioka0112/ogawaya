@@ -13,7 +13,7 @@
         <h1 class="hero-title">店舗の確認作業を、<br />その日の状態でそろえる。</h1>
         <p class="hero-copy">
           LINE からそのまま開ける LIFF 画面です。<br />
-          従業員は今日の状態を更新し、管理者は未完了とテンプレート運用を追えます。
+          当日のチェックと未完了確認をシンプルに扱います。
         </p>
         <div class="meta-grid">
           <div class="meta-card">
@@ -25,8 +25,8 @@
             <div class="meta-value">0:00 に前日分を締切</div>
           </div>
           <div class="meta-card">
-            <div class="meta-label">Roles</div>
-            <div class="meta-value">part_time / manager / admin</div>
+            <div class="meta-label">チェック実行者</div>
+            <div class="meta-value">LINE表示名で記録</div>
           </div>
         </div>
       </section>
@@ -34,13 +34,8 @@
       <section class="mode-grid">
         <a class="mode-card" href="<?= appBaseUrl ?>?mode=user">
           <div class="eyebrow">User</div>
-          <h2 class="mode-title">従業員画面</h2>
-          <p class="panel-copy">当日のチェック、取消、未完了確認、履歴参照に絞った LIFF 画面です。</p>
-        </a>
-        <a class="mode-card" href="<?= appBaseUrl ?>?mode=admin">
-          <div class="eyebrow">Admin</div>
-          <h2 class="mode-title">管理者画面</h2>
-          <p class="panel-copy">未完了通知、履歴確認、テンプレート CRUD をまとめて扱う運用画面です。</p>
+          <h2 class="mode-title">チェック画面</h2>
+          <p class="panel-copy">当日のチェック更新と未完了確認に絞った LIFF 画面です。</p>
         </a>
       </section>
     </main>

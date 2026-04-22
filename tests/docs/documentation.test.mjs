@@ -9,17 +9,17 @@ const importCsvHeaders = {
   'docs/operations/import/checklist_templates.csv': 'id,store_id,name,notify_time,closing_time,is_active,created_by,created_at,updated_at',
   'docs/operations/import/checklist_template_items.csv': 'id,template_id,title,description,sort_order,is_required,is_active,created_at,updated_at',
   'docs/operations/import/checklist_runs.csv': 'id,template_id,store_id,target_date,status,notified_at,closed_at,created_at',
-  'docs/operations/import/checklist_run_items.csv': 'id,run_id,template_item_id,title,sort_order,status,checked_by,checked_at,updated_at',
+  'docs/operations/import/checklist_run_items.csv': 'id,run_id,template_item_id,title,sort_order,status,checked_by,checked_by_name,checked_at,updated_at',
   'docs/operations/import/checklist_item_logs.csv': 'id,run_item_id,action,user_id,before_value,after_value,is_after_close,created_at',
   'docs/operations/import/notifications.csv': 'id,store_id,user_id,type,message,status,sent_at,error_message'
 };
 
-test('README に権限・単一店舗前提・/api/link 契約・日次時刻が記載されている', async () => {
+test('README に単一店舗前提・匿名運用・日次時刻・LINE表示名記録が記載されている', async () => {
   const readme = await readFile('README.md', 'utf8');
 
-  assert.match(readme, /part_time \/ manager \/ admin/);
   assert.match(readme, /1ユーザー = 1店舗/);
-  assert.match(readme, /employeeCode \+ passcode/);
+  assert.match(readme, /ALLOW_ANONYMOUS_ACCESS=true/);
+  assert.match(readme, /checked_by_name/);
   assert.match(readme, /10:30/);
   assert.match(readme, /0:00/);
 });
