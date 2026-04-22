@@ -8,11 +8,14 @@ function normalizeLiffId_(value) {
   if (!rawValue) {
     return '';
   }
+  if (/^[0-9]{10}-[A-Za-z0-9]+$/.test(rawValue)) {
+    return rawValue;
+  }
   var extracted = rawValue.match(/(?:https?:\/\/liff\.line\.me\/|line:\/\/app\/)?([0-9]{10}-[A-Za-z0-9]+)/);
   if (extracted && extracted[1]) {
     return extracted[1];
   }
-  return rawValue;
+  return '';
 }
 
 function doGet(e) {

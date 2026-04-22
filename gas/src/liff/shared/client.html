@@ -174,11 +174,14 @@
         if (!rawValue) {
           return '';
         }
+        if (/^[0-9]{10}-[A-Za-z0-9]+$/.test(rawValue)) {
+          return rawValue;
+        }
         var extracted = rawValue.match(/(?:https?:\/\/liff\.line\.me\/|line:\/\/app\/)?([0-9]{10}-[A-Za-z0-9]+)/);
         if (extracted && extracted[1]) {
           return extracted[1];
         }
-        return rawValue;
+        return '';
       }
 
       function getNormalizedLiffId() {
@@ -302,7 +305,8 @@
             throw new Error('LIFF 認証コンテキストを取得できません');
           }
           return buildAuthenticatedContext(idToken, postContext);
-        }
+        },
+        getNormalizedLiffIdForDebug: getNormalizedLiffId
       };
     }
 
@@ -1234,9 +1238,14 @@
         try {
           clearError();
           clearStatus();
+          var rawLiffId = global.OGAWAYA_LIFF_ID ? String(global.OGAWAYA_LIFF_ID) : '';
+          var normalizedLiffId = auth.getNormalizedLiffIdForDebug ? auth.getNormalizedLiffIdForDebug() : '';
           emitClientEvent('init.auth.config', {
-            liffId: global.OGAWAYA_LIFF_ID ? String(global.OGAWAYA_LIFF_ID) : '',
-            liffIdLength: global.OGAWAYA_LIFF_ID ? String(global.OGAWAYA_LIFF_ID).length : 0,
+            liffId: rawLiffId,
+            liffIdLength: rawLiffId.length,
+            normalizedLiffId: normalizedLiffId,
+            normalizedLiffIdLength: normalizedLiffId.length,
+            isLiffIdValid: !!normalizedLiffId,
             allowAnonymousAccess: global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS === true,
             hasLiffObject: !!global.liff,
             hasLiffInit: !!(global.liff && typeof global.liff.init === 'function'),
