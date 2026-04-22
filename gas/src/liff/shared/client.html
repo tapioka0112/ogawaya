@@ -276,6 +276,7 @@
         selectedTemplateId: '',
         selectedTemplateItemId: ''
       };
+      var backgroundRefreshTimer = null;
       var documentRef = options.document;
       var auth = options.auth;
       var api = options.api;
@@ -490,15 +491,116 @@
         return item.checkedByUserId === state.me.userId;
       }
 
+      function findChecklistItemById(runItemId) {
+        if (!state.checklist || !Array.isArray(state.checklist.items)) {
+          return null;
+        }
+        return state.checklist.items.find(function (item) {
+          return item.id === runItemId;
+        }) || null;
+      }
+
+      function recomputeProgress() {
+        if (!state.checklist || !Array.isArray(state.checklist.items)) {
+          return;
+        }
+        var checkedCount = state.checklist.items.filter(function (item) {
+          return item.status === 'checked';
+        }).length;
+        state.checklist.progress = {
+          total: state.checklist.items.length,
+          checked: checkedCount
+        };
+      }
+
+      function upsertIncompleteItemFromChecklistItem(item) {
+        if (!state.incomplete) {
+          return;
+        }
+        var incompleteItems = normalizeArray(state.incomplete.items).filter(function (incompleteItem) {
+          return incompleteItem.id !== item.id;
+        });
+        if (item.status === 'unchecked') {
+          incompleteItems.push({
+            id: item.id,
+            title: item.title
+          });
+        }
+        state.incomplete.items = incompleteItems;
+      }
+
+      function applyChecklistItemUpdate(updatedItem) {
+        if (!updatedItem || !state.checklist || !Array.isArray(state.checklist.items)) {
+          return;
+        }
+        var target = findChecklistItemById(updatedItem.id);
+        if (!target) {
+          return;
+        }
+        target.status = updatedItem.status;
+        target.checkedBy = updatedItem.checkedBy;
+        target.checkedByUserId = updatedItem.checkedByUserId;
+        target.checkedAt = updatedItem.checkedAt;
+        recomputeProgress();
+        upsertIncompleteItemFromChecklistItem(target);
+        renderOverview(state.checklist);
+        renderChecklist(state.checklist);
+        if (state.incomplete) {
+          renderIncomplete(state.incomplete);
+        }
+      }
+
+      function scheduleBackgroundRefresh() {
+        function run() {
+          refresh({
+            includeAncillary: false
+          }).catch(function (error) {
+            setError(error && error.message ? String(error.message) : '最新状態の取得に失敗しました');
+          });
+        }
+
+        if (typeof global.setTimeout !== 'function' || typeof global.clearTimeout !== 'function') {
+          run();
+          return;
+        }
+        if (backgroundRefreshTimer) {
+          global.clearTimeout(backgroundRefreshTimer);
+        }
+        backgroundRefreshTimer = global.setTimeout(function () {
+          backgroundRefreshTimer = null;
+          run();
+        }, 250);
+      }
+
+      function loadAncillaryInBackground() {
+        if (!state.checklist || !state.checklist.runId) {
+          return;
+        }
+        loadLogs().catch(function (error) {
+          setError(error && error.message ? String(error.message) : '履歴の取得に失敗しました');
+        });
+        if (canManageTemplates()) {
+          loadTemplates().catch(function (error) {
+            setError(error && error.message ? String(error.message) : 'テンプレートの取得に失敗しました');
+          });
+        }
+      }
+
       async function handleCheck(runItemId) {
-        await api.checkItem(state.idToken, runItemId, { comment: '' });
-        await refresh();
+        var response = await api.checkItem(state.idToken, runItemId, { comment: '' });
+        if (response && response.item) {
+          applyChecklistItemUpdate(response.item);
+        }
+        scheduleBackgroundRefresh();
         setStatus('チェックを更新しました');
       }
 
       async function handleUncheck(runItemId) {
-        await api.uncheckItem(state.idToken, runItemId, { reason: '' });
-        await refresh();
+        var response = await api.uncheckItem(state.idToken, runItemId, { reason: '' });
+        if (response && response.item) {
+          applyChecklistItemUpdate(response.item);
+        }
+        scheduleBackgroundRefresh();
         setStatus('チェックを取り消しました');
       }
 
@@ -806,10 +908,13 @@
         renderTemplates();
       }
 
-      async function refresh() {
+      async function refresh(options) {
+        var refreshOptions = options || {};
+        var includeAncillary = refreshOptions.includeAncillary !== false;
+        var includeIncomplete = refreshOptions.includeIncomplete !== false;
         clearError();
         var incompleteTask = null;
-        if (api.getTodayIncomplete) {
+        if (includeIncomplete && api.getTodayIncomplete) {
           incompleteTask = api.getTodayIncomplete(state.idToken).then(function (payload) {
             return { ok: true, payload: payload };
           }).catch(function (error) {
@@ -821,10 +926,13 @@
         renderOverview(checklist);
         renderChecklist(checklist);
 
-        var logsTask = loadLogs();
+        var logsTask = null;
         var templatesTask = null;
-        if (canManageTemplates()) {
-          templatesTask = loadTemplates();
+        if (includeAncillary) {
+          logsTask = loadLogs();
+          if (canManageTemplates()) {
+            templatesTask = loadTemplates();
+          }
         }
 
         if (incompleteTask) {
@@ -838,7 +946,9 @@
         if (templatesTask) {
           await templatesTask;
         }
-        await logsTask;
+        if (logsTask) {
+          await logsTask;
+        }
       }
 
       async function createTemplate() {
@@ -1093,7 +1203,10 @@
             language: authResult.context && authResult.context.language ? String(authResult.context.language) : ''
           });
           await loadCurrentUser();
-          await refresh();
+          await refresh({
+            includeAncillary: false
+          });
+          loadAncillaryInBackground();
           emitClientEvent('init.ready', {
             role: state.me && state.me.role ? String(state.me.role) : '',
             elapsedMs: initStartedAt ? Date.now() - initStartedAt : 0
