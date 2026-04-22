@@ -153,6 +153,22 @@ test('テンプレートと項目の一括取得は storage.load を 1 回に抑
   assert.equal(templates[0].items.length, 2);
 });
 
+test('is_active が TRUE/FALSE 表示値でもアクティブ判定できる', async () => {
+  const runtime = await loadGasRuntime();
+  const dataset = createBaseDataset();
+  dataset.checklist_templates[0].is_active = 'TRUE';
+  dataset.checklist_template_items[0].is_active = 'TRUE';
+  dataset.checklist_template_items[1].is_active = 'TRUE';
+  const storage = runtime.Ogawaya.createArrayStorage(dataset);
+  const repository = runtime.Ogawaya.createSpreadsheetRepository({ storage });
+
+  const templates = repository.listActiveTemplatesWithItems('store-001');
+
+  assert.equal(templates.length, 1);
+  assert.equal(templates[0].template.id, 'tmpl-001');
+  assert.equal(templates[0].items.length, 2);
+});
+
 test('runItemIds が既知ならログ一括取得は storage.load を 1 回に抑える', async () => {
   const runtime = await loadGasRuntime();
   let state = createBaseDataset();

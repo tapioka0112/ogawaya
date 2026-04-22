@@ -143,7 +143,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   };
 
   ns.parseBoolean = function (value) {
-    return value === true || value === 'true';
+    if (value === true) {
+      return true;
+    }
+    if (typeof value === 'string') {
+      return value.toLowerCase() === 'true';
+    }
+    return false;
   };
 
   ns.requireString = function (value, fieldName) {
