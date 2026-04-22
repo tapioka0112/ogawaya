@@ -268,6 +268,20 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       });
     }
 
+    function updateRunItemWithLog(runItemId, changes, log) {
+      return commit(function (draftState) {
+        var index = draftState.checklist_run_items.findIndex(function (row) {
+          return row.id === runItemId;
+        });
+        ns.assert(index !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
+        Object.keys(changes).forEach(function (key) {
+          draftState.checklist_run_items[index][key] = changes[key];
+        });
+        draftState.checklist_item_logs.push(ns.clone(log));
+        return ns.clone(draftState.checklist_run_items[index]);
+      });
+    }
+
     function updateRun(runId, changes) {
       return updateRow('checklist_runs', runId, function (row) {
         Object.keys(changes).forEach(function (key) {
@@ -395,6 +409,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       listUsersByStore: listUsersByStore,
       updateRun: updateRun,
       updateRunItem: updateRunItem,
+      updateRunItemWithLog: updateRunItemWithLog,
       updateTemplate: updateTemplate,
       updateTemplateItem: updateTemplateItem
     };

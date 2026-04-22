@@ -115,9 +115,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   }
 
-  function buildLogRow(repository, clock, action, userId, run, runItemId, beforeValue, afterValue) {
+  function buildLogPayload(clock, action, userId, run, runItemId, beforeValue, afterValue) {
     var now = ns.toIsoString(clock.now());
-    return repository.appendLog({
+    return {
       id: Utilities.getUuid(),
       run_item_id: runItemId,
       action: action,
@@ -126,7 +126,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       after_value: ns.jsonStringify(afterValue),
       is_after_close: run.closed_at && now > run.closed_at ? 'true' : 'false',
       created_at: now
-    });
+    };
+  }
+
+  function buildLogRow(repository, clock, action, userId, run, runItemId, beforeValue, afterValue) {
+    return repository.appendLog(
+      buildLogPayload(clock, action, userId, run, runItemId, beforeValue, afterValue)
+    );
   }
 
   function ensureStoreScope(repository, user, storeId) {
@@ -450,14 +456,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         }
 
         var now = ns.toIsoString(clock.now());
-        var updatedItem = repository.updateRunItem(item.id, {
+        var changes = {
           status: ns.ITEM_STATUS.CHECKED,
           checked_by: currentUser.user.id,
           checked_at: now,
           updated_at: now
+        };
+        var afterValue = ns.clone(item);
+        Object.keys(changes).forEach(function (key) {
+          afterValue[key] = changes[key];
         });
-
-        buildLogRow(repository, clock, 'check', currentUser.user.id, run, item.id, beforeValue, updatedItem);
+        var log = buildLogPayload(clock, 'check', currentUser.user.id, run, item.id, beforeValue, afterValue);
+        var updatedItem = repository.updateRunItemWithLog(item.id, changes, log);
         return {
           item: buildRunItemResponse(repository, updatedItem),
           logCreated: true,
@@ -484,14 +494,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         }
 
         var now = ns.toIsoString(clock.now());
-        var updatedItem = repository.updateRunItem(item.id, {
+        var changes = {
           status: ns.ITEM_STATUS.UNCHECKED,
           checked_by: '',
           checked_at: '',
           updated_at: now
+        };
+        var afterValue = ns.clone(item);
+        Object.keys(changes).forEach(function (key) {
+          afterValue[key] = changes[key];
         });
-
-        buildLogRow(repository, clock, 'uncheck', currentUser.user.id, run, item.id, beforeValue, updatedItem);
+        var log = buildLogPayload(clock, 'uncheck', currentUser.user.id, run, item.id, beforeValue, afterValue);
+        var updatedItem = repository.updateRunItemWithLog(item.id, changes, log);
         return {
           item: buildRunItemResponse(repository, updatedItem),
           logCreated: true,
