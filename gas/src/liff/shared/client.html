@@ -241,6 +241,9 @@
           }
 
           if (global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS === true) {
+            if (global.OGAWAYA_TRY_LIFF_AUTH_IN_ANONYMOUS !== true) {
+              return buildAnonymousContext();
+            }
             if (!global.liff || !normalizedLiffId || typeof global.liff.init !== 'function') {
               return buildAnonymousContext();
             }

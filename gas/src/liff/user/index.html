@@ -8,6 +8,7 @@
       window.OGAWAYA_APP_BASE_URL = <?!= JSON.stringify(String(appBaseUrl)).replace(/</g, '\\u003c') ?>;
       window.OGAWAYA_LIFF_ID = <?!= JSON.stringify(String(liffId)).replace(/</g, '\\u003c') ?>;
       window.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = <?!= JSON.stringify(Boolean(allowAnonymousAccess)).replace(/</g, '\\u003c') ?>;
+      window.OGAWAYA_TRY_LIFF_AUTH_IN_ANONYMOUS = false;
     </script>
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <?!= HtmlService.createHtmlOutputFromFile('src/liff/shared/style').getContent(); ?>
