@@ -202,6 +202,19 @@
 
       return {
         initialize: async function () {
+          if (global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS === true) {
+            return {
+              idToken: '',
+              context: {
+                isInClient: false,
+                isLoggedIn: false,
+                os: '',
+                lineVersion: '',
+                language: '',
+                isAnonymous: true
+              }
+            };
+          }
           if (global.__OGAWAYA_MOCK__ && global.__OGAWAYA_MOCK__.idToken) {
             return {
               idToken: global.__OGAWAYA_MOCK__.idToken,
@@ -210,7 +223,8 @@
                 isLoggedIn: true,
                 os: '',
                 lineVersion: '',
-                language: ''
+                language: '',
+                isAnonymous: false
               }
             };
           }
@@ -238,7 +252,14 @@
           }
           return {
             idToken: idToken,
-            context: postContext
+            context: {
+              isInClient: postContext.isInClient,
+              isLoggedIn: postContext.isLoggedIn,
+              os: postContext.os,
+              lineVersion: postContext.lineVersion,
+              language: postContext.language,
+              isAnonymous: false
+            }
           };
         }
       };
@@ -1022,6 +1043,7 @@
           emitClientEvent('init.auth.config', {
             liffId: global.OGAWAYA_LIFF_ID ? String(global.OGAWAYA_LIFF_ID) : '',
             liffIdLength: global.OGAWAYA_LIFF_ID ? String(global.OGAWAYA_LIFF_ID).length : 0,
+            allowAnonymousAccess: global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS === true,
             hasLiffObject: !!global.liff,
             hasLiffInit: !!(global.liff && typeof global.liff.init === 'function'),
             href: global.location && global.location.href ? String(global.location.href) : ''
@@ -1037,6 +1059,7 @@
             idTokenLength: state.idToken ? String(state.idToken).length : 0,
             isInClient: !!(authResult.context && authResult.context.isInClient),
             isLoggedIn: !!(authResult.context && authResult.context.isLoggedIn),
+            isAnonymous: !!(authResult.context && authResult.context.isAnonymous),
             os: authResult.context && authResult.context.os ? String(authResult.context.os) : '',
             lineVersion: authResult.context && authResult.context.lineVersion ? String(authResult.context.lineVersion) : '',
             language: authResult.context && authResult.context.language ? String(authResult.context.language) : ''

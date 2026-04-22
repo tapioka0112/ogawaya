@@ -117,7 +117,11 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   }
 
   ns.createApplication = function (options) {
+    options = options || {};
     var scriptProperties = PropertiesService.getScriptProperties();
+    var allowAnonymousAccess = typeof options.allowAnonymousAccess === 'boolean'
+      ? options.allowAnonymousAccess
+      : scriptProperties.getProperty('ALLOW_ANONYMOUS_ACCESS') === 'true';
     var repository = options.repository || ns.createSpreadsheetRepository({
       storage: options.storage,
       spreadsheetId: options.spreadsheetId || scriptProperties.getProperty('SPREADSHEET_ID')
@@ -136,7 +140,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       identityClient: options.identityClient,
       notificationService: notificationService,
       appBaseUrl: options.appBaseUrl || ScriptApp.getService().getUrl(),
-      lineChannelId: options.lineChannelId || scriptProperties.getProperty('LINE_CHANNEL_ID')
+      lineChannelId: options.lineChannelId || scriptProperties.getProperty('LINE_CHANNEL_ID'),
+      allowAnonymousAccess: allowAnonymousAccess
     });
     var webhookHandler = ns.createWebhookHandler({
       appBaseUrl: options.appBaseUrl || ScriptApp.getService().getUrl(),

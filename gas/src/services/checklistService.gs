@@ -143,6 +143,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var identityClient = options.identityClient || buildDefaultIdentityClient(options.lineChannelId);
     var notificationService = options.notificationService;
     var appBaseUrl = options.appBaseUrl || '';
+    var allowAnonymousAccess = options.allowAnonymousAccess === true;
 
     function resolveIdentity(query) {
       try {
@@ -160,8 +161,56 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }
     }
 
+    function pickAnonymousUser(storeId) {
+      var users = repository.listUsersByStore(storeId);
+      var prioritizedRoles = [ns.ROLES.ADMIN, ns.ROLES.MANAGER, ns.ROLES.PART_TIME];
+      var prioritizedUser = null;
+
+      prioritizedRoles.some(function (role) {
+        prioritizedUser = users.find(function (user) {
+          return user.role === role;
+        }) || null;
+        return !!prioritizedUser;
+      });
+
+      return prioritizedUser || users[0] || null;
+    }
+
+    function resolveAnonymousUser() {
+      var store = repository.listTable('stores').find(function (candidate) {
+        return candidate.status === 'active';
+      }) || null;
+      ns.assert(store, 'config_error', '匿名アクセス用の active store がありません', 500);
+
+      var user = pickAnonymousUser(store.id);
+      ns.assert(user, 'config_error', '匿名アクセス用の active user がありません', 500);
+
+      ns.logEvent('info', 'auth.anonymous.resolve', {
+        storeId: store.id,
+        userId: user.id,
+        role: user.role
+      });
+
+      return {
+        identity: {
+          lineUserId: 'anonymous',
+          displayName: user.name
+        },
+        user: user,
+        store: store
+      };
+    }
+
     function requireAuthenticatedUser(query) {
-      var identity = resolveIdentity(query);
+      var safeQuery = query || {};
+      if (!safeQuery.idToken) {
+        if (allowAnonymousAccess) {
+          return resolveAnonymousUser();
+        }
+        throw ns.createError('unauthorized', 'LIFF 認証コンテキストがありません', 401);
+      }
+
+      var identity = resolveIdentity(safeQuery);
       var user = repository.findLinkedUserByLineUserId(identity.lineUserId);
       ns.logEvent('info', 'auth.user.lookup', {
         lineUserId: summarizeId(identity.lineUserId),

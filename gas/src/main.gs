@@ -1,7 +1,13 @@
+function allowAnonymousAccessEnabled_() {
+  var rawValue = PropertiesService.getScriptProperties().getProperty('ALLOW_ANONYMOUS_ACCESS');
+  return rawValue !== 'false';
+}
+
 function doGet(e) {
   var request = Ogawaya.extractRequest(e, 'GET');
   var appBaseUrl = ScriptApp.getService().getUrl();
   var liffId = PropertiesService.getScriptProperties().getProperty('LIFF_ID') || '';
+  var allowAnonymousAccess = allowAnonymousAccessEnabled_();
   var queryKeys = Object.keys((e && e.parameter) || {});
   Ogawaya.writeDebugEvent('doGet', {
     path: request.path,
@@ -9,10 +15,13 @@ function doGet(e) {
     appBaseUrl: appBaseUrl,
     queryKeys: queryKeys,
     hasLiffId: !!liffId,
-    liffIdLength: String(liffId).length
+    liffIdLength: String(liffId).length,
+    allowAnonymousAccess: allowAnonymousAccess
   });
   if (request.path.indexOf('/api/') === 0) {
-    return Ogawaya.toTextOutput(Ogawaya.createApplication({}).handleApiRequest(request));
+    return Ogawaya.toTextOutput(Ogawaya.createApplication({
+      allowAnonymousAccess: allowAnonymousAccess
+    }).handleApiRequest(request));
   }
 
   var mode = (e && e.parameter && e.parameter.mode) || 'user';
@@ -27,18 +36,23 @@ function doGet(e) {
   return Ogawaya.renderTemplate(templateName, {
     appBaseUrl: appBaseUrl,
     mode: mode,
-    liffId: liffId
+    liffId: liffId,
+    allowAnonymousAccess: allowAnonymousAccess
   });
 }
 
 function doPost(e) {
   var request = Ogawaya.extractRequest(e, 'POST');
   var appBaseUrl = ScriptApp.getService().getUrl();
+  var allowAnonymousAccess = allowAnonymousAccessEnabled_();
   Ogawaya.writeDebugEvent('doPost', {
     path: request.path,
-    appBaseUrl: appBaseUrl
+    appBaseUrl: appBaseUrl,
+    allowAnonymousAccess: allowAnonymousAccess
   });
-  var app = Ogawaya.createApplication({});
+  var app = Ogawaya.createApplication({
+    allowAnonymousAccess: allowAnonymousAccess
+  });
   if (request.path === '/webhook' || request.path === '/api/webhook') {
     return Ogawaya.toTextOutput(app.handleWebhook({
       body: e.postData.contents,
@@ -58,7 +72,9 @@ function bootstrapSpreadsheetTemplates() {
 
 function handleClientApi(request) {
   var safeRequest = request && typeof request === 'object' ? request : {};
-  var response = Ogawaya.createApplication({}).handleApiRequest({
+  var response = Ogawaya.createApplication({
+    allowAnonymousAccess: allowAnonymousAccessEnabled_()
+  }).handleApiRequest({
     method: Ogawaya.normalizeMethod(safeRequest.method, 'GET'),
     path: safeRequest.path || '/',
     query: safeRequest.query || {},

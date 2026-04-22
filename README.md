@@ -13,7 +13,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - 初期版は `1ユーザー = 1店舗` 前提で運用する。複数店舗の横断閲覧は対象外。
 - ロールは `part_time / manager / admin`。業務上は `part_time=アルバイト`、`manager=店長・部署責任者`、`admin=本部担当者` として扱う。
 - LINEメニューは全ロール共通で `今日のチェックリスト / 未完了一覧 / 履歴を見る / ヘルプ` を表示する。
-- `/api/link` は `employeeCode + passcode` を受け取り、`lineUserI はLIFF認証コンテキストからサーバー側で取得する。
+- `/api/link` は `employeeCode + passcode` を受け取り、`lineUserId` は LIFF 認証コンテキストからサーバー側で取得する。
 - `/api/link` のリクエストボディは `employeeCode` と `passcode` の2項目のみを受け付ける。
 - 性能目標は `today` 取得2秒以内、チェック操作1秒以内。
 
@@ -23,6 +23,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - Webhook を将来使う場合のみ、`X-Line-Signature` を `signature` クエリとして渡せる受信経路を別途用意する。
 - `users` シートには `/api/link` 用の `passcode` 列を持たせる。
 - GAS Web App は `GET` / `POST` だけを直接受けるため、`PUT` / `DELETE` は `_method` クエリでメソッドオーバーライドして扱う。
+- MVP では `ALLOW_ANONYMOUS_ACCESS=true` で LIFF 認証をスキップし、`users` の既存アカウント（優先順位: `admin > manager > part_time`）を実行ユーザーとして扱える。
 
 ## 目的
 - 店舗別の日次チェックリストをLINE上で共有する。
@@ -78,12 +79,13 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 1. [gas/.clasp.json](/home/sota411/Documents/project/ogawaya/gas/.clasp.json) の `scriptId` を設定する。
 2. [gas/appsscript.json](/home/sota411/Documents/project/ogawaya/gas/appsscript.json) の必要権限（External Request / Spreadsheet）を設定する。
 3. `gas/src` 配下の `.gs` / `.html` を実装する。
-4. `clasp push` で反映する。
-5. Trigger を2本作成する。
+4. Script Properties に `ALLOW_ANONYMOUS_ACCESS` を設定する（MVPは `true` 推奨）。
+5. `clasp push` で反映する。
+6. Trigger を2本作成する。
    - 10:30: `runDailyStart`
    - 0:00: `runDailyClosing`
-6. LIFF URLをLINEリッチメニューに紐づける。
-7. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
+7. LIFF URLをLINEリッチメニューに紐づける。
+8. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
 
 詳細な初期データ投入と運用手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照する。
 

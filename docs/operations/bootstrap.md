@@ -31,6 +31,7 @@
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LIFF_ID`
+- `ALLOW_ANONYMOUS_ACCESS`（MVP は `true` 推奨）
 
 コピペ用のテンプレートは [script-properties.example.json](./import/script-properties.example.json) を使う。
 
@@ -69,7 +70,8 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 
 ## 5. LIFF
 
-- `/api/link` は `idToken` をクエリに付け、本文は `employeeCode` と `passcode` のみ送る。
+- `ALLOW_ANONYMOUS_ACCESS=true` の場合、LIFF 認証はスキップして画面を直接利用する。
+- `ALLOW_ANONYMOUS_ACCESS=false` の場合のみ、`/api/link` は `idToken` をクエリに付け、本文は `employeeCode` と `passcode` のみ送る。
 - 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` にする。
 
 ## 6. Trigger

@@ -241,6 +241,17 @@ function createTemplatesPayload() {
   };
 }
 
+test('匿名アクセス有効時は LIFF SDK なしでも初期化できる', async () => {
+  const { client, context } = await loadClientModule();
+  context.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = true;
+  const auth = client.createAuth();
+
+  const result = await auth.initialize();
+
+  assert.equal(result.idToken, '');
+  assert.equal(result.context.isAnonymous, true);
+});
+
 test('LIFF 初期化失敗時はユーザー向けエラーを表示する', async () => {
   const { client } = await loadClientModule();
   const documentRef = createFakeDocument();
