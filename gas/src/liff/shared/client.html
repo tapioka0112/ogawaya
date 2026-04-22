@@ -170,7 +170,7 @@
 
     function createAuth() {
       function getNormalizedLiffId() {
-        return String(global.OGAWAYA_LIFF_ID || '').trim();
+        return String(global.OGAWAYA_LIFF_ID || '').replace(/\s+/g, '');
       }
 
       function buildAnonymousContext() {
@@ -245,10 +245,14 @@
               return buildAnonymousContext();
             }
             var anonymousPreContext = buildRuntimeContext();
-            await global.liff.init({
-              liffId: normalizedLiffId,
-              withLoginOnExternalBrowser: !anonymousPreContext.isInClient
-            });
+            try {
+              await global.liff.init({
+                liffId: normalizedLiffId,
+                withLoginOnExternalBrowser: !anonymousPreContext.isInClient
+              });
+            } catch (error) {
+              return buildAnonymousContext();
+            }
             var anonymousPostContext = buildRuntimeContext();
             var anonymousIdToken = typeof global.liff.getIDToken === 'function'
               ? global.liff.getIDToken()
@@ -380,9 +384,7 @@
         }
 
         // google.script.run のキュー詰まりを避けるため、まず HTTP で送る。
-        if (sendViaHttp()) {
-          return;
-        }
+        sendViaHttp();
         if (!global.google || !global.google.script || !global.google.script.run) {
           return;
         }
