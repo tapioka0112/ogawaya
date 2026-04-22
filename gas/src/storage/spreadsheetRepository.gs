@@ -285,6 +285,24 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function updateRunItemWithLog(runItemId, changes, log) {
+      if (storage && typeof storage.updateRunItemWithLog === 'function') {
+        var state = readState();
+        var runItemIndex = state.checklist_run_items.findIndex(function (row) {
+          return row.id === runItemId;
+        });
+        ns.assert(runItemIndex !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
+        var updatedRow = ns.clone(state.checklist_run_items[runItemIndex]);
+        Object.keys(changes).forEach(function (key) {
+          updatedRow[key] = changes[key];
+        });
+        validateRow('checklist_run_items', updatedRow);
+        validateRow('checklist_item_logs', log);
+        storage.updateRunItemWithLog(runItemId, ns.clone(updatedRow), ns.clone(log));
+        state.checklist_run_items[runItemIndex] = ns.clone(updatedRow);
+        state.checklist_item_logs.push(ns.clone(log));
+        cachedState = ensureStateShape(state);
+        return ns.clone(updatedRow);
+      }
       return commit(function (draftState) {
         var index = draftState.checklist_run_items.findIndex(function (row) {
           return row.id === runItemId;
@@ -706,6 +724,78 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }
     }
 
+    function buildRowValues(sheetName, row) {
+      var headers = ns.SHEET_DEFINITIONS[sheetName];
+      return headers.map(function (header) {
+        return row[header] == null ? '' : String(row[header]);
+      });
+    }
+
+    function ensureSheetHeader(sheet, sheetName) {
+      var headers = ns.SHEET_DEFINITIONS[sheetName];
+      var lastRow = sheet.getLastRow();
+      if (lastRow < 1) {
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        return;
+      }
+      var headerValues = sheet.getRange(1, 1, 1, headers.length).getDisplayValues()[0];
+      var isSameHeader = headers.every(function (header, index) {
+        return String(headerValues[index] == null ? '' : headerValues[index]) === header;
+      });
+      if (!isSameHeader) {
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      }
+    }
+
+    function findDataRowById(sheet, sheetName, rowId) {
+      var headers = ns.SHEET_DEFINITIONS[sheetName];
+      var idColumnIndex = headers.indexOf('id') + 1;
+      ns.assert(idColumnIndex > 0, 'config_error', sheetName + ' に id 列がありません', 500);
+      var lastRow = sheet.getLastRow();
+      ns.assert(lastRow >= 2, 'not_found', sheetName + ' が見つかりません', 404);
+      var idValues = sheet.getRange(2, idColumnIndex, lastRow - 1, 1).getDisplayValues();
+      for (var offset = 0; offset < idValues.length; offset += 1) {
+        if (String(idValues[offset][0] == null ? '' : idValues[offset][0]) === rowId) {
+          return offset + 2;
+        }
+      }
+      ns.assert(false, 'not_found', sheetName + ' が見つかりません', 404);
+    }
+
+    function appendRowToSheet(sheet, sheetName, row) {
+      var headers = ns.SHEET_DEFINITIONS[sheetName];
+      var nextRow = sheet.getLastRow() + 1;
+      if (nextRow < 2) {
+        nextRow = 2;
+      }
+      sheet.getRange(nextRow, 1, 1, headers.length).setValues([buildRowValues(sheetName, row)]);
+    }
+
+    function updateRunItemWithLog(runItemId, updatedRunItem, log) {
+      var spreadsheet = getSpreadsheet();
+      var runItemsSheet = spreadsheet.getSheetByName('checklist_run_items') || spreadsheet.insertSheet('checklist_run_items');
+      var logsSheet = spreadsheet.getSheetByName('checklist_item_logs') || spreadsheet.insertSheet('checklist_item_logs');
+      ensureSheetHeader(runItemsSheet, 'checklist_run_items');
+      ensureSheetHeader(logsSheet, 'checklist_item_logs');
+
+      var runItemRow = findDataRowById(runItemsSheet, 'checklist_run_items', runItemId);
+      runItemsSheet
+        .getRange(runItemRow, 1, 1, ns.SHEET_DEFINITIONS.checklist_run_items.length)
+        .setValues([buildRowValues('checklist_run_items', updatedRunItem)]);
+      appendRowToSheet(logsSheet, 'checklist_item_logs', log);
+
+      var currentState = lastLoadedState || load();
+      var nextState = ns.clone(currentState);
+      var runItemIndex = nextState.checklist_run_items.findIndex(function (row) {
+        return row.id === runItemId;
+      });
+      ns.assert(runItemIndex !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
+      nextState.checklist_run_items[runItemIndex] = ns.clone(updatedRunItem);
+      nextState.checklist_item_logs.push(ns.clone(log));
+      lastLoadedState = ns.clone(nextState);
+      writeStateToCache(getScriptCache(), nextState);
+    }
+
     function load() {
       var cache = getScriptCache();
       var cachedState = readStateFromCache(cache);
@@ -776,7 +866,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
     return {
       load: load,
-      save: save
+      save: save,
+      updateRunItemWithLog: updateRunItemWithLog
     };
   };
 
