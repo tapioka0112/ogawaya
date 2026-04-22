@@ -7,9 +7,33 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     });
   }
 
+  function summarizeId(value) {
+    var normalized = String(value || '');
+    if (!normalized) {
+      return '';
+    }
+    if (normalized.length <= 10) {
+      return normalized;
+    }
+    return normalized.slice(0, 4) + '...' + normalized.slice(-4);
+  }
+
+  function buildErrorLog(error) {
+    return {
+      code: error && error.code ? String(error.code) : '',
+      statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
+      message: error && error.message ? String(error.message) : ''
+    };
+  }
+
   function buildDefaultIdentityClient(channelId) {
     return {
       verifyIdToken: function (idToken) {
+        ns.logEvent('info', 'auth.verify.request', {
+          channelConfigured: !!channelId,
+          hasIdToken: !!idToken,
+          idTokenLength: idToken ? String(idToken).length : 0
+        });
         ns.assert(channelId, 'config_error', 'LINE_CHANNEL_ID が未設定です', 500);
         ns.assert(idToken, 'unauthorized', 'LIFF 認証コンテキストがありません', 401);
         var response = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify', {
@@ -19,9 +43,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             client_id: channelId
           }
         });
+        ns.logEvent('info', 'auth.verify.response', {
+          responseCode: Number(response.getResponseCode())
+        });
         ns.assert(response.getResponseCode() === 200, 'unauthorized', 'LIFF 認証の検証に失敗しました', 401);
         var payload = JSON.parse(response.getContentText());
         ns.assert(payload.sub, 'internal_error', 'LINE verify 応答に sub が含まれていません', 500);
+        ns.logEvent('info', 'auth.verify.success', {
+          lineUserId: summarizeId(payload.sub),
+          hasDisplayName: !!payload.name
+        });
         return {
           lineUserId: payload.sub,
           displayName: payload.name || ''
@@ -115,8 +146,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
     function resolveIdentity(query) {
       try {
-        return identityClient.verifyIdToken(query.idToken);
+        var identity = identityClient.verifyIdToken(query.idToken);
+        ns.logEvent('info', 'auth.resolve.success', {
+          lineUserId: summarizeId(identity.lineUserId)
+        });
+        return identity;
       } catch (error) {
+        ns.logEvent('error', 'auth.resolve.failed', buildErrorLog(error));
         if (error && (error.statusCode || error.code)) {
           throw error;
         }
@@ -127,6 +163,11 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     function requireAuthenticatedUser(query) {
       var identity = resolveIdentity(query);
       var user = repository.findLinkedUserByLineUserId(identity.lineUserId);
+      ns.logEvent('info', 'auth.user.lookup', {
+        lineUserId: summarizeId(identity.lineUserId),
+        linked: !!user,
+        userId: user ? user.id : ''
+      });
       ns.assert(user, 'unauthorized', 'LINE 連携済みユーザーではありません', 401);
       return {
         identity: identity,
@@ -244,7 +285,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         ns.assert(keys.length === 2 && keys.indexOf('employeeCode') !== -1 && keys.indexOf('passcode') !== -1, 'invalid_request', 'employeeCode と passcode のみ指定できます', 400);
 
         var identity = resolveIdentity(query);
+        ns.logEvent('info', 'auth.link.request', {
+          employeeCode: body.employeeCode || '',
+          lineUserId: summarizeId(identity.lineUserId)
+        });
         var user = repository.findUserByEmployeeCodeAndPasscode(body.employeeCode, body.passcode);
+        ns.logEvent('info', 'auth.link.userMatch', {
+          employeeCode: body.employeeCode || '',
+          matched: !!user,
+          userId: user ? user.id : ''
+        });
         ns.assert(user, 'unauthorized', '社員コードまたはパスコードが不正です', 401);
 
         repository.createLineAccountLink({
@@ -253,6 +303,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           line_user_id: identity.lineUserId,
           display_name: identity.displayName || '',
           linked_at: ns.toIsoString(clock.now())
+        });
+        ns.logEvent('info', 'auth.link.success', {
+          userId: user.id,
+          lineUserId: summarizeId(identity.lineUserId)
         });
 
         return {

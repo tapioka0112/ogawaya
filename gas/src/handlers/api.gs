@@ -31,6 +31,24 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var method = request.method;
     var path = request.path;
 
+    if ((method === 'POST' || method === 'GET') && path === '/api/client-events') {
+      var source = method === 'POST' ? (request.body || {}) : (request.query || {});
+      ns.writeDebugEvent('api.client-events', {
+        path: path,
+        name: source.name || ''
+      });
+      ns.logEvent('info', 'client.event.http', {
+        name: source.name || '',
+        mode: source.mode || '',
+        details: source.details || {
+          message: source.message || '',
+          code: source.code || '',
+          statusCode: source.statusCode || ''
+        }
+      });
+      return ns.createJsonResponse(200, { ok: true });
+    }
+
     if (method === 'GET' && path === '/api/me') {
       return ns.createJsonResponse(200, service.getMe(request.query));
     }
@@ -133,8 +151,21 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       handleWebhook: webhookHandler.handleWebhook,
       handleApiRequest: function (request) {
         try {
-          return routeApiRequest(checklistService, request);
+          var response = routeApiRequest(checklistService, request);
+          ns.logEvent('info', 'api.request.success', {
+            method: request.method,
+            path: request.path,
+            statusCode: response.statusCode
+          });
+          return response;
         } catch (error) {
+          ns.logEvent('error', 'api.request.failed', {
+            method: request.method,
+            path: request.path,
+            code: error && error.code ? String(error.code) : '',
+            statusCode: error && error.statusCode ? Number(error.statusCode) : 500,
+            message: error && error.message ? String(error.message) : ''
+          });
           return ns.mapErrorToResponse(error);
         }
       },

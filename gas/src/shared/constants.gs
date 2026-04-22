@@ -206,6 +206,54 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     });
   };
 
+  ns.logEvent = function (level, eventName, details) {
+    var payload = {
+      level: level,
+      event: eventName,
+      at: ns.toIsoString(new Date()),
+      details: details || {}
+    };
+    var message = JSON.stringify(payload);
+    console.log(message);
+    if (typeof Logger !== 'undefined' && Logger && typeof Logger.log === 'function') {
+      Logger.log(message);
+    }
+  };
+
+  ns.writeDebugEvent = function (source, details) {
+    var payload = {
+      source: String(source || ''),
+      at: ns.toIsoString(new Date()),
+      details: details || {}
+    };
+    ns.logEvent('info', 'debug.event', payload);
+
+    try {
+      var spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+      if (!spreadsheetId) {
+        return;
+      }
+      var spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+      var sheet = spreadsheet.getSheetByName('debug_events') || spreadsheet.insertSheet('debug_events');
+
+      if (sheet.getLastRow() === 0) {
+        sheet.getRange(1, 1, 1, 5).setValues([['at', 'source', 'path', 'name', 'details']]);
+      }
+
+      sheet.appendRow([
+        payload.at,
+        payload.source,
+        String((payload.details && payload.details.path) || ''),
+        String((payload.details && payload.details.name) || ''),
+        JSON.stringify(payload.details || {})
+      ]);
+    } catch (error) {
+      ns.logEvent('error', 'debug.event.persist_failed', {
+        message: error && error.message ? String(error.message) : ''
+      });
+    }
+  };
+
   ns.normalizeMethod = function (method, fallbackMethod) {
     return String(method || fallbackMethod || 'GET').toUpperCase();
   };

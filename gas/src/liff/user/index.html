@@ -35,7 +35,26 @@
         </div>
       </section>
 
-      <section class="content-grid">
+      <section class="panel" id="link-panel" hidden>
+        <div class="eyebrow">First Link</div>
+        <h2 class="panel-title">LINE 連携</h2>
+        <p class="panel-copy">社員コードとパスコードを入力して、最初の連携を完了してください。</p>
+        <div class="form-grid">
+          <label class="field-card">
+            <span class="field-label">社員コード</span>
+            <input class="text-input" id="link-employee-code-input" type="text" autocomplete="username" />
+          </label>
+          <label class="field-card">
+            <span class="field-label">パスコード</span>
+            <input class="text-input" id="link-passcode-input" type="password" autocomplete="current-password" />
+          </label>
+        </div>
+        <div class="button-row" style="margin-top: 12px;">
+          <button class="action-button" id="link-account-button" type="button">連携する</button>
+        </div>
+      </section>
+
+      <section class="content-grid" id="main-content">
         <section class="panel">
           <div class="panel-head">
             <div>
@@ -91,15 +110,58 @@
     </main>
     <?!= HtmlService.createHtmlOutputFromFile('src/liff/shared/client').getContent(); ?>
     <script>
-      window.addEventListener('DOMContentLoaded', function () {
-        var controller = window.OgawayaLiff.createController({
-          document: document,
-          auth: window.OgawayaLiff.createAuth(),
-          api: window.OgawayaLiff.createApi(window.OGAWAYA_APP_BASE_URL),
-          mode: 'user'
-        });
-        controller.init();
-      });
+      (function () {
+        function boot() {
+          try {
+            if (!window.OgawayaLiff || typeof window.OgawayaLiff.createController !== 'function') {
+              var bootErrorBox = document.getElementById('error-message');
+              if (bootErrorBox) {
+                bootErrorBox.textContent = '初期化スクリプトの読み込みに失敗しました。画面を再読み込みしてください。';
+                bootErrorBox.dataset.visible = 'true';
+              }
+              if (window.google && window.google.script && window.google.script.run) {
+                window.google.script.run.withFailureHandler(function () {}).logClientEvent({
+                  name: 'boot.error',
+                  mode: 'user',
+                  details: {
+                    reason: 'OgawayaLiff missing'
+                  }
+                });
+              }
+              return;
+            }
+            var controller = window.OgawayaLiff.createController({
+              document: document,
+              auth: window.OgawayaLiff.createAuth(),
+              api: window.OgawayaLiff.createApi(window.OGAWAYA_APP_BASE_URL),
+              mode: 'user',
+              appBaseUrl: window.OGAWAYA_APP_BASE_URL
+            });
+            controller.init();
+          } catch (error) {
+            var errorBox = document.getElementById('error-message');
+            if (errorBox) {
+              errorBox.textContent = error && error.message ? error.message : 'LIFF の初期化に失敗しました';
+              errorBox.dataset.visible = 'true';
+            }
+            if (window.google && window.google.script && window.google.script.run) {
+              window.google.script.run.withFailureHandler(function () {}).logClientEvent({
+                name: 'boot.exception',
+                mode: 'user',
+                details: {
+                  message: error && error.message ? String(error.message) : ''
+                }
+              });
+            }
+          }
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', boot, { once: true });
+          return;
+        }
+        boot();
+      })();
     </script>
   </body>
 </html>

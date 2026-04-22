@@ -79,6 +79,11 @@ function createFakeDocument() {
     ['div', 'target-date'],
     ['div', 'progress-summary'],
     ['ul', 'checklist-items'],
+    ['section', 'main-content'],
+    ['section', 'link-panel'],
+    ['input', 'link-employee-code-input'],
+    ['input', 'link-passcode-input'],
+    ['button', 'link-account-button'],
     ['button', 'refresh-button'],
     ['section', 'admin-panel'],
     ['div', 'screen-mode'],
@@ -284,6 +289,34 @@ test('/api/me 取得失敗時はエラーを表示する', async () => {
   assert.match(documentRef.elements['error-message'].textContent, /未認証/);
 });
 
+test('/api/me が unauthorized(401) のときは連携フォームを表示する', async () => {
+  const { client } = await loadClientModule();
+  const documentRef = createFakeDocument();
+  const controller = client.createController({
+    document: documentRef,
+    auth: {
+      async initialize() {
+        return { idToken: 'token' };
+      }
+    },
+    api: {
+      async getMe() {
+        const error = new Error('LIFF 認証コンテキストがありません');
+        error.code = 'unauthorized';
+        error.statusCode = 401;
+        throw error;
+      }
+    },
+    mode: 'user'
+  });
+
+  await controller.init();
+
+  assert.equal(documentRef.elements['link-panel'].hidden, false);
+  assert.equal(documentRef.elements['main-content'].hidden, true);
+  assert.equal(documentRef.elements['status-message'].dataset.visible, 'true');
+});
+
 test('ロール別表示に分岐する', async () => {
   const { client } = await loadClientModule();
   const documentRef = createFakeDocument();
@@ -392,6 +425,88 @@ test('createApi は GAS 応答の ok=false をエラーとして扱う', async (
     api.getMe('token'),
     /未認証/
   );
+});
+
+test('createApi は google.script.run が使える場合に GAS ブリッジを優先する', async () => {
+  const { client, context } = await loadClientModule();
+  const api = client.createApi('https://example.com/exec');
+  let calledRequest = null;
+  let fetchCalled = false;
+
+  context.fetch = async () => {
+    fetchCalled = true;
+    return {
+      ok: true,
+      async json() {
+        return { ok: true, statusCode: 200 };
+      }
+    };
+  };
+  context.google = {
+    script: {
+      run: {
+        withSuccessHandler(handler) {
+          this.successHandler = handler;
+          return this;
+        },
+        withFailureHandler(handler) {
+          this.failureHandler = handler;
+          return this;
+        },
+        handleClientApi(request) {
+          calledRequest = request;
+          this.successHandler({
+            ok: true,
+            statusCode: 200,
+            userId: 'user-001'
+          });
+        }
+      }
+    }
+  };
+
+  const payload = await api.getMe('token');
+
+  assert.equal(fetchCalled, false);
+  assert.deepEqual(toPlainJson(calledRequest), {
+    method: 'GET',
+    path: '/api/me',
+    query: {
+      idToken: 'token'
+    },
+    body: {}
+  });
+  assert.equal(payload.userId, 'user-001');
+});
+
+test('createApi は google.script.run 経由の API エラーをそのまま扱う', async () => {
+  const { client, context } = await loadClientModule();
+  const api = client.createApi('https://example.com/exec');
+
+  context.google = {
+    script: {
+      run: {
+        withSuccessHandler(handler) {
+          this.successHandler = handler;
+          return this;
+        },
+        withFailureHandler(handler) {
+          this.failureHandler = handler;
+          return this;
+        },
+        handleClientApi() {
+          this.successHandler({
+            ok: false,
+            statusCode: 401,
+            code: 'unauthorized',
+            message: '未認証です'
+          });
+        }
+      }
+    }
+  };
+
+  await assert.rejects(api.getMe('token'), /未認証です/);
 });
 
 test('createApi は checklist 操作と履歴 API を呼び分ける', async () => {

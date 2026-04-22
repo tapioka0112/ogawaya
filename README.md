@@ -13,7 +13,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - 初期版は `1ユーザー = 1店舗` 前提で運用する。複数店舗の横断閲覧は対象外。
 - ロールは `part_time / manager / admin`。業務上は `part_time=アルバイト`、`manager=店長・部署責任者`、`admin=本部担当者` として扱う。
 - LINEメニューは全ロール共通で `今日のチェックリスト / 未完了一覧 / 履歴を見る / ヘルプ` を表示する。
-- `/api/link` は `employeeCode + passcode` を受け取り、`lineUserId` はLIFF認証コンテキストからサーバー側で取得する。
+- `/api/link` は `employeeCode + passcode` を受け取り、`lineUserI はLIFF認証コンテキストからサーバー側で取得する。
 - `/api/link` のリクエストボディは `employeeCode` と `passcode` の2項目のみを受け付ける。
 - 性能目標は `today` 取得2秒以内、チェック操作1秒以内。
 

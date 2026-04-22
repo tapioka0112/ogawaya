@@ -22,8 +22,77 @@
     function createApi(baseUrl) {
       var normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
+      function canUseGoogleScriptRunner() {
+        return !!(
+          global.google &&
+          global.google.script &&
+          global.google.script.run &&
+          typeof global.google.script.run.withSuccessHandler === 'function' &&
+          typeof global.google.script.run.withFailureHandler === 'function'
+        );
+      }
+
+      function toError(value) {
+        if (value instanceof Error) {
+          return value;
+        }
+        if (value && typeof value.message === 'string') {
+          return new Error(value.message);
+        }
+        return new Error(String(value || 'API request failed'));
+      }
+
+      function ensureSuccessPayload(payload, fallbackStatusCode) {
+        var statusCode = payload && typeof payload.statusCode === 'number'
+          ? payload.statusCode
+          : Number(payload && payload.statusCode) || fallbackStatusCode || 500;
+        if (!payload || payload.ok === false || statusCode >= 400) {
+          var error = new Error((payload && payload.message) || 'API request failed');
+          error.code = (payload && payload.code) || '';
+          error.statusCode = statusCode;
+          throw error;
+        }
+        return payload;
+      }
+
+      function requestViaGoogleScriptRunner(requestPayload) {
+        return new Promise(function (resolve, reject) {
+          try {
+            global.google.script.run
+              .withSuccessHandler(function (payload) {
+                resolve(payload);
+              })
+              .withFailureHandler(function (error) {
+                reject(toError(error));
+              })
+              .handleClientApi(requestPayload);
+          } catch (error) {
+            reject(toError(error));
+          }
+        });
+      }
+
       async function request(method, path, idToken, body, query) {
         var queryParams = {};
+        var requestBody = body || {};
+
+        if (idToken) {
+          queryParams.idToken = idToken;
+        }
+        Object.keys(query || {}).forEach(function (key) {
+          queryParams[key] = query[key];
+        });
+
+        if (canUseGoogleScriptRunner()) {
+          var bridgePayload = await requestViaGoogleScriptRunner({
+            method: method,
+            path: path,
+            query: queryParams,
+            body: requestBody
+          });
+          return ensureSuccessPayload(bridgePayload, 200);
+        }
+
         var actualMethod = method;
         var url = normalizedBaseUrl + path;
         var options = {
@@ -32,35 +101,26 @@
             'Content-Type': 'application/json'
           }
         };
-
-        if (idToken) {
-          queryParams.idToken = idToken;
-        }
-        Object.keys(query || {}).forEach(function (key) {
-          queryParams[key] = query[key];
-        });
         if (method === 'PUT' || method === 'DELETE') {
           actualMethod = 'POST';
           queryParams._method = method;
         }
         url = appendQuery(url, queryParams);
         options.method = actualMethod;
-
         if (actualMethod !== 'GET') {
-          options.body = JSON.stringify(body || {});
+          options.body = JSON.stringify(requestBody);
         }
-
         var response = await global.fetch(url, options);
         var payload = await response.json();
-        if (!response.ok || payload.ok === false || payload.statusCode >= 400) {
-          throw new Error(payload.message || 'API request failed');
-        }
-        return payload;
+        return ensureSuccessPayload(payload, response.status);
       }
 
       return {
         getMe: function (idToken) {
           return request('GET', '/api/me', idToken);
+        },
+        linkAccount: function (idToken, body) {
+          return request('POST', '/api/link', idToken, body);
         },
         getTodayChecklist: function (idToken) {
           return request('GET', '/api/checklists/today', idToken);
@@ -150,6 +210,7 @@
       var auth = options.auth;
       var api = options.api;
       var mode = options.mode;
+      var appBaseUrl = normalizeBaseUrl(options.appBaseUrl || global.OGAWAYA_APP_BASE_URL || '');
       var elements = {
         errorBox: documentRef.getElementById('error-message'),
         statusBox: documentRef.getElementById('status-message'),
@@ -158,6 +219,11 @@
         targetDate: documentRef.getElementById('target-date'),
         progressSummary: documentRef.getElementById('progress-summary'),
         checklistItems: documentRef.getElementById('checklist-items'),
+        mainContent: documentRef.getElementById('main-content'),
+        linkPanel: documentRef.getElementById('link-panel'),
+        linkEmployeeCodeInput: documentRef.getElementById('link-employee-code-input'),
+        linkPasscodeInput: documentRef.getElementById('link-passcode-input'),
+        linkAccountButton: documentRef.getElementById('link-account-button'),
         refreshButton: documentRef.getElementById('refresh-button'),
         adminPanel: documentRef.getElementById('admin-panel'),
         screenMode: documentRef.getElementById('screen-mode'),
@@ -199,6 +265,64 @@
         return !!(state.me && isManagerRole(state.me.role) && mode === 'admin');
       }
 
+      function isUnlinkedUserError(error) {
+        return !!(error && String(error.message || '').indexOf('LINE 連携済みユーザーではありません') !== -1);
+      }
+
+      function emitClientEvent(name, details) {
+        var payload = {
+          name: String(name || ''),
+          mode: mode,
+          details: details || {}
+        };
+
+        function sendHttpFallback() {
+          if (!appBaseUrl || !global.fetch) {
+            return;
+          }
+          var query = {
+            name: payload.name,
+            mode: payload.mode,
+            message: payload.details && payload.details.message ? String(payload.details.message) : '',
+            code: payload.details && payload.details.code ? String(payload.details.code) : '',
+            statusCode: payload.details && payload.details.statusCode ? String(payload.details.statusCode) : ''
+          };
+          var url = appendQuery(appBaseUrl + '/api/client-events', query);
+          global.fetch(url, { method: 'GET' }).catch(function () {});
+        }
+
+        if (!global.google || !global.google.script || !global.google.script.run) {
+          sendHttpFallback();
+          return;
+        }
+        try {
+          global.google.script.run
+            .withFailureHandler(function () {
+              sendHttpFallback();
+            })
+            .logClientEvent(payload);
+        } catch (error) {
+          // クライアントログ送信は本処理を阻害しない
+          sendHttpFallback();
+        }
+      }
+
+      function isUnauthorizedError(error) {
+        if (!error) {
+          return false;
+        }
+        return error.statusCode === 401 || error.code === 'unauthorized';
+      }
+
+      function setLinkMode(enabled) {
+        if (elements.linkPanel) {
+          elements.linkPanel.hidden = !enabled;
+        }
+        if (elements.mainContent) {
+          elements.mainContent.hidden = !!enabled;
+        }
+      }
+
       function setBoxMessage(element, message) {
         if (!element) {
           return;
@@ -235,6 +359,13 @@
 
       function clearStatus() {
         setStatus('');
+      }
+
+      function clearOverview() {
+        setText(elements.storeName, '-');
+        setText(elements.targetDate, '-');
+        setText(elements.progressSummary, '-');
+        setText(elements.roleBadge, '-');
       }
 
       function createMessageListItem(text, className) {
@@ -536,6 +667,46 @@
         return value;
       }
 
+      async function loadCurrentUser() {
+        state.me = await api.getMe(state.idToken);
+        renderRole(state.me.role);
+      }
+
+      async function linkAccount() {
+        emitClientEvent('link.start', {
+          hasEmployeeCode: !!String((elements.linkEmployeeCodeInput && elements.linkEmployeeCodeInput.value) || '').trim()
+        });
+        await api.linkAccount(state.idToken, {
+          employeeCode: requireStringValue(elements.linkEmployeeCodeInput, '社員コード'),
+          passcode: requireStringValue(elements.linkPasscodeInput, 'パスコード')
+        });
+        if (elements.linkEmployeeCodeInput) {
+          elements.linkEmployeeCodeInput.value = '';
+        }
+        if (elements.linkPasscodeInput) {
+          elements.linkPasscodeInput.value = '';
+        }
+        await loadCurrentUser();
+        setLinkMode(false);
+        await refresh();
+        emitClientEvent('link.success', {
+          userId: state.me && state.me.userId ? String(state.me.userId) : ''
+        });
+        setStatus('LINE 連携が完了しました');
+      }
+
+      function renderUnlinkedState() {
+        state.me = null;
+        clearOverview();
+        clearList(elements.checklistItems);
+        clearList(elements.incompleteItems);
+        clearList(elements.logsList);
+        setLinkMode(true);
+        emitClientEvent('unlinked.rendered', {});
+        clearError();
+        setStatus('社員コードとパスコードを入力して連携してください。');
+      }
+
       async function loadLogs() {
         if (!api.getLogs || !state.checklist || !state.checklist.runId) {
           return;
@@ -689,6 +860,11 @@
       }
 
       function bindEvents() {
+        bindButton(elements.linkAccountButton, function () {
+          return runAction(function () {
+            return linkAccount();
+          });
+        });
         bindButton(elements.refreshButton, function () {
           return runAction(function () {
             return refresh();
@@ -739,18 +915,78 @@
         });
       }
 
+      function withTimeout(promise, timeoutMs, message) {
+        if (typeof global.setTimeout !== 'function' || typeof global.clearTimeout !== 'function') {
+          return promise;
+        }
+        return new Promise(function (resolve, reject) {
+          var settled = false;
+          var timer = global.setTimeout(function () {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            reject(new Error(message));
+          }, timeoutMs);
+
+          promise.then(function (value) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            global.clearTimeout(timer);
+            resolve(value);
+          }).catch(function (error) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            global.clearTimeout(timer);
+            reject(error);
+          });
+        });
+      }
+
       async function init() {
         bindEvents();
         setText(elements.screenMode, mode === 'admin' ? '管理者 LIFF' : '従業員 LIFF');
+        setLinkMode(false);
+        emitClientEvent('init.start', {});
+        emitClientEvent('init.context', {
+          href: global.location && global.location.href ? String(global.location.href) : '',
+          referrer: documentRef && documentRef.referrer ? String(documentRef.referrer) : ''
+        });
         try {
           clearError();
           clearStatus();
-          var authResult = await auth.initialize();
+          emitClientEvent('init.auth.start', {});
+          var authResult = await withTimeout(
+            auth.initialize(),
+            10000,
+            'LIFF 認証の初期化がタイムアウトしました。LINE から再度開いてください。'
+          );
           state.idToken = authResult.idToken;
-          state.me = await api.getMe(state.idToken);
-          renderRole(state.me.role);
+          emitClientEvent('init.auth.ok', {
+            idTokenLength: state.idToken ? String(state.idToken).length : 0
+          });
+          await loadCurrentUser();
           await refresh();
+          emitClientEvent('init.ready', {
+            role: state.me && state.me.role ? String(state.me.role) : ''
+          });
         } catch (error) {
+          emitClientEvent('init.error', {
+            message: error && error.message ? String(error.message) : '',
+            code: error && error.code ? String(error.code) : '',
+            statusCode: error && error.statusCode ? Number(error.statusCode) : 0
+          });
+          if (isUnlinkedUserError(error) || isUnauthorizedError(error)) {
+            renderUnlinkedState();
+            if (!isUnlinkedUserError(error)) {
+              setError(error.message || '認証状態を確認できません');
+            }
+            return;
+          }
           setError(error.message || 'LIFF の初期化に失敗しました');
         }
       }

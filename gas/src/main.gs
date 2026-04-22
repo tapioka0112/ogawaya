@@ -1,10 +1,18 @@
 function doGet(e) {
   var request = Ogawaya.extractRequest(e, 'GET');
+  var appBaseUrl = ScriptApp.getService().getUrl();
+  var queryKeys = Object.keys((e && e.parameter) || {});
+  Ogawaya.writeDebugEvent('doGet', {
+    path: request.path,
+    mode: (e && e.parameter && e.parameter.mode) || '',
+    appBaseUrl: appBaseUrl,
+    queryKeys: queryKeys
+  });
   if (request.path.indexOf('/api/') === 0) {
     return Ogawaya.toTextOutput(Ogawaya.createApplication({}).handleApiRequest(request));
   }
 
-  var mode = (e && e.parameter && e.parameter.mode) || 'index';
+  var mode = (e && e.parameter && e.parameter.mode) || 'user';
   var templateName = 'src/liff/index';
   if (mode === 'user') {
     templateName = 'src/liff/user/index';
@@ -14,7 +22,7 @@ function doGet(e) {
   }
 
   return Ogawaya.renderTemplate(templateName, {
-    appBaseUrl: ScriptApp.getService().getUrl(),
+    appBaseUrl: appBaseUrl,
     mode: mode,
     liffId: PropertiesService.getScriptProperties().getProperty('LIFF_ID') || ''
   });
@@ -22,6 +30,11 @@ function doGet(e) {
 
 function doPost(e) {
   var request = Ogawaya.extractRequest(e, 'POST');
+  var appBaseUrl = ScriptApp.getService().getUrl();
+  Ogawaya.writeDebugEvent('doPost', {
+    path: request.path,
+    appBaseUrl: appBaseUrl
+  });
   var app = Ogawaya.createApplication({});
   if (request.path === '/webhook' || request.path === '/api/webhook') {
     return Ogawaya.toTextOutput(app.handleWebhook({
@@ -38,4 +51,30 @@ function routePost_(e) {
 
 function bootstrapSpreadsheetTemplates() {
   return Ogawaya.bootstrapSpreadsheetTemplates({});
+}
+
+function handleClientApi(request) {
+  var safeRequest = request && typeof request === 'object' ? request : {};
+  var response = Ogawaya.createApplication({}).handleApiRequest({
+    method: Ogawaya.normalizeMethod(safeRequest.method, 'GET'),
+    path: safeRequest.path || '/',
+    query: safeRequest.query || {},
+    body: safeRequest.body || {}
+  });
+  var payload = Ogawaya.clone(response.body || {});
+  payload.ok = response.statusCode < 400;
+  payload.statusCode = response.statusCode;
+  Ogawaya.writeDebugEvent('handleClientApi', {
+    path: safeRequest.path || '/',
+    method: Ogawaya.normalizeMethod(safeRequest.method, 'GET'),
+    statusCode: response.statusCode
+  });
+  return payload;
+}
+
+function logClientEvent(payload) {
+  var details = payload && typeof payload === 'object' ? payload : { raw: String(payload || '') };
+  Ogawaya.writeDebugEvent('logClientEvent', details);
+  Ogawaya.logEvent('info', 'client.event', details);
+  return { ok: true };
 }
