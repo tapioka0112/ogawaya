@@ -276,7 +276,6 @@
         selectedTemplateId: '',
         selectedTemplateItemId: ''
       };
-      var backgroundRefreshTimer = null;
       var pendingItemActions = {};
       var documentRef = options.document;
       var auth = options.auth;
@@ -592,35 +591,10 @@
         };
       }
 
-      function scheduleBackgroundRefresh() {
-        function run() {
-          refresh({
-            includeAncillary: false
-          }).catch(function (error) {
-            setError(error && error.message ? String(error.message) : '最新状態の取得に失敗しました');
-          });
-        }
-
-        if (typeof global.setTimeout !== 'function' || typeof global.clearTimeout !== 'function') {
-          run();
-          return;
-        }
-        if (backgroundRefreshTimer) {
-          global.clearTimeout(backgroundRefreshTimer);
-        }
-        backgroundRefreshTimer = global.setTimeout(function () {
-          backgroundRefreshTimer = null;
-          run();
-        }, 250);
-      }
-
       function loadAncillaryInBackground() {
         if (!state.checklist || !state.checklist.runId) {
           return;
         }
-        loadLogs().catch(function (error) {
-          setError(error && error.message ? String(error.message) : '履歴の取得に失敗しました');
-        });
         if (canManageTemplates()) {
           loadTemplates().catch(function (error) {
             setError(error && error.message ? String(error.message) : 'テンプレートの取得に失敗しました');
@@ -660,7 +634,6 @@
             if (response && response.item) {
               applyChecklistItemUpdate(response.item);
             }
-            scheduleBackgroundRefresh();
           }).catch(function (error) {
             applyChecklistItemUpdate(rollbackItem);
             setError(error && error.message ? String(error.message) : 'チェック更新に失敗しました');
@@ -688,7 +661,6 @@
             if (response && response.item) {
               applyChecklistItemUpdate(response.item);
             }
-            scheduleBackgroundRefresh();
           }).catch(function (error) {
             applyChecklistItemUpdate(rollbackItem);
             setError(error && error.message ? String(error.message) : 'チェック取消に失敗しました');
@@ -1022,21 +994,9 @@
         };
       }
 
-      function loadIncompleteInBackground() {
-        if (!api.getTodayIncomplete) {
-          return;
-        }
-        api.getTodayIncomplete(state.idToken).then(function (payload) {
-          renderIncomplete(payload);
-        }).catch(function (error) {
-          setError(error && error.message ? String(error.message) : '未完了一覧の取得に失敗しました');
-        });
-      }
-
       async function refresh(options) {
         var refreshOptions = options || {};
         var includeAncillary = refreshOptions.includeAncillary !== false;
-        var includeIncomplete = refreshOptions.includeIncomplete !== false;
         clearError();
 
         var checklist = await api.getTodayChecklist(state.idToken);
@@ -1054,10 +1014,6 @@
           if (canManageTemplates()) {
             templatesTask = loadTemplates();
           }
-        }
-
-        if (includeIncomplete) {
-          loadIncompleteInBackground();
         }
 
         if (templatesTask) {
@@ -1320,8 +1276,7 @@
             language: authResult.context && authResult.context.language ? String(authResult.context.language) : ''
           });
           await refresh({
-            includeAncillary: false,
-            includeIncomplete: false
+            includeAncillary: false
           });
           if (!state.me) {
             await loadCurrentUser();

@@ -425,7 +425,7 @@ test('ロール別表示に分岐する', async () => {
   assert.equal(documentRef.elements['admin-panel'].hidden, true);
 });
 
-test('更新ボタンで today と incomplete を再取得する', async () => {
+test('更新ボタンで today を再取得し、incomplete は today から再計算する', async () => {
   const { client } = await loadClientModule();
   const documentRef = createFakeDocument();
   let checklistCallCount = 0;
@@ -469,7 +469,7 @@ test('更新ボタンで today と incomplete を再取得する', async () => {
 
   await documentRef.elements['refresh-button'].click();
   assert.equal(checklistCallCount, 2);
-  assert.equal(incompleteCallCount, 1);
+  assert.equal(incompleteCallCount, 0);
 });
 
 test('createApi は GAS 応答の ok=false をエラーとして扱う', async () => {
@@ -606,6 +606,7 @@ test('createApi は checklist 操作と履歴 API を呼び分ける', async () 
 test('チェック操作で UI と未完了一覧を更新する', async () => {
   const { client } = await loadClientModule();
   const documentRef = createFakeDocument();
+  let checklistCallCount = 0;
   const checklistResponses = [
     createChecklistPayload(),
     createChecklistPayload({
@@ -646,6 +647,7 @@ test('チェック操作で UI と未完了一覧を更新する', async () => {
         };
       },
       async getTodayChecklist() {
+        checklistCallCount += 1;
         return checklistResponses.shift();
       },
       async getTodayIncomplete() {
@@ -682,6 +684,7 @@ test('チェック操作で UI と未完了一覧を更新する', async () => {
   assert.equal(documentRef.elements['progress-summary'].textContent, '2 / 2');
   assert.equal(documentRef.elements['incomplete-summary'].textContent, '未完了 0 件');
   assert.ok(findByDataset(documentRef.elements['checklist-items'], 'action', 'uncheck'));
+  assert.equal(checklistCallCount, 1);
 });
 
 test('チェック操作は API 応答前でも UI を即時反映する', async () => {
