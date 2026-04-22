@@ -1,12 +1,15 @@
 function doGet(e) {
   var request = Ogawaya.extractRequest(e, 'GET');
   var appBaseUrl = ScriptApp.getService().getUrl();
+  var liffId = PropertiesService.getScriptProperties().getProperty('LIFF_ID') || '';
   var queryKeys = Object.keys((e && e.parameter) || {});
   Ogawaya.writeDebugEvent('doGet', {
     path: request.path,
     mode: (e && e.parameter && e.parameter.mode) || '',
     appBaseUrl: appBaseUrl,
-    queryKeys: queryKeys
+    queryKeys: queryKeys,
+    hasLiffId: !!liffId,
+    liffIdLength: String(liffId).length
   });
   if (request.path.indexOf('/api/') === 0) {
     return Ogawaya.toTextOutput(Ogawaya.createApplication({}).handleApiRequest(request));
@@ -24,7 +27,7 @@ function doGet(e) {
   return Ogawaya.renderTemplate(templateName, {
     appBaseUrl: appBaseUrl,
     mode: mode,
-    liffId: PropertiesService.getScriptProperties().getProperty('LIFF_ID') || ''
+    liffId: liffId
   });
 }
 
