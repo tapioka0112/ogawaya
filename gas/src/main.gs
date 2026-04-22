@@ -5,12 +5,12 @@ function doGet(e) {
   }
 
   var mode = (e && e.parameter && e.parameter.mode) || 'index';
-  var templateName = 'liff/index';
+  var templateName = 'src/liff/index';
   if (mode === 'user') {
-    templateName = 'liff/user/index';
+    templateName = 'src/liff/user/index';
   }
   if (mode === 'admin') {
-    templateName = 'liff/admin/index';
+    templateName = 'src/liff/admin/index';
   }
 
   return Ogawaya.renderTemplate(templateName, {

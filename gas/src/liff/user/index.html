@@ -9,7 +9,7 @@
       window.OGAWAYA_LIFF_ID = <?!= JSON.stringify(String(liffId)).replace(/</g, '\\u003c') ?>;
     </script>
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-    <?!= HtmlService.createHtmlOutputFromFile('liff/shared/style').getContent(); ?>
+    <?!= HtmlService.createHtmlOutputFromFile('src/liff/shared/style').getContent(); ?>
   </head>
   <body>
     <main class="page-shell">
@@ -89,7 +89,7 @@
         </section>
       </section>
     </main>
-    <?!= HtmlService.createHtmlOutputFromFile('liff/shared/client').getContent(); ?>
+    <?!= HtmlService.createHtmlOutputFromFile('src/liff/shared/client').getContent(); ?>
     <script>
       window.addEventListener('DOMContentLoaded', function () {
         var controller = window.OgawayaLiff.createController({
