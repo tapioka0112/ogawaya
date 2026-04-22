@@ -277,6 +277,7 @@
         selectedTemplateItemId: ''
       };
       var backgroundRefreshTimer = null;
+      var pendingItemActions = {};
       var documentRef = options.document;
       var auth = options.auth;
       var api = options.api;
@@ -568,6 +569,29 @@
         }
       }
 
+      function buildOptimisticCheckedItem(item) {
+        var nowIso = new Date().toISOString();
+        return {
+          id: item.id,
+          title: item.title,
+          status: 'checked',
+          checkedBy: state.me && state.me.name ? state.me.name : '自分',
+          checkedByUserId: state.me && state.me.userId ? state.me.userId : '',
+          checkedAt: nowIso
+        };
+      }
+
+      function buildOptimisticUncheckedItem(item) {
+        return {
+          id: item.id,
+          title: item.title,
+          status: 'unchecked',
+          checkedBy: null,
+          checkedByUserId: null,
+          checkedAt: null
+        };
+      }
+
       function scheduleBackgroundRefresh() {
         function run() {
           refresh({
@@ -604,22 +628,72 @@
         }
       }
 
-      async function handleCheck(runItemId) {
-        var response = await api.checkItem(state.idToken, runItemId, { comment: '' });
-        if (response && response.item) {
-          applyChecklistItemUpdate(response.item);
+      function withPendingItemAction(runItemId, action) {
+        if (pendingItemActions[runItemId]) {
+          return;
         }
-        scheduleBackgroundRefresh();
-        setStatus('チェックを更新しました');
+        pendingItemActions[runItemId] = true;
+        renderChecklist(state.checklist || { items: [] });
+        action().finally(function () {
+          delete pendingItemActions[runItemId];
+          renderChecklist(state.checklist || { items: [] });
+        });
       }
 
-      async function handleUncheck(runItemId) {
-        var response = await api.uncheckItem(state.idToken, runItemId, { reason: '' });
-        if (response && response.item) {
-          applyChecklistItemUpdate(response.item);
+      function handleCheck(runItemId) {
+        var currentItem = findChecklistItemById(runItemId);
+        if (!currentItem || currentItem.status === 'checked') {
+          return;
         }
-        scheduleBackgroundRefresh();
+        var rollbackItem = {
+          id: currentItem.id,
+          title: currentItem.title,
+          status: currentItem.status,
+          checkedBy: currentItem.checkedBy,
+          checkedByUserId: currentItem.checkedByUserId,
+          checkedAt: currentItem.checkedAt
+        };
+        applyChecklistItemUpdate(buildOptimisticCheckedItem(currentItem));
+        setStatus('チェックを更新しました');
+        withPendingItemAction(runItemId, function () {
+          return api.checkItem(state.idToken, runItemId, { comment: '' }).then(function (response) {
+            if (response && response.item) {
+              applyChecklistItemUpdate(response.item);
+            }
+            scheduleBackgroundRefresh();
+          }).catch(function (error) {
+            applyChecklistItemUpdate(rollbackItem);
+            setError(error && error.message ? String(error.message) : 'チェック更新に失敗しました');
+          });
+        });
+      }
+
+      function handleUncheck(runItemId) {
+        var currentItem = findChecklistItemById(runItemId);
+        if (!currentItem || currentItem.status === 'unchecked') {
+          return;
+        }
+        var rollbackItem = {
+          id: currentItem.id,
+          title: currentItem.title,
+          status: currentItem.status,
+          checkedBy: currentItem.checkedBy,
+          checkedByUserId: currentItem.checkedByUserId,
+          checkedAt: currentItem.checkedAt
+        };
+        applyChecklistItemUpdate(buildOptimisticUncheckedItem(currentItem));
         setStatus('チェックを取り消しました');
+        withPendingItemAction(runItemId, function () {
+          return api.uncheckItem(state.idToken, runItemId, { reason: '' }).then(function (response) {
+            if (response && response.item) {
+              applyChecklistItemUpdate(response.item);
+            }
+            scheduleBackgroundRefresh();
+          }).catch(function (error) {
+            applyChecklistItemUpdate(rollbackItem);
+            setError(error && error.message ? String(error.message) : 'チェック取消に失敗しました');
+          });
+        });
       }
 
       function renderChecklist(checklist) {
@@ -648,18 +722,22 @@
           var actions = documentRef.createElement('div');
           actions.className = 'button-row item-actions';
           if (item.status === 'unchecked' && api.checkItem) {
-            actions.appendChild(createActionButton('チェックする', 'check', item.id, function () {
-              return runAction(function () {
-                return handleCheck(item.id);
-              });
-            }));
+            var checkButton = createActionButton('チェックする', 'check', item.id, function () {
+              clearError();
+              clearStatus();
+              handleCheck(item.id);
+            });
+            checkButton.disabled = !!pendingItemActions[item.id];
+            actions.appendChild(checkButton);
           }
           if (canUncheck(item) && api.uncheckItem) {
-            actions.appendChild(createActionButton('取消', 'uncheck', item.id, function () {
-              return runAction(function () {
-                return handleUncheck(item.id);
-              });
-            }, 'action-button ghost-button'));
+            var uncheckButton = createActionButton('取消', 'uncheck', item.id, function () {
+              clearError();
+              clearStatus();
+              handleUncheck(item.id);
+            }, 'action-button ghost-button');
+            uncheckButton.disabled = !!pendingItemActions[item.id];
+            actions.appendChild(uncheckButton);
           }
 
           body.appendChild(title);
@@ -928,19 +1006,38 @@
         renderTemplates();
       }
 
+      function buildIncompleteFromChecklist(checklist) {
+        var uncheckedItems = normalizeArray(checklist && checklist.items).filter(function (item) {
+          return item.status === 'unchecked';
+        }).map(function (item) {
+          return {
+            id: item.id,
+            title: item.title
+          };
+        });
+        return {
+          runId: checklist && checklist.runId ? checklist.runId : '',
+          targetDate: checklist && checklist.targetDate ? checklist.targetDate : '',
+          items: uncheckedItems
+        };
+      }
+
+      function loadIncompleteInBackground() {
+        if (!api.getTodayIncomplete) {
+          return;
+        }
+        api.getTodayIncomplete(state.idToken).then(function (payload) {
+          renderIncomplete(payload);
+        }).catch(function (error) {
+          setError(error && error.message ? String(error.message) : '未完了一覧の取得に失敗しました');
+        });
+      }
+
       async function refresh(options) {
         var refreshOptions = options || {};
         var includeAncillary = refreshOptions.includeAncillary !== false;
         var includeIncomplete = refreshOptions.includeIncomplete !== false;
         clearError();
-        var incompleteTask = null;
-        if (includeIncomplete && api.getTodayIncomplete) {
-          incompleteTask = api.getTodayIncomplete(state.idToken).then(function (payload) {
-            return { ok: true, payload: payload };
-          }).catch(function (error) {
-            return { ok: false, error: error };
-          });
-        }
 
         var checklist = await api.getTodayChecklist(state.idToken);
         if (checklist && checklist.currentUser) {
@@ -948,6 +1045,7 @@
         }
         renderOverview(checklist);
         renderChecklist(checklist);
+        renderIncomplete(buildIncompleteFromChecklist(checklist));
 
         var logsTask = null;
         var templatesTask = null;
@@ -958,12 +1056,8 @@
           }
         }
 
-        if (incompleteTask) {
-          var incompleteResult = await incompleteTask;
-          if (!incompleteResult.ok) {
-            throw incompleteResult.error;
-          }
-          renderIncomplete(incompleteResult.payload);
+        if (includeIncomplete) {
+          loadIncompleteInBackground();
         }
 
         if (templatesTask) {
@@ -1226,7 +1320,8 @@
             language: authResult.context && authResult.context.language ? String(authResult.context.language) : ''
           });
           await refresh({
-            includeAncillary: false
+            includeAncillary: false,
+            includeIncomplete: false
           });
           if (!state.me) {
             await loadCurrentUser();

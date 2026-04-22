@@ -448,10 +448,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var scriptProperties = PropertiesService.getScriptProperties();
     var spreadsheetId = options.spreadsheetId || scriptProperties.getProperty('SPREADSHEET_ID');
     ns.assert(spreadsheetId, 'config_error', 'SPREADSHEET_ID が未設定です', 500);
-    var cacheKey = 'ogawaya:spreadsheet-state:v1:' + spreadsheetId;
+    var cacheKeyBase = 'ogawaya:spreadsheet-state:v2:' + spreadsheetId;
+    var directCacheKey = cacheKeyBase + ':direct';
+    var metaCacheKey = cacheKeyBase + ':meta';
+    var legacyCacheKey = 'ogawaya:spreadsheet-state:v1:' + spreadsheetId;
     var cacheEnabled = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_ENABLED') !== 'false';
     var cacheTtlRaw = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_TTL_SECONDS');
+    var chunkSizeRaw = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_CHUNK_SIZE');
     var cacheTtlSeconds = 30;
+    var chunkSize = 90000;
     var lastLoadedState = null;
     var cachedSpreadsheet = null;
 
@@ -466,6 +471,17 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       cacheTtlSeconds = parsedCacheTtl;
     }
 
+    if (chunkSizeRaw) {
+      var parsedChunkSize = Number(chunkSizeRaw);
+      ns.assert(
+        isFinite(parsedChunkSize) && parsedChunkSize >= 50 && Math.floor(parsedChunkSize) === parsedChunkSize,
+        'config_error',
+        'SPREADSHEET_STATE_CACHE_CHUNK_SIZE は 50 以上の整数で指定してください',
+        500
+      );
+      chunkSize = parsedChunkSize;
+    }
+
     function getSpreadsheet() {
       if (!cachedSpreadsheet) {
         cachedSpreadsheet = SpreadsheetApp.openById(spreadsheetId);
@@ -478,6 +494,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         return null;
       }
       return CacheService.getScriptCache();
+    }
+
+    function buildChunkCacheKey(index) {
+      return cacheKeyBase + ':chunk:' + String(index);
     }
 
     function buildStateFromSpreadsheet() {
@@ -508,19 +528,48 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return ensureStateShape(loadedState);
     }
 
-    function readStateFromCache(cache) {
-      if (!cache) {
-        return null;
-      }
-      var raw = '';
+    function tryReadCacheValue(cache, key) {
       try {
-        raw = cache.get(cacheKey);
+        return cache.get(key);
       } catch (error) {
         ns.logEvent('error', 'storage.cache.read_failed', {
+          key: key,
           message: error && error.message ? String(error.message) : ''
         });
         return null;
       }
+    }
+
+    function tryRemoveCacheKeys(cache, keys) {
+      var normalizedKeys = keys.filter(function (key) {
+        return !!key;
+      });
+      if (normalizedKeys.length === 0) {
+        return;
+      }
+      try {
+        if (typeof cache.removeAll === 'function') {
+          cache.removeAll(normalizedKeys);
+          return;
+        }
+      } catch (error) {
+        ns.logEvent('error', 'storage.cache.remove_all_failed', {
+          message: error && error.message ? String(error.message) : ''
+        });
+      }
+      normalizedKeys.forEach(function (key) {
+        try {
+          cache.remove(key);
+        } catch (removeError) {
+          ns.logEvent('error', 'storage.cache.remove_failed', {
+            key: key,
+            message: removeError && removeError.message ? String(removeError.message) : ''
+          });
+        }
+      });
+    }
+
+    function parseCachedState(raw, source) {
       if (!raw) {
         return null;
       }
@@ -529,17 +578,94 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         return ensureStateShape(parsed);
       } catch (parseError) {
         ns.logEvent('error', 'storage.cache.parse_failed', {
+          source: source,
           message: parseError && parseError.message ? String(parseError.message) : ''
         });
-        try {
-          cache.remove(cacheKey);
-        } catch (removeError) {
-          ns.logEvent('error', 'storage.cache.remove_failed', {
-            message: removeError && removeError.message ? String(removeError.message) : ''
-          });
-        }
         return null;
       }
+    }
+
+    function readChunkedStateFromCache(cache) {
+      var metaRaw = tryReadCacheValue(cache, metaCacheKey);
+      if (!metaRaw) {
+        return null;
+      }
+      var meta = null;
+      try {
+        meta = JSON.parse(metaRaw);
+      } catch (error) {
+        ns.logEvent('error', 'storage.cache.meta_parse_failed', {
+          message: error && error.message ? String(error.message) : ''
+        });
+        tryRemoveCacheKeys(cache, [metaCacheKey]);
+        return null;
+      }
+      if (!meta || !meta.chunked || !meta.parts || !isFinite(Number(meta.parts)) || Number(meta.parts) < 1) {
+        tryRemoveCacheKeys(cache, [metaCacheKey]);
+        return null;
+      }
+      var parts = Number(meta.parts);
+      var joinedPayload = '';
+      for (var index = 0; index < parts; index += 1) {
+        var partRaw = tryReadCacheValue(cache, buildChunkCacheKey(index));
+        if (!partRaw) {
+          var staleKeys = [metaCacheKey];
+          for (var staleIndex = 0; staleIndex < parts; staleIndex += 1) {
+            staleKeys.push(buildChunkCacheKey(staleIndex));
+          }
+          tryRemoveCacheKeys(cache, staleKeys);
+          return null;
+        }
+        joinedPayload += partRaw;
+      }
+      return parseCachedState(joinedPayload, 'chunked');
+    }
+
+    function readStateFromCache(cache) {
+      if (!cache) {
+        return null;
+      }
+      var directRaw = tryReadCacheValue(cache, directCacheKey);
+      var directState = parseCachedState(directRaw, 'direct');
+      if (directState) {
+        return directState;
+      }
+      if (directRaw && !directState) {
+        tryRemoveCacheKeys(cache, [directCacheKey]);
+      }
+      var chunkedState = readChunkedStateFromCache(cache);
+      if (chunkedState) {
+        return chunkedState;
+      }
+      var legacyRaw = tryReadCacheValue(cache, legacyCacheKey);
+      var legacyState = parseCachedState(legacyRaw, 'legacy');
+      if (legacyState) {
+        return legacyState;
+      }
+      if (legacyRaw && !legacyState) {
+        tryRemoveCacheKeys(cache, [legacyCacheKey]);
+      }
+      return null;
+    }
+
+    function splitPayload(payload, size) {
+      var chunks = [];
+      for (var offset = 0; offset < payload.length; offset += size) {
+        chunks.push(payload.slice(offset, offset + size));
+      }
+      return chunks;
+    }
+
+    function writeChunkedStateToCache(cache, payload) {
+      var chunks = splitPayload(payload, chunkSize);
+      var metaPayload = JSON.stringify({
+        chunked: true,
+        parts: chunks.length
+      });
+      chunks.forEach(function (chunk, index) {
+        cache.put(buildChunkCacheKey(index), chunk, cacheTtlSeconds);
+      });
+      cache.put(metaCacheKey, metaPayload, cacheTtlSeconds);
     }
 
     function writeStateToCache(cache, state) {
@@ -547,13 +673,36 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         return;
       }
       var payload = JSON.stringify(state);
+      var previousMetaRaw = tryReadCacheValue(cache, metaCacheKey);
+      var previousChunkCount = 0;
+      if (previousMetaRaw) {
+        try {
+          var previousMeta = JSON.parse(previousMetaRaw);
+          previousChunkCount = Number(previousMeta.parts) || 0;
+        } catch (error) {
+          previousChunkCount = 0;
+        }
+      }
+      var staleKeys = [legacyCacheKey, directCacheKey, metaCacheKey];
+      for (var staleIndex = 0; staleIndex < previousChunkCount; staleIndex += 1) {
+        staleKeys.push(buildChunkCacheKey(staleIndex));
+      }
+      tryRemoveCacheKeys(cache, staleKeys);
       try {
-        cache.put(cacheKey, payload, cacheTtlSeconds);
+        cache.put(directCacheKey, payload, cacheTtlSeconds);
       } catch (error) {
-        ns.logEvent('error', 'storage.cache.write_failed', {
+        ns.logEvent('warn', 'storage.cache.direct_write_failed', {
           message: error && error.message ? String(error.message) : '',
           payloadLength: payload.length
         });
+        try {
+          writeChunkedStateToCache(cache, payload);
+        } catch (chunkError) {
+          ns.logEvent('error', 'storage.cache.chunked_write_failed', {
+            message: chunkError && chunkError.message ? String(chunkError.message) : '',
+            payloadLength: payload.length
+          });
+        }
       }
     }
 

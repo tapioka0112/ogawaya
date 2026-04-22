@@ -18,6 +18,28 @@ function createScriptCache() {
   };
 }
 
+function createLimitedScriptCache(maxValueLength) {
+  const entries = new Map();
+  return {
+    get(key) {
+      return entries.has(key) ? entries.get(key) : null;
+    },
+    put(key, value) {
+      const normalized = String(value);
+      if (normalized.length > maxValueLength) {
+        throw new Error('value too large');
+      }
+      entries.set(key, normalized);
+    },
+    remove(key) {
+      entries.delete(key);
+    },
+    removeAll(keys) {
+      keys.forEach((key) => entries.delete(key));
+    }
+  };
+}
+
 function createStoresSheet(initialRows) {
   const headers = ['id', 'name', 'status', 'created_at'];
   let values = [headers].concat(initialRows.map((row) => [
@@ -295,7 +317,8 @@ test('Spreadsheet state cache 有効時は新規 repository でも再読込を�
 
   const runtime = await loadGasRuntime({
     scriptProperties: {
-      SPREADSHEET_ID: 'spreadsheet-001'
+      SPREADSHEET_ID: 'spreadsheet-001',
+      SPREADSHEET_STATE_CACHE_CHUNK_SIZE: '120'
     },
     cacheFactory() {
       return cache;
@@ -333,7 +356,8 @@ test('Spreadsheet save 後は cache を更新し、次の repository でも更�
 
   const runtime = await loadGasRuntime({
     scriptProperties: {
-      SPREADSHEET_ID: 'spreadsheet-001'
+      SPREADSHEET_ID: 'spreadsheet-001',
+      SPREADSHEET_STATE_CACHE_CHUNK_SIZE: '120'
     },
     cacheFactory() {
       return cache;
@@ -411,4 +435,51 @@ test('SPREADSHEET_STATE_CACHE_ENABLED=false のときは毎回 Spreadsheet を�
   repository2.listTable('stores');
 
   assert.equal(openCount, 2);
+});
+
+test('direct cache 書き込み上限超過時は chunked cache にフォールバックする', async () => {
+  const seed = createBaseDataset();
+  const largeStores = Array.from({ length: 120 }, (_, index) => ({
+    id: `store-${String(index + 1).padStart(3, '0')}`,
+    name: `店舗-${index + 1}-` + 'x'.repeat(80),
+    status: 'active',
+    created_at: '2026-04-20T00:00:00Z'
+  }));
+  const cache = createLimitedScriptCache(200);
+  const stores = createStoresSheet(largeStores.length > 0 ? largeStores : seed.stores);
+  let openCount = 0;
+
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      SPREADSHEET_ID: 'spreadsheet-001',
+      SPREADSHEET_STATE_CACHE_CHUNK_SIZE: '120'
+    },
+    cacheFactory() {
+      return cache;
+    },
+    spreadsheetFactory() {
+      openCount += 1;
+      return {
+        getSheetByName(sheetName) {
+          if (sheetName === 'stores') {
+            return stores.sheet;
+          }
+          return null;
+        },
+        insertSheet() {
+          return stores.sheet;
+        }
+      };
+    }
+  });
+
+  const repository1 = runtime.Ogawaya.createSpreadsheetRepository({ spreadsheetId: 'spreadsheet-001' });
+  const firstStores = repository1.listTable('stores');
+  assert.equal(firstStores.length, 120);
+  assert.equal(openCount, 1);
+
+  const repository2 = runtime.Ogawaya.createSpreadsheetRepository({ spreadsheetId: 'spreadsheet-001' });
+  const secondStores = repository2.listTable('stores');
+  assert.equal(secondStores.length, 120);
+  assert.equal(openCount, 1);
 });

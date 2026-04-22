@@ -465,11 +465,11 @@ test('更新ボタンで today と incomplete を再取得する', async () => {
 
   await controller.init();
   assert.equal(checklistCallCount, 1);
-  assert.equal(incompleteCallCount, 1);
+  assert.equal(incompleteCallCount, 0);
 
   await documentRef.elements['refresh-button'].click();
   assert.equal(checklistCallCount, 2);
-  assert.equal(incompleteCallCount, 2);
+  assert.equal(incompleteCallCount, 1);
 });
 
 test('createApi は GAS 応答の ok=false をエラーとして扱う', async () => {
@@ -682,6 +682,73 @@ test('チェック操作で UI と未完了一覧を更新する', async () => {
   assert.equal(documentRef.elements['progress-summary'].textContent, '2 / 2');
   assert.equal(documentRef.elements['incomplete-summary'].textContent, '未完了 0 件');
   assert.ok(findByDataset(documentRef.elements['checklist-items'], 'action', 'uncheck'));
+});
+
+test('チェック操作は API 応答前でも UI を即時反映する', async () => {
+  const { client } = await loadClientModule();
+  const documentRef = createFakeDocument();
+  let resolveCheck = null;
+  const controller = client.createController({
+    document: documentRef,
+    auth: {
+      async initialize() {
+        return { idToken: 'token' };
+      }
+    },
+    api: {
+      async getMe() {
+        return {
+          userId: 'user-pt-001',
+          name: '田中 花子',
+          role: 'part_time',
+          store: { id: 'store-001', name: '青山店' }
+        };
+      },
+      async getTodayChecklist() {
+        return createChecklistPayload();
+      },
+      async getTodayIncomplete() {
+        return createIncompletePayload();
+      },
+      async getLogs() {
+        return createLogsPayload();
+      },
+      async checkItem() {
+        return new Promise((resolve) => {
+          resolveCheck = resolve;
+        });
+      },
+      async uncheckItem() {
+        return { item: { id: 'run-item-001', status: 'unchecked' } };
+      }
+    },
+    mode: 'user'
+  });
+
+  await controller.init();
+
+  const checkButton = findByDataset(documentRef.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  checkButton.click();
+
+  assert.equal(documentRef.elements['progress-summary'].textContent, '2 / 2');
+  assert.equal(documentRef.elements['incomplete-summary'].textContent, '未完了 0 件');
+  const pendingUncheckButton = findByDataset(documentRef.elements['checklist-items'], 'action', 'uncheck');
+  assert.ok(pendingUncheckButton);
+  assert.equal(pendingUncheckButton.disabled, true);
+
+  resolveCheck({
+    item: {
+      id: 'run-item-001',
+      title: '開店準備',
+      status: 'checked',
+      checkedBy: '田中 花子',
+      checkedByUserId: 'user-pt-001',
+      checkedAt: '2026-04-21T10:36:00Z'
+    }
+  });
+  await Promise.resolve();
+  await Promise.resolve();
 });
 
 test('管理者は UI から他人のチェックを取り消せる', async () => {
