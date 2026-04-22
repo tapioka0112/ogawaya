@@ -17,7 +17,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         name: '田中 花子',
         employee_code: 'PT001',
         passcode: '111111',
-        role: ns.ROLES.PART_TIME,
+        role: 'part_time',
         status: 'active',
         created_at: '2026-04-22T00:00:00Z'
       },
@@ -27,7 +27,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         name: '山田 太郎',
         employee_code: 'MG001',
         passcode: '222222',
-        role: ns.ROLES.MANAGER,
+        role: 'manager',
         status: 'active',
         created_at: '2026-04-22T00:00:00Z'
       },
@@ -37,7 +37,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         name: '本部 次郎',
         employee_code: 'AD001',
         passcode: '333333',
-        role: ns.ROLES.ADMIN,
+        role: 'admin',
         status: 'active',
         created_at: '2026-04-22T00:00:00Z'
       }

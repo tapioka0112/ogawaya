@@ -1,3 +1,5 @@
+var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
+
 (function (ns) {
   function createLineClient(channelAccessToken) {
     return {
