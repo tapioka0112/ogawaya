@@ -252,6 +252,40 @@ test('匿名アクセス有効時は LIFF SDK なしでも初期化できる', a
   assert.equal(result.context.isAnonymous, true);
 });
 
+test('匿名アクセス有効でも LIFF idToken が取れる場合は認証コンテキストを使う', async () => {
+  const { client, context } = await loadClientModule();
+  context.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = true;
+  context.OGAWAYA_LIFF_ID = '2000000000-test';
+  context.liff = {
+    async init() {},
+    getIDToken() {
+      return 'token-from-liff';
+    },
+    isInClient() {
+      return true;
+    },
+    isLoggedIn() {
+      return true;
+    },
+    getOS() {
+      return 'ios';
+    },
+    getLineVersion() {
+      return '1.0.0';
+    },
+    getLanguage() {
+      return 'ja';
+    }
+  };
+  const auth = client.createAuth();
+
+  const result = await auth.initialize();
+
+  assert.equal(result.idToken, 'token-from-liff');
+  assert.equal(result.context.isAnonymous, false);
+  assert.equal(result.context.isInClient, true);
+});
+
 test('LIFF 初期化失敗時はユーザー向けエラーを表示する', async () => {
   const { client } = await loadClientModule();
   const documentRef = createFakeDocument();

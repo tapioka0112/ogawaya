@@ -169,6 +169,34 @@
     }
 
     function createAuth() {
+      function buildAnonymousContext() {
+        return {
+          idToken: '',
+          context: {
+            isInClient: false,
+            isLoggedIn: false,
+            os: '',
+            lineVersion: '',
+            language: '',
+            isAnonymous: true
+          }
+        };
+      }
+
+      function buildAuthenticatedContext(idToken, runtimeContext) {
+        return {
+          idToken: idToken,
+          context: {
+            isInClient: !!(runtimeContext && runtimeContext.isInClient),
+            isLoggedIn: !!(runtimeContext && runtimeContext.isLoggedIn),
+            os: runtimeContext && runtimeContext.os ? runtimeContext.os : '',
+            lineVersion: runtimeContext && runtimeContext.lineVersion ? runtimeContext.lineVersion : '',
+            language: runtimeContext && runtimeContext.language ? runtimeContext.language : '',
+            isAnonymous: false
+          }
+        };
+      }
+
       function buildRuntimeContext() {
         var liffRef = global.liff;
         var inClient = typeof liffRef.isInClient === 'function'
@@ -197,38 +225,42 @@
 
       return {
         initialize: async function () {
-          if (global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS === true) {
-            return {
-              idToken: '',
-              context: {
-                isInClient: false,
-                isLoggedIn: false,
-                os: '',
-                lineVersion: '',
-                language: '',
-                isAnonymous: true
-              }
-            };
-          }
           if (global.__OGAWAYA_MOCK__ && global.__OGAWAYA_MOCK__.idToken) {
-            return {
-              idToken: global.__OGAWAYA_MOCK__.idToken,
-              context: {
-                isInClient: true,
-                isLoggedIn: true,
-                os: '',
-                lineVersion: '',
-                language: '',
-                isAnonymous: false
-              }
-            };
+            return buildAuthenticatedContext(global.__OGAWAYA_MOCK__.idToken, {
+              isInClient: true,
+              isLoggedIn: true,
+              os: '',
+              lineVersion: '',
+              language: ''
+            });
           }
+
+          if (global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS === true) {
+            if (!global.liff || !global.OGAWAYA_LIFF_ID || typeof global.liff.init !== 'function') {
+              return buildAnonymousContext();
+            }
+            var anonymousPreContext = buildRuntimeContext();
+            await global.liff.init({
+              liffId: global.OGAWAYA_LIFF_ID,
+              withLoginOnExternalBrowser: !anonymousPreContext.isInClient
+            });
+            var anonymousPostContext = buildRuntimeContext();
+            var anonymousIdToken = typeof global.liff.getIDToken === 'function'
+              ? global.liff.getIDToken()
+              : '';
+            if (!anonymousIdToken) {
+              return buildAnonymousContext();
+            }
+            return buildAuthenticatedContext(anonymousIdToken, anonymousPostContext);
+          }
+
           if (!global.liff) {
             throw new Error('LIFF SDK が読み込まれていません');
           }
           if (!global.OGAWAYA_LIFF_ID) {
             throw new Error('LIFF ID が未設定です');
           }
+
           var preContext = buildRuntimeContext();
           await global.liff.init({
             liffId: global.OGAWAYA_LIFF_ID,
@@ -245,17 +277,7 @@
           if (!idToken) {
             throw new Error('LIFF 認証コンテキストを取得できません');
           }
-          return {
-            idToken: idToken,
-            context: {
-              isInClient: postContext.isInClient,
-              isLoggedIn: postContext.isLoggedIn,
-              os: postContext.os,
-              lineVersion: postContext.lineVersion,
-              language: postContext.language,
-              isAnonymous: false
-            }
-          };
+          return buildAuthenticatedContext(idToken, postContext);
         }
       };
     }
