@@ -174,10 +174,45 @@
     }
 
     function createAuth() {
+      function buildRuntimeContext() {
+        var liffRef = global.liff;
+        var inClient = typeof liffRef.isInClient === 'function'
+          ? !!liffRef.isInClient()
+          : false;
+        var loggedIn = typeof liffRef.isLoggedIn === 'function'
+          ? !!liffRef.isLoggedIn()
+          : false;
+        var os = typeof liffRef.getOS === 'function'
+          ? String(liffRef.getOS() || '')
+          : '';
+        var lineVersion = typeof liffRef.getLineVersion === 'function'
+          ? String(liffRef.getLineVersion() || '')
+          : '';
+        var language = typeof liffRef.getLanguage === 'function'
+          ? String(liffRef.getLanguage() || '')
+          : '';
+        return {
+          isInClient: inClient,
+          isLoggedIn: loggedIn,
+          os: os,
+          lineVersion: lineVersion,
+          language: language
+        };
+      }
+
       return {
         initialize: async function () {
           if (global.__OGAWAYA_MOCK__ && global.__OGAWAYA_MOCK__.idToken) {
-            return { idToken: global.__OGAWAYA_MOCK__.idToken };
+            return {
+              idToken: global.__OGAWAYA_MOCK__.idToken,
+              context: {
+                isInClient: true,
+                isLoggedIn: true,
+                os: '',
+                lineVersion: '',
+                language: ''
+              }
+            };
           }
           if (!global.liff) {
             throw new Error('LIFF SDK が読み込まれていません');
@@ -185,12 +220,26 @@
           if (!global.OGAWAYA_LIFF_ID) {
             throw new Error('LIFF ID が未設定です');
           }
-          await global.liff.init({ liffId: global.OGAWAYA_LIFF_ID });
+          var preContext = buildRuntimeContext();
+          await global.liff.init({
+            liffId: global.OGAWAYA_LIFF_ID,
+            withLoginOnExternalBrowser: !preContext.isInClient
+          });
+          var postContext = buildRuntimeContext();
+          if (typeof global.liff.isLoggedIn === 'function' && !global.liff.isLoggedIn()) {
+            if (typeof global.liff.login === 'function') {
+              global.liff.login();
+            }
+            throw new Error('LINE ログイン画面へ遷移しました。ログイン後に再度開いてください。');
+          }
           var idToken = global.liff.getIDToken();
           if (!idToken) {
             throw new Error('LIFF 認証コンテキストを取得できません');
           }
-          return { idToken: idToken };
+          return {
+            idToken: idToken,
+            context: postContext
+          };
         }
       };
     }
@@ -952,9 +1001,20 @@
         setText(elements.screenMode, mode === 'admin' ? '管理者 LIFF' : '従業員 LIFF');
         setLinkMode(false);
         emitClientEvent('init.start', {});
+        var topHref = '';
+        try {
+          if (global.top && global.top.location && global.top.location.href) {
+            topHref = String(global.top.location.href);
+          }
+        } catch (error) {
+          topHref = 'blocked';
+        }
         emitClientEvent('init.context', {
           href: global.location && global.location.href ? String(global.location.href) : '',
-          referrer: documentRef && documentRef.referrer ? String(documentRef.referrer) : ''
+          referrer: documentRef && documentRef.referrer ? String(documentRef.referrer) : '',
+          topHref: topHref,
+          isFramed: global.top !== global.self,
+          userAgent: global.navigator && global.navigator.userAgent ? String(global.navigator.userAgent) : ''
         });
         try {
           clearError();
@@ -967,7 +1027,12 @@
           );
           state.idToken = authResult.idToken;
           emitClientEvent('init.auth.ok', {
-            idTokenLength: state.idToken ? String(state.idToken).length : 0
+            idTokenLength: state.idToken ? String(state.idToken).length : 0,
+            isInClient: !!(authResult.context && authResult.context.isInClient),
+            isLoggedIn: !!(authResult.context && authResult.context.isLoggedIn),
+            os: authResult.context && authResult.context.os ? String(authResult.context.os) : '',
+            lineVersion: authResult.context && authResult.context.lineVersion ? String(authResult.context.lineVersion) : '',
+            language: authResult.context && authResult.context.language ? String(authResult.context.language) : ''
           });
           await loadCurrentUser();
           await refresh();
