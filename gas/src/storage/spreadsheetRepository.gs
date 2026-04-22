@@ -98,11 +98,45 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   }
 
   function createRepository(storage) {
-    var cachedState = null;
+    var cachedState = ensureStateShapeInPlace({});
+    var loadedSheetFlags = {};
+    var hasLoadedAllSheets = false;
+
+    function markAllSheetsLoaded() {
+      ns.getSheetNames().forEach(function (sheetName) {
+        loadedSheetFlags[sheetName] = true;
+      });
+      hasLoadedAllSheets = true;
+    }
+
+    function loadFullState() {
+      cachedState = ensureStateShapeInPlace(storage.load());
+      markAllSheetsLoaded();
+    }
+
+    function ensureSheetLoaded(sheetName) {
+      if (hasLoadedAllSheets || loadedSheetFlags[sheetName]) {
+        return;
+      }
+      if (typeof storage.loadTable !== 'function') {
+        loadFullState();
+        return;
+      }
+      var loadedRows = storage.loadTable(sheetName);
+      cachedState[sheetName] = Array.isArray(loadedRows) ? loadedRows : [];
+      loadedSheetFlags[sheetName] = true;
+    }
 
     function readState() {
-      if (!cachedState) {
-        cachedState = ensureStateShapeInPlace(storage.load());
+      if (!hasLoadedAllSheets) {
+        if (typeof storage.loadTable !== 'function') {
+          loadFullState();
+          return cachedState;
+        }
+        ns.getSheetNames().forEach(function (sheetName) {
+          ensureSheetLoaded(sheetName);
+        });
+        hasLoadedAllSheets = true;
       }
       return cachedState;
     }
@@ -113,15 +147,17 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       validateState(draftState);
       storage.save(draftState);
       cachedState = ensureStateShapeInPlace(draftState);
+      markAllSheetsLoaded();
       return result;
     }
 
     function listTable(sheetName) {
-      return readState()[sheetName].map(ns.clone);
+      return getTableRowsUnsafe(sheetName).map(ns.clone);
     }
 
     function getTableRowsUnsafe(sheetName) {
-      return readState()[sheetName];
+      ensureSheetLoaded(sheetName);
+      return cachedState[sheetName];
     }
 
     function findRowById(sheetName, rowId) {
@@ -317,21 +353,25 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
     function updateRunItemWithLog(runItemId, changes, log) {
       if (storage && typeof storage.updateRunItemWithLog === 'function') {
-        var state = readState();
-        var runItemIndex = state.checklist_run_items.findIndex(function (row) {
+        var runItems = getTableRowsUnsafe('checklist_run_items');
+        var logs = getTableRowsUnsafe('checklist_item_logs');
+        var runItemIndex = runItems.findIndex(function (row) {
           return row.id === runItemId;
         });
         ns.assert(runItemIndex !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
-        var updatedRow = ns.clone(state.checklist_run_items[runItemIndex]);
+        var updatedRow = ns.clone(runItems[runItemIndex]);
         Object.keys(changes).forEach(function (key) {
           updatedRow[key] = changes[key];
         });
         validateRow('checklist_run_items', updatedRow);
         validateRow('checklist_item_logs', log);
         storage.updateRunItemWithLog(runItemId, ns.clone(updatedRow), ns.clone(log));
-        state.checklist_run_items[runItemIndex] = ns.clone(updatedRow);
-        state.checklist_item_logs.push(ns.clone(log));
-        cachedState = ensureStateShapeInPlace(state);
+        runItems[runItemIndex] = ns.clone(updatedRow);
+        logs.push(ns.clone(log));
+        cachedState.checklist_run_items = runItems;
+        cachedState.checklist_item_logs = logs;
+        loadedSheetFlags.checklist_run_items = true;
+        loadedSheetFlags.checklist_item_logs = true;
         return ns.clone(updatedRow);
       }
       return commit(function (draftState) {
@@ -507,6 +547,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       load: function () {
         return ns.clone(state);
       },
+      loadTable: function (sheetName) {
+        return (state[sheetName] || []).map(ns.clone);
+      },
       save: function (nextState) {
         state = ensureStateShape(nextState);
       }
@@ -520,6 +563,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var cacheKeyBase = 'ogawaya:spreadsheet-state:v2:' + spreadsheetId;
     var directCacheKey = cacheKeyBase + ':direct';
     var metaCacheKey = cacheKeyBase + ':meta';
+    var tableCacheKeyPrefix = cacheKeyBase + ':table:';
     var legacyCacheKey = 'ogawaya:spreadsheet-state:v1:' + spreadsheetId;
     var cacheEnabled = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_ENABLED') !== 'false';
     var cacheTtlRaw = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_TTL_SECONDS');
@@ -527,6 +571,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var cacheTtlSeconds = 300;
     var chunkSize = 90000;
     var lastLoadedState = null;
+    var tableStateCache = {};
     var cachedSpreadsheet = null;
 
     if (cacheTtlRaw) {
@@ -569,6 +614,42 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return cacheKeyBase + ':chunk:' + String(index);
     }
 
+    function buildTableCacheKey(sheetName) {
+      return tableCacheKeyPrefix + sheetName;
+    }
+
+    function buildTableMetaCacheKey(sheetName) {
+      return buildTableCacheKey(sheetName) + ':meta';
+    }
+
+    function buildTableChunkCacheKey(sheetName, index) {
+      return buildTableCacheKey(sheetName) + ':chunk:' + String(index);
+    }
+
+    function cloneTableRows(rows) {
+      return (rows || []).map(ns.clone);
+    }
+
+    function refreshTableStateCacheFromState(state) {
+      tableStateCache = {};
+      ns.getSheetNames().forEach(function (sheetName) {
+        tableStateCache[sheetName] = cloneTableRows(state[sheetName]);
+      });
+    }
+
+    function readTableFromMatrix(sheetName, rows) {
+      var headers = ns.SHEET_DEFINITIONS[sheetName];
+      return rows.filter(function (row) {
+        return row.join('') !== '';
+      }).map(function (row) {
+        var record = {};
+        headers.forEach(function (header, index) {
+          record[header] = row[index] == null ? '' : String(row[index]);
+        });
+        return record;
+      });
+    }
+
     function logSlowSheetRead(sheetName, rowCount, startedAt) {
       var durationMs = new Date().getTime() - startedAt;
       if (durationMs < 100) {
@@ -581,34 +662,30 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       });
     }
 
-    function buildStateFromSpreadsheet() {
+    function readTableFromSpreadsheet(sheetName) {
+      var sheetReadStartedAt = new Date().getTime();
       var spreadsheet = getSpreadsheet();
+      var sheet = spreadsheet.getSheetByName(sheetName);
+      if (!sheet) {
+        logSlowSheetRead(sheetName, 0, sheetReadStartedAt);
+        return [];
+      }
+      var lastRow = sheet.getLastRow();
+      if (lastRow < 2) {
+        logSlowSheetRead(sheetName, 0, sheetReadStartedAt);
+        return [];
+      }
+      var headers = ns.SHEET_DEFINITIONS[sheetName];
+      var rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getDisplayValues();
+      var records = readTableFromMatrix(sheetName, rows);
+      logSlowSheetRead(sheetName, records.length, sheetReadStartedAt);
+      return records;
+    }
+
+    function buildStateFromSpreadsheet() {
       var loadedState = {};
       ns.getSheetNames().forEach(function (sheetName) {
-        var sheetReadStartedAt = new Date().getTime();
-        var sheet = spreadsheet.getSheetByName(sheetName);
-        if (!sheet) {
-          loadedState[sheetName] = [];
-          logSlowSheetRead(sheetName, 0, sheetReadStartedAt);
-          return;
-        }
-        var values = sheet.getDataRange().getDisplayValues();
-        if (values.length === 0) {
-          loadedState[sheetName] = [];
-          logSlowSheetRead(sheetName, 0, sheetReadStartedAt);
-          return;
-        }
-        var headers = values[0];
-        loadedState[sheetName] = values.slice(1).filter(function (row) {
-          return row.join('') !== '';
-        }).map(function (row) {
-          var record = {};
-          headers.forEach(function (header, index) {
-            record[header] = row[index] == null ? '' : String(row[index]);
-          });
-          return record;
-        });
-        logSlowSheetRead(sheetName, loadedState[sheetName].length, sheetReadStartedAt);
+        loadedState[sheetName] = readTableFromSpreadsheet(sheetName);
       });
       return ensureStateShapeInPlace(loadedState);
     }
@@ -668,6 +745,131 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         });
         return null;
       }
+    }
+
+    function parseCachedTable(raw, sheetName) {
+      if (!raw) {
+        return null;
+      }
+      try {
+        var parsed = JSON.parse(raw);
+        ns.assert(Array.isArray(parsed), 'invalid_data', sheetName + ' table cache の形式が不正です', 500);
+        return parsed.map(function (row) {
+          return ns.clone(row);
+        });
+      } catch (parseError) {
+        ns.logEvent('error', 'storage.cache.table_parse_failed', {
+          sheetName: sheetName,
+          message: parseError && parseError.message ? String(parseError.message) : ''
+        });
+        return null;
+      }
+    }
+
+    function readTableFromCache(cache, sheetName) {
+      if (!cache) {
+        return null;
+      }
+      var tableCacheKey = buildTableCacheKey(sheetName);
+      var tableRaw = tryReadCacheValue(cache, tableCacheKey);
+      var tableRows = parseCachedTable(tableRaw, sheetName);
+      if (tableRows) {
+        return tableRows;
+      }
+      if (tableRaw && !tableRows) {
+        tryRemoveCacheKeys(cache, [tableCacheKey]);
+      }
+
+      var tableMetaKey = buildTableMetaCacheKey(sheetName);
+      var metaRaw = tryReadCacheValue(cache, tableMetaKey);
+      if (!metaRaw) {
+        return null;
+      }
+      var meta = null;
+      try {
+        meta = JSON.parse(metaRaw);
+      } catch (error) {
+        tryRemoveCacheKeys(cache, [tableMetaKey]);
+        return null;
+      }
+      if (!meta || !meta.parts || !isFinite(Number(meta.parts)) || Number(meta.parts) < 1) {
+        tryRemoveCacheKeys(cache, [tableMetaKey]);
+        return null;
+      }
+      var parts = Number(meta.parts);
+      var payload = '';
+      for (var index = 0; index < parts; index += 1) {
+        var chunkRaw = tryReadCacheValue(cache, buildTableChunkCacheKey(sheetName, index));
+        if (!chunkRaw) {
+          var staleKeys = [tableMetaKey];
+          for (var staleIndex = 0; staleIndex < parts; staleIndex += 1) {
+            staleKeys.push(buildTableChunkCacheKey(sheetName, staleIndex));
+          }
+          tryRemoveCacheKeys(cache, staleKeys);
+          return null;
+        }
+        payload += chunkRaw;
+      }
+
+      var chunkedTableRows = parseCachedTable(payload, sheetName);
+      if (chunkedTableRows) {
+        return chunkedTableRows;
+      }
+      var invalidChunkKeys = [tableMetaKey];
+      for (var invalidIndex = 0; invalidIndex < parts; invalidIndex += 1) {
+        invalidChunkKeys.push(buildTableChunkCacheKey(sheetName, invalidIndex));
+      }
+      tryRemoveCacheKeys(cache, invalidChunkKeys);
+      return null;
+    }
+
+    function writeTableToCache(cache, sheetName, rows) {
+      if (!cache) {
+        return;
+      }
+      var payload = JSON.stringify(rows || []);
+      var tableCacheKey = buildTableCacheKey(sheetName);
+      var tableMetaKey = buildTableMetaCacheKey(sheetName);
+      var previousMetaRaw = tryReadCacheValue(cache, tableMetaKey);
+      var previousChunkCount = 0;
+      if (previousMetaRaw) {
+        try {
+          var previousMeta = JSON.parse(previousMetaRaw);
+          previousChunkCount = Number(previousMeta.parts) || 0;
+        } catch (error) {
+          previousChunkCount = 0;
+        }
+      }
+      var staleKeys = [tableCacheKey, tableMetaKey];
+      for (var staleIndex = 0; staleIndex < previousChunkCount; staleIndex += 1) {
+        staleKeys.push(buildTableChunkCacheKey(sheetName, staleIndex));
+      }
+      tryRemoveCacheKeys(cache, staleKeys);
+      try {
+        cache.put(tableCacheKey, payload, cacheTtlSeconds);
+      } catch (error) {
+        try {
+          var chunks = splitPayload(payload, chunkSize);
+          chunks.forEach(function (chunk, index) {
+            cache.put(buildTableChunkCacheKey(sheetName, index), chunk, cacheTtlSeconds);
+          });
+          cache.put(tableMetaKey, JSON.stringify({ parts: chunks.length }), cacheTtlSeconds);
+        } catch (chunkError) {
+          ns.logEvent('warn', 'storage.cache.table_write_failed', {
+            sheetName: sheetName,
+            message: chunkError && chunkError.message ? String(chunkError.message) : ''
+          });
+        }
+      }
+    }
+
+    function writeTablesToCache(cache, state) {
+      if (!cache) {
+        return;
+      }
+      ns.getSheetNames().forEach(function (sheetName) {
+        writeTableToCache(cache, sheetName, state[sheetName] || []);
+      });
     }
 
     function readChunkedStateFromCache(cache) {
@@ -772,6 +974,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       for (var staleIndex = 0; staleIndex < previousChunkCount; staleIndex += 1) {
         staleKeys.push(buildChunkCacheKey(staleIndex));
       }
+      ns.getSheetNames().forEach(function (sheetName) {
+        staleKeys.push(buildTableCacheKey(sheetName));
+      });
       tryRemoveCacheKeys(cache, staleKeys);
       try {
         cache.put(directCacheKey, payload, cacheTtlSeconds);
@@ -789,6 +994,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           });
         }
       }
+      writeTablesToCache(cache, state);
     }
 
     function buildRowValues(sheetName, row) {
@@ -838,6 +1044,35 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       sheet.getRange(nextRow, 1, 1, headers.length).setValues([buildRowValues(sheetName, row)]);
     }
 
+    function hasCachedTableRows(sheetName) {
+      return Object.prototype.hasOwnProperty.call(tableStateCache, sheetName);
+    }
+
+    function loadTable(sheetName) {
+      if (lastLoadedState) {
+        return cloneTableRows(lastLoadedState[sheetName]);
+      }
+      if (hasCachedTableRows(sheetName)) {
+        return cloneTableRows(tableStateCache[sheetName]);
+      }
+      var cache = getScriptCache();
+      var cachedTableRows = readTableFromCache(cache, sheetName);
+      if (cachedTableRows) {
+        tableStateCache[sheetName] = cloneTableRows(cachedTableRows);
+        return cloneTableRows(cachedTableRows);
+      }
+      var cachedState = readStateFromCache(cache);
+      if (cachedState) {
+        lastLoadedState = cachedState;
+        refreshTableStateCacheFromState(cachedState);
+        return cloneTableRows(cachedState[sheetName]);
+      }
+      var loadedRows = readTableFromSpreadsheet(sheetName);
+      tableStateCache[sheetName] = cloneTableRows(loadedRows);
+      writeTableToCache(cache, sheetName, loadedRows);
+      return cloneTableRows(loadedRows);
+    }
+
     function updateRunItemWithLog(runItemId, updatedRunItem, log) {
       var spreadsheet = getSpreadsheet();
       var runItemsSheet = spreadsheet.getSheetByName('checklist_run_items') || spreadsheet.insertSheet('checklist_run_items');
@@ -851,16 +1086,26 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         .setValues([buildRowValues('checklist_run_items', updatedRunItem)]);
       appendRowToSheet(logsSheet, 'checklist_item_logs', log);
 
-      var currentState = lastLoadedState || load();
-      var nextState = ns.clone(currentState);
-      var runItemIndex = nextState.checklist_run_items.findIndex(function (row) {
+      var runItems = loadTable('checklist_run_items');
+      var logs = loadTable('checklist_item_logs');
+      var runItemIndex = runItems.findIndex(function (row) {
         return row.id === runItemId;
       });
       ns.assert(runItemIndex !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
-      nextState.checklist_run_items[runItemIndex] = ns.clone(updatedRunItem);
-      nextState.checklist_item_logs.push(ns.clone(log));
-      lastLoadedState = nextState;
-      writeStateToCache(getScriptCache(), nextState);
+      runItems[runItemIndex] = ns.clone(updatedRunItem);
+      logs.push(ns.clone(log));
+      tableStateCache.checklist_run_items = cloneTableRows(runItems);
+      tableStateCache.checklist_item_logs = cloneTableRows(logs);
+
+      var cache = getScriptCache();
+      if (lastLoadedState) {
+        lastLoadedState.checklist_run_items = cloneTableRows(runItems);
+        lastLoadedState.checklist_item_logs = cloneTableRows(logs);
+        writeStateToCache(cache, lastLoadedState);
+        return;
+      }
+      writeTableToCache(cache, 'checklist_run_items', runItems);
+      writeTableToCache(cache, 'checklist_item_logs', logs);
     }
 
     function load() {
@@ -869,6 +1114,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       var cachedState = readStateFromCache(cache);
       if (cachedState) {
         lastLoadedState = cachedState;
+        refreshTableStateCacheFromState(cachedState);
         ns.logEvent('info', 'storage.load', {
           source: 'cache',
           durationMs: new Date().getTime() - loadStartedAt
@@ -877,6 +1123,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }
       var loadedState = buildStateFromSpreadsheet();
       lastLoadedState = loadedState;
+      refreshTableStateCacheFromState(loadedState);
       writeStateToCache(cache, loadedState);
       ns.logEvent('info', 'storage.load', {
         source: 'spreadsheet',
@@ -936,12 +1183,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }
 
       lastLoadedState = nextState;
+      refreshTableStateCacheFromState(nextState);
       var cache = getScriptCache();
       writeStateToCache(cache, nextState);
     }
 
     return {
       load: load,
+      loadTable: loadTable,
       save: save,
       updateRunItemWithLog: updateRunItemWithLog
     };

@@ -54,29 +54,60 @@ function createStoresSheet(initialRows) {
     writes: 0
   };
 
+  function ensureCell(rowIndex, colIndex) {
+    while (values.length <= rowIndex) {
+      values.push(new Array(headers.length).fill(''));
+    }
+    while (values[rowIndex].length <= colIndex) {
+      values[rowIndex].push('');
+    }
+  }
+
   return {
     sheet: {
-      getDataRange() {
-        return {
-          getDisplayValues() {
-            counters.reads += 1;
-            return values.map((row) => row.slice());
-          },
-          getValues() {
-            counters.reads += 1;
-            return values.map((row) => row.slice());
-          }
-        };
+      getLastRow() {
+        return values.length;
       },
       clearContents() {
         counters.clears += 1;
         values = [headers.slice()];
       },
-      getRange() {
+      getRange(row, col, numRows, numCols) {
         return {
+          getDisplayValues() {
+            counters.reads += 1;
+            const rows = [];
+            for (let rowOffset = 0; rowOffset < numRows; rowOffset += 1) {
+              const cells = [];
+              for (let colOffset = 0; colOffset < numCols; colOffset += 1) {
+                const sourceRow = values[row - 1 + rowOffset] || [];
+                cells.push(String(sourceRow[col - 1 + colOffset] == null ? '' : sourceRow[col - 1 + colOffset]));
+              }
+              rows.push(cells);
+            }
+            return rows;
+          },
+          getValues() {
+            counters.reads += 1;
+            const rows = [];
+            for (let rowOffset = 0; rowOffset < numRows; rowOffset += 1) {
+              const cells = [];
+              for (let colOffset = 0; colOffset < numCols; colOffset += 1) {
+                const sourceRow = values[row - 1 + rowOffset] || [];
+                cells.push(String(sourceRow[col - 1 + colOffset] == null ? '' : sourceRow[col - 1 + colOffset]));
+              }
+              rows.push(cells);
+            }
+            return rows;
+          },
           setValues(nextValues) {
             counters.writes += 1;
-            values = nextValues.map((row) => row.map((cell) => String(cell == null ? '' : cell)));
+            for (let rowOffset = 0; rowOffset < numRows; rowOffset += 1) {
+              for (let colOffset = 0; colOffset < numCols; colOffset += 1) {
+                ensureCell(row - 1 + rowOffset, col - 1 + colOffset);
+                values[row - 1 + rowOffset][col - 1 + colOffset] = String(nextValues[rowOffset][colOffset] == null ? '' : nextValues[rowOffset][colOffset]);
+              }
+            }
           }
         };
       }
@@ -276,13 +307,13 @@ test('Spreadsheet 読み込みは display values を使い、0 と false を空�
             return null;
           }
           return {
-            getDataRange() {
+            getLastRow() {
+              return 2;
+            },
+            getRange() {
               return {
                 getDisplayValues() {
-                  return [
-                    ['id', 'name', 'status', 'created_at'],
-                    ['store-001', 0, false, '2026-04-20T00:00:00Z']
-                  ];
+                  return [['store-001', 0, false, '2026-04-20T00:00:00Z']];
                 }
               };
             }
@@ -396,6 +427,67 @@ test('runItemIds が既知ならログ一括取得は storage.load を 1 回に�
   assert.equal(loadCount, 1);
   assert.equal(logs.length, 1);
   assert.equal(logs[0].id, 'log-001');
+});
+
+test('loadTable 対応 storage では必要シートだけを遅延ロードする', async () => {
+  const runtime = await loadGasRuntime();
+  const dataset = createBaseDataset();
+  dataset.checklist_runs = [
+    {
+      id: 'run-001',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-21',
+      status: 'open',
+      notified_at: '2026-04-21T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-21T01:30:00Z'
+    }
+  ];
+  dataset.checklist_run_items = [
+    {
+      id: 'run-item-001',
+      run_id: 'run-001',
+      template_item_id: 'tmpl-item-001',
+      title: '開店準備',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_at: '',
+      updated_at: '2026-04-21T01:30:00Z'
+    }
+  ];
+  let state = JSON.parse(JSON.stringify(dataset));
+  let loadCount = 0;
+  const loadTableCalls = [];
+  const storage = {
+    load() {
+      loadCount += 1;
+      return JSON.parse(JSON.stringify(state));
+    },
+    loadTable(sheetName) {
+      loadTableCalls.push(sheetName);
+      return JSON.parse(JSON.stringify(state[sheetName] || []));
+    },
+    save(nextState) {
+      state = JSON.parse(JSON.stringify(nextState));
+    }
+  };
+  const repository = runtime.Ogawaya.createSpreadsheetRepository({ storage });
+
+  const store = repository.findStoreById('store-001');
+  const users = repository.listUsersByStore('store-001');
+  const run = repository.findRunByStoreAndDate('store-001', '2026-04-21');
+  const items = repository.listRunItems('run-001');
+  const usersAgain = repository.listUsersByStore('store-001');
+
+  assert.equal(loadCount, 0);
+  assert.equal(store.id, 'store-001');
+  assert.equal(users.length, 3);
+  assert.equal(run.id, 'run-001');
+  assert.equal(items.length, 1);
+  assert.equal(usersAgain.length, 3);
+  assert.deepEqual(loadTableCalls, ['stores', 'users', 'checklist_runs', 'checklist_run_items']);
 });
 
 test('Spreadsheet state cache 有効時は新規 repository でも再読込を回避する', async () => {
