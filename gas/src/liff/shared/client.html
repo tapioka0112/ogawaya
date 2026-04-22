@@ -346,9 +346,9 @@
           details: details || {}
         };
 
-        function sendHttpFallback() {
+        function sendViaHttp() {
           if (!appBaseUrl || !global.fetch) {
-            return;
+            return false;
           }
           var query = {
             name: payload.name,
@@ -358,22 +358,30 @@
             statusCode: payload.details && payload.details.statusCode ? String(payload.details.statusCode) : ''
           };
           var url = appendQuery(appBaseUrl + '/api/client-events', query);
-          global.fetch(url, { method: 'GET' }).catch(function () {});
+          global.fetch(url, {
+            method: 'GET',
+            mode: 'no-cors',
+            keepalive: true
+          }).catch(function () {});
+          return true;
         }
 
+        // google.script.run のキュー詰まりを避けるため、まず HTTP で送る。
+        if (sendViaHttp()) {
+          return;
+        }
         if (!global.google || !global.google.script || !global.google.script.run) {
-          sendHttpFallback();
           return;
         }
         try {
           global.google.script.run
             .withFailureHandler(function () {
-              sendHttpFallback();
+              sendViaHttp();
             })
             .logClientEvent(payload);
         } catch (error) {
           // クライアントログ送信は本処理を阻害しない
-          sendHttpFallback();
+          sendViaHttp();
         }
       }
 
@@ -800,18 +808,37 @@
 
       async function refresh() {
         clearError();
+        var incompleteTask = null;
+        if (api.getTodayIncomplete) {
+          incompleteTask = api.getTodayIncomplete(state.idToken).then(function (payload) {
+            return { ok: true, payload: payload };
+          }).catch(function (error) {
+            return { ok: false, error: error };
+          });
+        }
+
         var checklist = await api.getTodayChecklist(state.idToken);
         renderOverview(checklist);
         renderChecklist(checklist);
 
-        if (api.getTodayIncomplete) {
-          var incomplete = await api.getTodayIncomplete(state.idToken);
-          renderIncomplete(incomplete);
-        }
+        var logsTask = loadLogs();
+        var templatesTask = null;
         if (canManageTemplates()) {
-          await loadTemplates();
+          templatesTask = loadTemplates();
         }
-        await loadLogs();
+
+        if (incompleteTask) {
+          var incompleteResult = await incompleteTask;
+          if (!incompleteResult.ok) {
+            throw incompleteResult.error;
+          }
+          renderIncomplete(incompleteResult.payload);
+        }
+
+        if (templatesTask) {
+          await templatesTask;
+        }
+        await logsTask;
       }
 
       async function createTemplate() {
@@ -1019,6 +1046,7 @@
 
       async function init() {
         bindEvents();
+        var initStartedAt = typeof Date === 'function' && typeof Date.now === 'function' ? Date.now() : 0;
         setText(elements.screenMode, mode === 'admin' ? '管理者 LIFF' : '従業員 LIFF');
         setLinkMode(false);
         emitClientEvent('init.start', {});
@@ -1067,13 +1095,15 @@
           await loadCurrentUser();
           await refresh();
           emitClientEvent('init.ready', {
-            role: state.me && state.me.role ? String(state.me.role) : ''
+            role: state.me && state.me.role ? String(state.me.role) : '',
+            elapsedMs: initStartedAt ? Date.now() - initStartedAt : 0
           });
         } catch (error) {
           emitClientEvent('init.error', {
             message: error && error.message ? String(error.message) : '',
             code: error && error.code ? String(error.code) : '',
-            statusCode: error && error.statusCode ? Number(error.statusCode) : 0
+            statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
+            elapsedMs: initStartedAt ? Date.now() - initStartedAt : 0
           });
           if (isUnlinkedUserError(error) || isUnauthorizedError(error)) {
             renderUnlinkedState();
