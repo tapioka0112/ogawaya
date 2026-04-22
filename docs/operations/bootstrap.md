@@ -34,7 +34,7 @@
 - `ALLOW_ANONYMOUS_ACCESS`（MVP は `true` 推奨）
 - `DEBUG_EVENT_SHEET_ENABLED`（通常運用は `false` 推奨、調査時のみ `true`）
 - `SPREADSHEET_STATE_CACHE_ENABLED`（通常運用は `true` 推奨）
-- `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（通常運用は `30`）
+- `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（通常運用は `300`）
 - `SPREADSHEET_STATE_CACHE_CHUNK_SIZE`（通常運用は `90000`）
 
 コピペ用のテンプレートは [script-properties.example.json](./import/script-properties.example.json) を使う。

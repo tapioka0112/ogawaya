@@ -40,6 +40,9 @@ function createSheet(initialValues = []) {
       return {
         getDisplayValues() {
           return values.map((row) => row.slice());
+        },
+        getValues() {
+          return values.map((row) => row.slice());
         }
       };
     },

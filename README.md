@@ -27,7 +27,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - MVP で `ALLOW_ANONYMOUS_ACCESS=true` の場合、当日チェックリストが未作成なら初回アクセス時に自動生成する。
 - `DEBUG_EVENT_SHEET_ENABLED=false` のときは `debug_events` への追記を止め、実行速度を優先する（Cloud Logs は継続）。
 - `SPREADSHEET_STATE_CACHE_ENABLED=true`（既定）で Spreadsheet state を ScriptCache に保持し、連続アクセス時の読み込みを短縮する。
-- `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（既定 `30`）で state cache の保持秒数を調整できる。
+- `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（既定 `300`）で state cache の保持秒数を調整できる。
 - `SPREADSHEET_STATE_CACHE_CHUNK_SIZE`（既定 `90000`）で cache 分割サイズを調整できる。
 - API 実行ログ `api.request.success` / `api.request.failed` には `durationMs` が出るため、遅延の実測比較に使える。
 

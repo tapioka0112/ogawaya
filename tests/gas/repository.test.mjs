@@ -61,6 +61,10 @@ function createStoresSheet(initialRows) {
           getDisplayValues() {
             counters.reads += 1;
             return values.map((row) => row.slice());
+          },
+          getValues() {
+            counters.reads += 1;
+            return values.map((row) => row.slice());
           }
         };
       },
@@ -108,6 +112,10 @@ function createSheet(headers, initialRows) {
           getDisplayValues() {
             counters.reads += 1;
             return values.map((row) => row.slice());
+          },
+          getValues() {
+            counters.reads += 1;
+            return values.map((row) => row.slice());
           }
         };
       },
@@ -121,6 +129,19 @@ function createSheet(headers, initialRows) {
       getRange(row, col, numRows, numCols) {
         return {
           getDisplayValues() {
+            counters.reads += 1;
+            const rows = [];
+            for (let rowOffset = 0; rowOffset < numRows; rowOffset += 1) {
+              const cells = [];
+              for (let colOffset = 0; colOffset < numCols; colOffset += 1) {
+                const sourceRow = values[row - 1 + rowOffset] || [];
+                cells.push(String(sourceRow[col - 1 + colOffset] == null ? '' : sourceRow[col - 1 + colOffset]));
+              }
+              rows.push(cells);
+            }
+            return rows;
+          },
+          getValues() {
             counters.reads += 1;
             const rows = [];
             for (let rowOffset = 0; rowOffset < numRows; rowOffset += 1) {
@@ -246,7 +267,7 @@ test('不正データ投入時はロールバックされる', async () => {
   assert.equal(repository.listTable('users').length, initialDataset.users.length);
 });
 
-test('Spreadsheet 読み込みは display values を使い、0 と false を空文字に潰さない', async () => {
+test('Spreadsheet 読み込みは values を使い、0 と false を空文字に潰さない', async () => {
   const runtime = await loadGasRuntime({
     spreadsheetFactory() {
       return {
@@ -257,7 +278,7 @@ test('Spreadsheet 読み込みは display values を使い、0 と false を空�
           return {
             getDataRange() {
               return {
-                getDisplayValues() {
+                getValues() {
                   return [
                     ['id', 'name', 'status', 'created_at'],
                     ['store-001', 0, false, '2026-04-20T00:00:00Z']

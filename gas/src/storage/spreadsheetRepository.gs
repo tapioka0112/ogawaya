@@ -473,7 +473,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var cacheEnabled = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_ENABLED') !== 'false';
     var cacheTtlRaw = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_TTL_SECONDS');
     var chunkSizeRaw = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_CHUNK_SIZE');
-    var cacheTtlSeconds = 30;
+    var cacheTtlSeconds = 300;
     var chunkSize = 90000;
     var lastLoadedState = null;
     var cachedSpreadsheet = null;
@@ -527,7 +527,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           loadedState[sheetName] = [];
           return;
         }
-        var values = sheet.getDataRange().getDisplayValues();
+        var values = sheet.getDataRange().getValues();
         if (values.length === 0) {
           loadedState[sheetName] = [];
           return;
@@ -738,7 +738,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
         return;
       }
-      var headerValues = sheet.getRange(1, 1, 1, headers.length).getDisplayValues()[0];
+      var headerValues = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
       var isSameHeader = headers.every(function (header, index) {
         return String(headerValues[index] == null ? '' : headerValues[index]) === header;
       });
@@ -753,7 +753,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       ns.assert(idColumnIndex > 0, 'config_error', sheetName + ' に id 列がありません', 500);
       var lastRow = sheet.getLastRow();
       ns.assert(lastRow >= 2, 'not_found', sheetName + ' が見つかりません', 404);
-      var idValues = sheet.getRange(2, idColumnIndex, lastRow - 1, 1).getDisplayValues();
+      var idValues = sheet.getRange(2, idColumnIndex, lastRow - 1, 1).getValues();
       for (var offset = 0; offset < idValues.length; offset += 1) {
         if (String(idValues[offset][0] == null ? '' : idValues[offset][0]) === rowId) {
           return offset + 2;
