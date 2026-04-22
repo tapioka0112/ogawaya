@@ -267,7 +267,7 @@ test('不正データ投入時はロールバックされる', async () => {
   assert.equal(repository.listTable('users').length, initialDataset.users.length);
 });
 
-test('Spreadsheet 読み込みは values を使い、0 と false を空文字に潰さない', async () => {
+test('Spreadsheet 読み込みは display values を使い、0 と false を空文字に潰さない', async () => {
   const runtime = await loadGasRuntime({
     spreadsheetFactory() {
       return {
@@ -278,7 +278,7 @@ test('Spreadsheet 読み込みは values を使い、0 と false を空文字に
           return {
             getDataRange() {
               return {
-                getValues() {
+                getDisplayValues() {
                   return [
                     ['id', 'name', 'status', 'created_at'],
                     ['store-001', 0, false, '2026-04-20T00:00:00Z']

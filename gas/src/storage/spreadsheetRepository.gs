@@ -527,7 +527,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           loadedState[sheetName] = [];
           return;
         }
-        var values = sheet.getDataRange().getValues();
+        var values = sheet.getDataRange().getDisplayValues();
         if (values.length === 0) {
           loadedState[sheetName] = [];
           return;
