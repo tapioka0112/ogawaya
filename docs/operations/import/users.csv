@@ -1,0 +1,4 @@
+id,store_id,name,employee_code,passcode,role,status,created_at
+user-pt-001,store-001,田中 花子,PT001,111111,part_time,active,2026-04-22T00:00:00Z
+user-mg-001,store-001,山田 太郎,MG001,222222,manager,active,2026-04-22T00:00:00Z
+user-ad-001,store-001,本部 次郎,AD001,333333,admin,active,2026-04-22T00:00:00Z

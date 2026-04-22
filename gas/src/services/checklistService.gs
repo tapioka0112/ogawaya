@@ -1,3 +1,5 @@
+var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
+
 (function (ns) {
   function listNotificationTypes() {
     return Object.keys(ns.NOTIFICATION_TYPES).map(function (key) {

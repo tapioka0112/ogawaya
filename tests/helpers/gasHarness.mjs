@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 
 const GAS_FILE_PATHS = [
   'gas/src/shared/constants.gs',
+  'gas/src/shared/bootstrap.gs',
   'gas/src/storage/spreadsheetRepository.gs',
   'gas/src/services/notificationService.gs',
   'gas/src/services/checklistService.gs',
@@ -96,6 +97,7 @@ function createScriptProperties(initialProperties = {}) {
 
 export async function loadGasRuntime(options = {}) {
   const cwd = options.cwd ?? process.cwd();
+  const filePaths = options.filePaths ?? GAS_FILE_PATHS;
   const scriptProperties = createScriptProperties(options.scriptProperties);
   const context = {
     console,
@@ -165,7 +167,7 @@ export async function loadGasRuntime(options = {}) {
   context.globalThis = context;
   vm.createContext(context);
 
-  for (const relativePath of GAS_FILE_PATHS) {
+  for (const relativePath of filePaths) {
     const absolutePath = path.join(cwd, relativePath);
     const code = await readFile(absolutePath, 'utf8');
     vm.runInContext(code, context, { filename: absolutePath });

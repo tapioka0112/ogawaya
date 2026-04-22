@@ -1,3 +1,5 @@
+var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
+
 (function (ns) {
   function buildNotificationRow(repository, clock, run, user, type, message, status, errorMessage) {
     return repository.appendNotification({

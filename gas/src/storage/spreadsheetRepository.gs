@@ -1,3 +1,5 @@
+var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
+
 (function (ns) {
   function ensureStateShape(state) {
     var nextState = ns.clone(state || {});

@@ -1,3 +1,5 @@
+var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
+
 (function (ns) {
   ns.createWebhookHandler = function (options) {
     var appBaseUrl = options.appBaseUrl || '';
