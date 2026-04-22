@@ -246,6 +246,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return appendRow('checklist_runs', run);
     }
 
+    function createChecklistRunWithItems(run, items) {
+      return commit(function (draftState) {
+        draftState.checklist_runs.push(ns.clone(run));
+        items.forEach(function (item) {
+          draftState.checklist_run_items.push(ns.clone(item));
+        });
+        return ns.clone(run);
+      });
+    }
+
     function listRunItems(runId) {
       return ns.sortBySortOrder(listTable('checklist_run_items').filter(function (item) {
         return item.run_id === runId;
@@ -388,6 +398,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       appendLog: appendLog,
       appendNotification: appendNotification,
       createChecklistRun: createChecklistRun,
+      createChecklistRunWithItems: createChecklistRunWithItems,
       createLineAccountLink: createLineAccountLink,
       createRunItems: createRunItems,
       createTemplate: createTemplate,
@@ -434,29 +445,57 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   };
 
   ns.createSpreadsheetStorage = function (options) {
-    var spreadsheetId = options.spreadsheetId || PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+    var scriptProperties = PropertiesService.getScriptProperties();
+    var spreadsheetId = options.spreadsheetId || scriptProperties.getProperty('SPREADSHEET_ID');
     ns.assert(spreadsheetId, 'config_error', 'SPREADSHEET_ID が未設定です', 500);
+    var cacheKey = 'ogawaya:spreadsheet-state:v1:' + spreadsheetId;
+    var cacheEnabled = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_ENABLED') !== 'false';
+    var cacheTtlRaw = scriptProperties.getProperty('SPREADSHEET_STATE_CACHE_TTL_SECONDS');
+    var cacheTtlSeconds = 30;
+    var lastLoadedState = null;
+    var cachedSpreadsheet = null;
 
-    function getSpreadsheet() {
-      return SpreadsheetApp.openById(spreadsheetId);
+    if (cacheTtlRaw) {
+      var parsedCacheTtl = Number(cacheTtlRaw);
+      ns.assert(
+        isFinite(parsedCacheTtl) && parsedCacheTtl >= 1 && Math.floor(parsedCacheTtl) === parsedCacheTtl,
+        'config_error',
+        'SPREADSHEET_STATE_CACHE_TTL_SECONDS は 1 以上の整数で指定してください',
+        500
+      );
+      cacheTtlSeconds = parsedCacheTtl;
     }
 
-    function load() {
+    function getSpreadsheet() {
+      if (!cachedSpreadsheet) {
+        cachedSpreadsheet = SpreadsheetApp.openById(spreadsheetId);
+      }
+      return cachedSpreadsheet;
+    }
+
+    function getScriptCache() {
+      if (!cacheEnabled || typeof CacheService === 'undefined' || !CacheService) {
+        return null;
+      }
+      return CacheService.getScriptCache();
+    }
+
+    function buildStateFromSpreadsheet() {
       var spreadsheet = getSpreadsheet();
-      var state = {};
+      var loadedState = {};
       ns.getSheetNames().forEach(function (sheetName) {
         var sheet = spreadsheet.getSheetByName(sheetName);
         if (!sheet) {
-          state[sheetName] = [];
+          loadedState[sheetName] = [];
           return;
         }
         var values = sheet.getDataRange().getDisplayValues();
         if (values.length === 0) {
-          state[sheetName] = [];
+          loadedState[sheetName] = [];
           return;
         }
         var headers = values[0];
-        state[sheetName] = values.slice(1).filter(function (row) {
+        loadedState[sheetName] = values.slice(1).filter(function (row) {
           return row.join('') !== '';
         }).map(function (row) {
           var record = {};
@@ -466,22 +505,124 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           return record;
         });
       });
-      return ensureStateShape(state);
+      return ensureStateShape(loadedState);
+    }
+
+    function readStateFromCache(cache) {
+      if (!cache) {
+        return null;
+      }
+      var raw = '';
+      try {
+        raw = cache.get(cacheKey);
+      } catch (error) {
+        ns.logEvent('error', 'storage.cache.read_failed', {
+          message: error && error.message ? String(error.message) : ''
+        });
+        return null;
+      }
+      if (!raw) {
+        return null;
+      }
+      try {
+        var parsed = JSON.parse(raw);
+        return ensureStateShape(parsed);
+      } catch (parseError) {
+        ns.logEvent('error', 'storage.cache.parse_failed', {
+          message: parseError && parseError.message ? String(parseError.message) : ''
+        });
+        try {
+          cache.remove(cacheKey);
+        } catch (removeError) {
+          ns.logEvent('error', 'storage.cache.remove_failed', {
+            message: removeError && removeError.message ? String(removeError.message) : ''
+          });
+        }
+        return null;
+      }
+    }
+
+    function writeStateToCache(cache, state) {
+      if (!cache) {
+        return;
+      }
+      var payload = JSON.stringify(state);
+      try {
+        cache.put(cacheKey, payload, cacheTtlSeconds);
+      } catch (error) {
+        ns.logEvent('error', 'storage.cache.write_failed', {
+          message: error && error.message ? String(error.message) : '',
+          payloadLength: payload.length
+        });
+      }
+    }
+
+    function load() {
+      var cache = getScriptCache();
+      var cachedState = readStateFromCache(cache);
+      if (cachedState) {
+        lastLoadedState = ns.clone(cachedState);
+        return ns.clone(cachedState);
+      }
+      var loadedState = buildStateFromSpreadsheet();
+      lastLoadedState = ns.clone(loadedState);
+      writeStateToCache(cache, loadedState);
+      return ns.clone(loadedState);
+    }
+
+    function buildSheetValues(headers, rows) {
+      return [headers].concat(rows.map(function (row) {
+        return headers.map(function (header) {
+          return row[header] == null ? '' : String(row[header]);
+        });
+      }));
+    }
+
+    function isSameMatrix(left, right) {
+      if (left.length !== right.length) {
+        return false;
+      }
+      for (var rowIndex = 0; rowIndex < left.length; rowIndex += 1) {
+        if (left[rowIndex].length !== right[rowIndex].length) {
+          return false;
+        }
+        for (var colIndex = 0; colIndex < left[rowIndex].length; colIndex += 1) {
+          if (String(left[rowIndex][colIndex]) !== String(right[rowIndex][colIndex])) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    function hasSheetChanged(headers, currentRows, nextRows) {
+      var currentValues = buildSheetValues(headers, currentRows || []);
+      var nextValues = buildSheetValues(headers, nextRows || []);
+      return !isSameMatrix(currentValues, nextValues);
     }
 
     function save(state) {
-      var spreadsheet = getSpreadsheet();
-      ns.getSheetNames().forEach(function (sheetName) {
+      var nextState = ensureStateShape(ns.clone(state));
+      var currentState = lastLoadedState || load();
+      var changedSheetNames = ns.getSheetNames().filter(function (sheetName) {
         var headers = ns.SHEET_DEFINITIONS[sheetName];
-        var sheet = spreadsheet.getSheetByName(sheetName) || spreadsheet.insertSheet(sheetName);
-        sheet.clearContents();
-        var values = [headers].concat(state[sheetName].map(function (row) {
-          return headers.map(function (header) {
-            return row[header] || '';
-          });
-        }));
-        sheet.getRange(1, 1, values.length, headers.length).setValues(values);
+        return hasSheetChanged(headers, currentState[sheetName], nextState[sheetName]);
       });
+
+      if (changedSheetNames.length > 0) {
+        var spreadsheet = getSpreadsheet();
+        changedSheetNames.forEach(function (sheetName) {
+          var headers = ns.SHEET_DEFINITIONS[sheetName];
+          var sheet = spreadsheet.getSheetByName(sheetName) || spreadsheet.insertSheet(sheetName);
+          var nextValues = buildSheetValues(headers, nextState[sheetName]);
+          sheet.clearContents();
+          sheet.getRange(1, 1, nextValues.length, headers.length).setValues(nextValues);
+        });
+      }
+
+      lastLoadedState = ns.clone(nextState);
+      var cache = getScriptCache();
+      writeStateToCache(cache, nextState);
     }
 
     return {

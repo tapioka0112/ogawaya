@@ -73,7 +73,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   }
 
-  function buildChecklistResponse(repository, store, run, items) {
+  function buildChecklistResponse(repository, currentUser, run, items) {
     var usersById = {};
     repository.listTable('users').forEach(function (user) {
       usersById[user.id] = user;
@@ -86,9 +86,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return {
       runId: run.id,
       templateId: run.template_id,
-      storeName: store.name,
+      storeName: currentUser.store.name,
       targetDate: run.target_date,
       status: run.status,
+      currentUser: ns.buildUserSummary(currentUser.user, currentUser.store),
       progress: {
         total: items.length,
         checked: checkedCount
@@ -260,8 +261,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           targetDate: targetDate
         });
         var now = ns.toIsoString(clock.now());
-        var createdRun = repository.createChecklistRun({
-          id: Utilities.getUuid(),
+        var runId = Utilities.getUuid();
+        var runPayload = {
+          id: runId,
           template_id: template.id,
           store_id: template.store_id,
           target_date: targetDate,
@@ -269,12 +271,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           notified_at: now,
           closed_at: '',
           created_at: now
-        });
+        };
         var templateItems = repository.listTemplateItems(template.id);
-        repository.createRunItems(templateItems.map(function (templateItem) {
+        var runItems = templateItems.map(function (templateItem) {
           return {
             id: Utilities.getUuid(),
-            run_id: createdRun.id,
+            run_id: runId,
             template_item_id: templateItem.id,
             title: templateItem.title,
             sort_order: templateItem.sort_order,
@@ -283,7 +285,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             checked_at: '',
             updated_at: now
           };
-        }));
+        });
+        var createdRun = repository.createChecklistRunWithItems(runPayload, runItems);
         return createdRun;
       }
 
@@ -431,7 +434,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var currentUser = requireAuthenticatedUser(query);
         var run = getTodayRunForUser(currentUser.user);
         var items = repository.listRunItems(run.id);
-        return buildChecklistResponse(repository, currentUser.store, run, items);
+        return buildChecklistResponse(repository, currentUser, run, items);
       },
 
       getTodayIncomplete: function (query) {
@@ -671,8 +674,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           }
 
           var now = ns.toIsoString(clock.now());
-          var run = repository.createChecklistRun({
-            id: Utilities.getUuid(),
+          var runId = Utilities.getUuid();
+          var runPayload = {
+            id: runId,
             template_id: template.id,
             store_id: template.store_id,
             target_date: clock.today(),
@@ -680,12 +684,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             notified_at: now,
             closed_at: '',
             created_at: now
-          });
+          };
           var templateItems = repository.listTemplateItems(template.id);
-          repository.createRunItems(templateItems.map(function (templateItem) {
+          var run = repository.createChecklistRunWithItems(runPayload, templateItems.map(function (templateItem) {
             return {
               id: Utilities.getUuid(),
-              run_id: run.id,
+              run_id: runId,
               template_item_id: templateItem.id,
               title: templateItem.title,
               sort_order: templateItem.sort_order,

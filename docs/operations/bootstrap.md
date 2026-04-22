@@ -33,10 +33,14 @@
 - `LIFF_ID`
 - `ALLOW_ANONYMOUS_ACCESS`（MVP は `true` 推奨）
 - `DEBUG_EVENT_SHEET_ENABLED`（通常運用は `false` 推奨、調査時のみ `true`）
+- `SPREADSHEET_STATE_CACHE_ENABLED`（通常運用は `true` 推奨）
+- `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（通常運用は `30`）
 
 コピペ用のテンプレートは [script-properties.example.json](./import/script-properties.example.json) を使う。
 
 Spreadsheet 初期シートだけ先に作るなら、まず `SPREADSHEET_ID` を設定してから `bootstrapSpreadsheetTemplates` を実行し、その後に残りの Script Properties を埋める。
+
+パフォーマンス確認は、Apps Script 実行ログの `api.request.success` / `api.request.failed` の `durationMs` を見る。
 
 ## 3. デプロイ前チェック
 

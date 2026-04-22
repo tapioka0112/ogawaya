@@ -166,6 +166,8 @@ test('同日チェックリストを返す', async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.targetDate, '2026-04-21');
   assert.equal(response.body.items.length, 2);
+  assert.equal(response.body.currentUser.userId, 'user-pt-001');
+  assert.equal(response.body.currentUser.role, 'part_time');
 });
 
 test('匿名アクセス有効時は当日 run が無ければ自動生成して返す', async () => {
@@ -181,6 +183,7 @@ test('匿名アクセス有効時は当日 run が無ければ自動生成して
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.targetDate, '2026-04-22');
   assert.equal(response.body.items.length, 2);
+  assert.equal(response.body.currentUser.userId, 'user-ad-001');
   assert.equal(app.repository.listRunsByDate('2026-04-22').length, 1);
 });
 

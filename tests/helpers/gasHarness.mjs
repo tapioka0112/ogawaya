@@ -95,10 +95,28 @@ function createScriptProperties(initialProperties = {}) {
   };
 }
 
+function createScriptCache(initialEntries = {}) {
+  const entries = new Map(Object.entries(initialEntries));
+  return {
+    get(key) {
+      return entries.has(key) ? entries.get(key) : null;
+    },
+    put(key, value) {
+      entries.set(key, String(value));
+    },
+    remove(key) {
+      entries.delete(key);
+    }
+  };
+}
+
 export async function loadGasRuntime(options = {}) {
   const cwd = options.cwd ?? process.cwd();
   const filePaths = options.filePaths ?? GAS_FILE_PATHS;
   const scriptProperties = createScriptProperties(options.scriptProperties);
+  const scriptCache = options.cacheFactory
+    ? options.cacheFactory()
+    : (options.enableCacheService === true ? createScriptCache() : null);
   const context = {
     console,
     JSON,
@@ -163,6 +181,13 @@ export async function loadGasRuntime(options = {}) {
     },
     Utilities: createUtilities()
   };
+  if (options.enableCacheService === true || options.cacheFactory) {
+    context.CacheService = {
+      getScriptCache() {
+        return scriptCache;
+      }
+    };
+  }
   context.global = context;
   context.globalThis = context;
   vm.createContext(context);

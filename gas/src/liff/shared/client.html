@@ -472,12 +472,30 @@
         }
       }
 
+      function applyCurrentUser(currentUser) {
+        if (!currentUser) {
+          return;
+        }
+        state.me = currentUser;
+        renderRole(state.me.role);
+      }
+
       function renderOverview(checklist) {
         state.checklist = checklist;
         setText(elements.storeName, checklist.storeName || (state.me && state.me.store && state.me.store.name) || '-');
         setText(elements.targetDate, checklist.targetDate || '-');
         if (checklist.progress) {
           setText(elements.progressSummary, checklist.progress.checked + ' / ' + checklist.progress.total);
+        }
+      }
+
+      function rerenderRoleDependentSections() {
+        if (state.checklist) {
+          renderOverview(state.checklist);
+          renderChecklist(state.checklist);
+        }
+        if (state.incomplete) {
+          renderIncomplete(state.incomplete);
         }
       }
 
@@ -848,8 +866,7 @@
       }
 
       async function loadCurrentUser() {
-        state.me = await api.getMe(state.idToken);
-        renderRole(state.me.role);
+        applyCurrentUser(await api.getMe(state.idToken));
       }
 
       async function linkAccount() {
@@ -866,9 +883,12 @@
         if (elements.linkPasscodeInput) {
           elements.linkPasscodeInput.value = '';
         }
-        await loadCurrentUser();
         setLinkMode(false);
         await refresh();
+        if (!state.me) {
+          await loadCurrentUser();
+          rerenderRoleDependentSections();
+        }
         emitClientEvent('link.success', {
           userId: state.me && state.me.userId ? String(state.me.userId) : ''
         });
@@ -923,6 +943,9 @@
         }
 
         var checklist = await api.getTodayChecklist(state.idToken);
+        if (checklist && checklist.currentUser) {
+          applyCurrentUser(checklist.currentUser);
+        }
         renderOverview(checklist);
         renderChecklist(checklist);
 
@@ -1202,10 +1225,13 @@
             lineVersion: authResult.context && authResult.context.lineVersion ? String(authResult.context.lineVersion) : '',
             language: authResult.context && authResult.context.language ? String(authResult.context.language) : ''
           });
-          await loadCurrentUser();
           await refresh({
             includeAncillary: false
           });
+          if (!state.me) {
+            await loadCurrentUser();
+            rerenderRoleDependentSections();
+          }
           loadAncillaryInBackground();
           emitClientEvent('init.ready', {
             role: state.me && state.me.role ? String(state.me.role) : '',

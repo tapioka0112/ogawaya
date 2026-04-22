@@ -3,6 +3,65 @@ import assert from 'node:assert/strict';
 import { loadGasRuntime } from '../helpers/gasHarness.mjs';
 import { createBaseDataset } from '../helpers/fixtures.mjs';
 
+function createScriptCache() {
+  const entries = new Map();
+  return {
+    get(key) {
+      return entries.has(key) ? entries.get(key) : null;
+    },
+    put(key, value) {
+      entries.set(key, String(value));
+    },
+    remove(key) {
+      entries.delete(key);
+    }
+  };
+}
+
+function createStoresSheet(initialRows) {
+  const headers = ['id', 'name', 'status', 'created_at'];
+  let values = [headers].concat(initialRows.map((row) => [
+    String(row.id || ''),
+    String(row.name || ''),
+    String(row.status || ''),
+    String(row.created_at || '')
+  ]));
+  const counters = {
+    reads: 0,
+    clears: 0,
+    writes: 0
+  };
+
+  return {
+    sheet: {
+      getDataRange() {
+        return {
+          getDisplayValues() {
+            counters.reads += 1;
+            return values.map((row) => row.slice());
+          }
+        };
+      },
+      clearContents() {
+        counters.clears += 1;
+        values = [headers.slice()];
+      },
+      getRange() {
+        return {
+          setValues(nextValues) {
+            counters.writes += 1;
+            values = nextValues.map((row) => row.map((cell) => String(cell == null ? '' : cell)));
+          }
+        };
+      }
+    },
+    counters,
+    getValues() {
+      return values.map((row) => row.slice());
+    }
+  };
+}
+
 test('主要シート構成を初期化できる', async () => {
   const runtime = await loadGasRuntime();
   const storage = runtime.Ogawaya.createArrayStorage({});
@@ -226,4 +285,130 @@ test('runItemIds が既知ならログ一括取得は storage.load を 1 回に�
   assert.equal(loadCount, 1);
   assert.equal(logs.length, 1);
   assert.equal(logs[0].id, 'log-001');
+});
+
+test('Spreadsheet state cache 有効時は新規 repository でも再読込を回避する', async () => {
+  const seed = createBaseDataset();
+  const cache = createScriptCache();
+  const stores = createStoresSheet(seed.stores);
+  let openCount = 0;
+
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      SPREADSHEET_ID: 'spreadsheet-001'
+    },
+    cacheFactory() {
+      return cache;
+    },
+    spreadsheetFactory() {
+      openCount += 1;
+      return {
+        getSheetByName(sheetName) {
+          if (sheetName === 'stores') {
+            return stores.sheet;
+          }
+          return null;
+        },
+        insertSheet() {
+          return stores.sheet;
+        }
+      };
+    }
+  });
+
+  const repository1 = runtime.Ogawaya.createSpreadsheetRepository({ spreadsheetId: 'spreadsheet-001' });
+  assert.equal(repository1.listTable('stores').length, 1);
+  assert.equal(openCount, 1);
+
+  const repository2 = runtime.Ogawaya.createSpreadsheetRepository({ spreadsheetId: 'spreadsheet-001' });
+  assert.equal(repository2.listTable('stores').length, 1);
+  assert.equal(openCount, 1);
+});
+
+test('Spreadsheet save 後は cache を更新し、次の repository でも更新値を返す', async () => {
+  const seed = createBaseDataset();
+  const cache = createScriptCache();
+  const stores = createStoresSheet(seed.stores);
+  let openCount = 0;
+
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      SPREADSHEET_ID: 'spreadsheet-001'
+    },
+    cacheFactory() {
+      return cache;
+    },
+    spreadsheetFactory() {
+      openCount += 1;
+      return {
+        getSheetByName(sheetName) {
+          if (sheetName === 'stores') {
+            return stores.sheet;
+          }
+          return null;
+        },
+        insertSheet() {
+          return stores.sheet;
+        }
+      };
+    }
+  });
+
+  const repository1 = runtime.Ogawaya.createSpreadsheetRepository({ spreadsheetId: 'spreadsheet-001' });
+  repository1.listTable('stores');
+  repository1.replaceTable('stores', [
+    {
+      id: 'store-002',
+      name: '渋谷店',
+      status: 'active',
+      created_at: '2026-04-21T00:00:00Z'
+    }
+  ]);
+
+  assert.equal(stores.counters.writes, 1);
+  assert.equal(openCount, 1);
+
+  const repository2 = runtime.Ogawaya.createSpreadsheetRepository({ spreadsheetId: 'spreadsheet-001' });
+  const nextStores = repository2.listTable('stores');
+  assert.equal(nextStores.length, 1);
+  assert.equal(nextStores[0].id, 'store-002');
+  assert.equal(openCount, 1);
+});
+
+test('SPREADSHEET_STATE_CACHE_ENABLED=false のときは毎回 Spreadsheet を読み込む', async () => {
+  const seed = createBaseDataset();
+  const cache = createScriptCache();
+  const stores = createStoresSheet(seed.stores);
+  let openCount = 0;
+
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      SPREADSHEET_ID: 'spreadsheet-001',
+      SPREADSHEET_STATE_CACHE_ENABLED: 'false'
+    },
+    cacheFactory() {
+      return cache;
+    },
+    spreadsheetFactory() {
+      openCount += 1;
+      return {
+        getSheetByName(sheetName) {
+          if (sheetName === 'stores') {
+            return stores.sheet;
+          }
+          return null;
+        },
+        insertSheet() {
+          return stores.sheet;
+        }
+      };
+    }
+  });
+
+  const repository1 = runtime.Ogawaya.createSpreadsheetRepository({ spreadsheetId: 'spreadsheet-001' });
+  repository1.listTable('stores');
+  const repository2 = runtime.Ogawaya.createSpreadsheetRepository({ spreadsheetId: 'spreadsheet-001' });
+  repository2.listTable('stores');
+
+  assert.equal(openCount, 2);
 });

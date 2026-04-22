@@ -157,21 +157,26 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       createWebhookSignature: webhookHandler.createWebhookSignature,
       handleWebhook: webhookHandler.handleWebhook,
       handleApiRequest: function (request) {
+        var startedAt = new Date().getTime();
         try {
           var response = routeApiRequest(checklistService, request);
+          var durationMs = new Date().getTime() - startedAt;
           ns.logEvent('info', 'api.request.success', {
             method: request.method,
             path: request.path,
-            statusCode: response.statusCode
+            statusCode: response.statusCode,
+            durationMs: durationMs
           });
           return response;
         } catch (error) {
+          var failedDurationMs = new Date().getTime() - startedAt;
           ns.logEvent('error', 'api.request.failed', {
             method: request.method,
             path: request.path,
             code: error && error.code ? String(error.code) : '',
             statusCode: error && error.statusCode ? Number(error.statusCode) : 500,
-            message: error && error.message ? String(error.message) : ''
+            message: error && error.message ? String(error.message) : '',
+            durationMs: failedDurationMs
           });
           return ns.mapErrorToResponse(error);
         }
