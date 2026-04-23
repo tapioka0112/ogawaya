@@ -22,3 +22,11 @@ test('管理者ページはログイン導線と管理UIの主要要素を持つ
   assert.match(html, /id="calendar-grid"/);
   assert.match(html, /<script src="\.\/admin\.js"><\/script>/);
 });
+
+test('管理者ページの GAS API 呼び出しは CORS preflight を避ける', async () => {
+  const js = await readFile('pages/admin.js', 'utf8');
+
+  assert.doesNotMatch(js, /Content-Type['"]?\s*:\s*['"]application\/json/);
+  assert.match(js, /var transportMethod = method === 'GET' \? 'GET' : 'POST';/);
+  assert.match(js, /query\._method = method;/);
+});

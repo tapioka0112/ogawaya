@@ -194,12 +194,15 @@
       }
       query.adminToken = state.token;
     }
+    var transportMethod = method === 'GET' ? 'GET' : 'POST';
+    if (method !== 'GET' && method !== 'POST') {
+      query._method = method;
+    }
     var url = appendQuery(state.config.gasApiBaseUrl, query);
     var payload = body && typeof body === 'object' ? body : {};
     var response = await fetch(url, {
-      method: method,
-      headers: { 'Content-Type': 'application/json' },
-      body: method === 'GET' || method === 'DELETE' ? undefined : JSON.stringify(payload)
+      method: transportMethod,
+      body: transportMethod === 'GET' ? undefined : JSON.stringify(payload)
     });
     var raw = await response.text();
     var json = {};
