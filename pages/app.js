@@ -298,10 +298,17 @@
     storeName: document.getElementById('store-name'),
     targetDate: document.getElementById('target-date'),
     progressSummary: document.getElementById('progress-summary'),
+    progressCountChecked: document.getElementById('progress-count-checked'),
+    progressCountTotal: document.getElementById('progress-count-total'),
+    progressBarFill: document.getElementById('progress-bar-fill'),
+    progressRingProgress: document.getElementById('progress-ring-progress'),
+    progressRingLabel: document.getElementById('progress-ring-label'),
     checklistItems: document.getElementById('checklist-items'),
     incompleteSummary: document.getElementById('incomplete-summary'),
     incompleteItems: document.getElementById('incomplete-items'),
-    refreshButton: document.getElementById('refresh-button')
+    refreshButton: document.getElementById('refresh-button'),
+    hamburgerButton: document.getElementById('hamburger-button'),
+    todoMenu: document.getElementById('todo-menu')
   };
 
   function setText(element, value) {
@@ -333,6 +340,43 @@
 
   function clearStatus() {
     setStatus('');
+  }
+
+  function setMenuOpen(open) {
+    if (!elements.hamburgerButton || !elements.todoMenu) {
+      return;
+    }
+    elements.hamburgerButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+    elements.hamburgerButton.setAttribute('aria-label', open ? 'メニューを閉じる' : 'メニューを開く');
+    elements.todoMenu.dataset.open = open ? 'true' : 'false';
+    elements.todoMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+  }
+
+  function bindHamburgerMenu() {
+    if (!elements.hamburgerButton || !elements.todoMenu || elements.hamburgerButton.__boundMenu) {
+      return;
+    }
+    elements.hamburgerButton.__boundMenu = true;
+    elements.hamburgerButton.addEventListener('click', function (event) {
+      event.stopPropagation();
+      var isOpen = elements.hamburgerButton.getAttribute('aria-expanded') === 'true';
+      setMenuOpen(!isOpen);
+    });
+    document.addEventListener('click', function (event) {
+      if (elements.hamburgerButton.getAttribute('aria-expanded') !== 'true') {
+        return;
+      }
+      if (elements.todoMenu.contains(event.target) || elements.hamburgerButton.contains(event.target)) {
+        return;
+      }
+      setMenuOpen(false);
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && elements.hamburgerButton.getAttribute('aria-expanded') === 'true') {
+        setMenuOpen(false);
+        elements.hamburgerButton.focus();
+      }
+    });
   }
 
   function clearList(element) {
@@ -925,80 +969,114 @@
       setText(elements.storeName, '-');
       setText(elements.targetDate, '-');
       setText(elements.progressSummary, '-');
+      renderProgressGauge({ checked: 0, total: 0 });
       return;
     }
     setText(elements.storeName, checklist.storeName || '-');
     setText(elements.targetDate, checklist.targetDate || '-');
     setText(elements.progressSummary, checklist.progress.checked + ' / ' + checklist.progress.total);
+    renderProgressGauge(checklist.progress);
+  }
+
+  function renderProgressGauge(progress) {
+    var checked = progress && typeof progress.checked === 'number' ? progress.checked : 0;
+    var total = progress && typeof progress.total === 'number' ? progress.total : 0;
+    var pct = total > 0 ? Math.round((checked / total) * 100) : 0;
+    setText(elements.progressCountChecked, String(checked));
+    setText(elements.progressCountTotal, String(total));
+    if (elements.progressBarFill) {
+      elements.progressBarFill.style.width = pct + '%';
+    }
+    if (elements.progressRingProgress) {
+      var circumference = 201.06;
+      var offset = circumference * (1 - pct / 100);
+      elements.progressRingProgress.style.strokeDashoffset = String(offset);
+    }
+    setText(elements.progressRingLabel, pct + '%');
   }
 
   function renderChecklist() {
     var checklist = state.checklist;
     clearList(elements.checklistItems);
     if (!checklist || !Array.isArray(checklist.items) || checklist.items.length === 0) {
-      elements.checklistItems.appendChild(createMessageListItem('当日の項目はありません。', 'empty-item'));
+      var empty = document.createElement('li');
+      empty.className = 'todo-empty';
+      empty.textContent = '当日の項目はありません。';
+      elements.checklistItems.appendChild(empty);
       return;
     }
 
     checklist.items.forEach(function (item) {
       var listItem = document.createElement('li');
-      listItem.className = 'checklist-item';
+      listItem.className = 'todo-item';
+      listItem.dataset.status = item.status;
+      var actionState = getItemActionState(item.id);
+      if (actionState.inFlight) {
+        listItem.dataset.pending = 'true';
+      }
+      listItem.setAttribute('role', 'button');
+      listItem.setAttribute('tabindex', '0');
+      listItem.setAttribute(
+        'aria-label',
+        item.status === 'checked'
+          ? item.title + ' (完了済み、タップで未完了に戻す)'
+          : item.title + ' (未完了、タップで完了にする)'
+      );
 
       var bullet = document.createElement('span');
-      bullet.className = 'check-bullet';
+      bullet.className = 'todo-bullet';
       bullet.dataset.status = item.status;
 
-      var body = document.createElement('div');
-      body.className = 'item-body';
+      var main = document.createElement('div');
+      main.className = 'todo-main';
 
       var title = document.createElement('div');
-      title.className = 'item-title';
+      title.className = 'todo-title-text';
       title.textContent = item.title;
+      main.appendChild(title);
 
-      var meta = document.createElement('div');
-      meta.className = 'item-meta';
       if (item.status === 'checked') {
         var checkedBy = item.checkedBy || 'LINEユーザー';
         var checkedAtText = formatCheckedAtJst(item.checkedAt);
-        meta.textContent = checkedAtText ? checkedBy + ' / ' + checkedAtText : checkedBy;
-      } else {
-        meta.textContent = '未チェック';
+        var meta = document.createElement('div');
+        meta.className = 'todo-meta';
+        meta.textContent = checkedAtText ? checkedBy + ' ・ ' + checkedAtText : checkedBy;
+        main.appendChild(meta);
       }
 
-      var actions = document.createElement('div');
-      actions.className = 'button-row item-actions';
+      var chevron = document.createElement('span');
+      chevron.className = 'todo-chevron';
+      chevron.setAttribute('aria-hidden', 'true');
+      chevron.textContent = '›';
 
-      if (item.status === 'unchecked') {
-        var checkButton = document.createElement('button');
-        checkButton.type = 'button';
-        checkButton.className = 'action-button';
-        checkButton.textContent = 'チェックする';
-        checkButton.disabled = !state.idToken;
-        checkButton.addEventListener('click', function () {
+      var toggleHandler = function () {
+        if (!state.idToken) {
           clearError();
-          clearStatus();
+          setError('LINE認証が完了していないため更新できません。LINEから開き直してください。');
+          return;
+        }
+        if (actionState.inFlight) {
+          return;
+        }
+        clearError();
+        clearStatus();
+        if (item.status === 'unchecked') {
           requestItemStatusChange(item.id, 'checked');
-        });
-        actions.appendChild(checkButton);
-      } else {
-        var uncheckButton = document.createElement('button');
-        uncheckButton.type = 'button';
-        uncheckButton.className = 'action-button ghost-button';
-        uncheckButton.textContent = '取消';
-        uncheckButton.disabled = !state.idToken;
-        uncheckButton.addEventListener('click', function () {
-          clearError();
-          clearStatus();
-          requestItemStatusChange(item.id, 'unchecked');
-        });
-        actions.appendChild(uncheckButton);
-      }
+          return;
+        }
+        requestItemStatusChange(item.id, 'unchecked');
+      };
+      listItem.addEventListener('click', toggleHandler);
+      listItem.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+          event.preventDefault();
+          toggleHandler();
+        }
+      });
 
-      body.appendChild(title);
-      body.appendChild(meta);
-      body.appendChild(actions);
       listItem.appendChild(bullet);
-      listItem.appendChild(body);
+      listItem.appendChild(main);
+      listItem.appendChild(chevron);
       elements.checklistItems.appendChild(listItem);
     });
   }
@@ -1104,6 +1182,9 @@
   }
 
   function start() {
+    bindHamburgerMenu();
+    setMenuOpen(false);
+
     if (elements.refreshButton) {
       elements.refreshButton.addEventListener('click', function () {
         clearError();
