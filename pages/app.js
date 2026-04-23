@@ -309,7 +309,11 @@
     incompleteItems: document.getElementById('incomplete-items'),
     refreshButton: document.getElementById('refresh-button'),
     hamburgerButton: document.getElementById('hamburger-button'),
-    todoMenu: document.getElementById('todo-menu')
+    todoMenu: document.getElementById('todo-menu'),
+    tabHome: document.getElementById('tab-home'),
+    tabStats: document.getElementById('tab-stats'),
+    mainContent: document.getElementById('main-content'),
+    statsContent: document.getElementById('stats-content')
   };
 
   function setText(element, value) {
@@ -377,6 +381,30 @@
         setMenuOpen(false);
         elements.hamburgerButton.focus();
       }
+    });
+  }
+
+  function setActiveTab(tabName) {
+    if (!elements.tabHome || !elements.tabStats || !elements.mainContent || !elements.statsContent) {
+      return;
+    }
+    var isStatsTab = tabName === 'stats';
+    elements.tabHome.classList.toggle('tab-btn--active', !isStatsTab);
+    elements.tabStats.classList.toggle('tab-btn--active', isStatsTab);
+    elements.mainContent.hidden = isStatsTab;
+    elements.statsContent.hidden = !isStatsTab;
+  }
+
+  function bindTabNavigation() {
+    if (!elements.tabHome || !elements.tabStats || elements.tabHome.__boundTabs) {
+      return;
+    }
+    elements.tabHome.__boundTabs = true;
+    elements.tabHome.addEventListener('click', function () {
+      setActiveTab('home');
+    });
+    elements.tabStats.addEventListener('click', function () {
+      setActiveTab('stats');
     });
   }
 
@@ -1287,6 +1315,8 @@
 
   function start() {
     bindHamburgerMenu();
+    bindTabNavigation();
+    setActiveTab('home');
     setMenuOpen(false);
 
     if (elements.refreshButton) {
