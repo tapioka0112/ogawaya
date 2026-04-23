@@ -804,7 +804,18 @@
     if (!eventPayload || !state.checklist) {
       return;
     }
+    if (emittedAtMs <= 0) {
+      console.debug('[sync] ignore realtime event: pending_server_timestamp');
+      return;
+    }
     if (String(eventPayload.runId || '') !== String(state.checklist.runId || '')) {
+      return;
+    }
+    var currentUserId = state.checklist && state.checklist.currentUser
+      ? String(state.checklist.currentUser.userId || '')
+      : '';
+    if (currentUserId && String(eventPayload.sourceUserId || '') === currentUserId) {
+      console.debug('[sync] ignore realtime event: self_event');
       return;
     }
     var runItemId = String(eventPayload.itemId || '');
@@ -815,12 +826,10 @@
     if (actionState.inFlight) {
       return;
     }
-    if (emittedAtMs > 0 && emittedAtMs <= actionState.lastSyncedAtMs) {
+    if (emittedAtMs <= actionState.lastSyncedAtMs) {
       return;
     }
-    if (emittedAtMs > 0) {
-      actionState.lastSyncedAtMs = emittedAtMs;
-    }
+    actionState.lastSyncedAtMs = emittedAtMs;
     var currentItem = findChecklistItemById(runItemId);
     var syncedItem = {
       id: runItemId,
@@ -830,6 +839,10 @@
       checkedByUserId: eventPayload.checkedByUserId || null,
       checkedAt: eventPayload.checkedAt || null
     };
+    if (syncedItem.status === 'checked' && !syncedItem.checkedAt) {
+      console.debug('[sync] ignore realtime event: missing_checked_at');
+      return;
+    }
     applyChecklistItemUpdate(syncedItem);
     actionState.confirmedItem = cloneChecklistItem(syncedItem);
     persistChecklistSnapshot();
@@ -906,6 +919,13 @@
       }
       var actionState = getItemActionState(serverItem.id);
       if (actionState.inFlight) {
+        return cloneChecklistItem(localItem);
+      }
+      if (
+        actionState.confirmedItem &&
+        actionState.desiredStatus &&
+        actionState.desiredStatus !== actionState.confirmedItem.status
+      ) {
         return cloneChecklistItem(localItem);
       }
       return serverItem;
