@@ -235,6 +235,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var notificationService = options.notificationService;
     var appBaseUrl = options.appBaseUrl || '';
     var allowAnonymousAccess = options.allowAnonymousAccess === true;
+    var adminLoginId = String(options.adminLoginId || '');
+    var adminLoginPassword = String(options.adminLoginPassword || '');
+    var adminSessionTtlSeconds = Number(options.adminSessionTtlSeconds || 12 * 60 * 60);
+    var adminSessionMemory = {};
+    var ADMIN_SESSION_KEY_PREFIX = 'ogawaya:admin:session:v1:';
+    var TASK_CATALOG_TEMPLATE_PREFIX = 'task-catalog-';
+
+    if (!isFinite(adminSessionTtlSeconds) || adminSessionTtlSeconds < 300) {
+      adminSessionTtlSeconds = 12 * 60 * 60;
+    }
 
     function resolveIdentity(query) {
       try {
@@ -540,6 +550,160 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       };
     }
 
+    function assertAdminCredentialConfigured() {
+      ns.assert(adminLoginId && adminLoginPassword, 'config_error', 'ADMIN_LOGIN_ID / ADMIN_LOGIN_PASSWORD が未設定です', 500);
+    }
+
+    function getAdminSessionCache() {
+      if (typeof CacheService === 'undefined' || !CacheService || typeof CacheService.getScriptCache !== 'function') {
+        return null;
+      }
+      try {
+        return CacheService.getScriptCache();
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function buildAdminSessionCacheKey(token) {
+      return ADMIN_SESSION_KEY_PREFIX + String(token || '');
+    }
+
+    function createAdminSessionToken() {
+      var raw = Utilities.getUuid() + ':' + String(nowMillis());
+      var digest = Utilities.computeHmacSha256Signature(raw, ADMIN_SESSION_KEY_PREFIX);
+      return Utilities.base64EncodeWebSafe(digest);
+    }
+
+    function persistAdminSession(token, session) {
+      var cache = getAdminSessionCache();
+      if (cache) {
+        cache.put(buildAdminSessionCacheKey(token), JSON.stringify(session), adminSessionTtlSeconds);
+      }
+      adminSessionMemory[token] = ns.clone(session);
+    }
+
+    function readAdminSession(token) {
+      var normalizedToken = String(token || '');
+      if (!normalizedToken) {
+        return null;
+      }
+
+      var inMemory = adminSessionMemory[normalizedToken];
+      if (inMemory && Number(inMemory.expiresAtMs || 0) > nowMillis()) {
+        return ns.clone(inMemory);
+      }
+      if (inMemory) {
+        delete adminSessionMemory[normalizedToken];
+      }
+
+      var cache = getAdminSessionCache();
+      if (!cache) {
+        return null;
+      }
+      var raw = cache.get(buildAdminSessionCacheKey(normalizedToken));
+      if (!raw) {
+        return null;
+      }
+      var session = JSON.parse(raw);
+      if (!session || Number(session.expiresAtMs || 0) <= nowMillis()) {
+        return null;
+      }
+      adminSessionMemory[normalizedToken] = ns.clone(session);
+      return session;
+    }
+
+    function resolveAdminToken(query, body) {
+      var safeQuery = query || {};
+      var safeBody = body || {};
+      return String(safeQuery.adminToken || safeBody.adminToken || '').trim();
+    }
+
+    function requireAdminSession(query, body) {
+      assertAdminCredentialConfigured();
+      var token = resolveAdminToken(query, body);
+      ns.assert(token, 'unauthorized', '管理者ログインが必要です', 401);
+      var session = readAdminSession(token);
+      ns.assert(session && session.storeId, 'unauthorized', '管理者セッションが無効です', 401);
+      return session;
+    }
+
+    function parseAdminTargetDate(targetDate) {
+      var normalizedDate = String(targetDate || '').trim();
+      ns.assert(ns.isDateString(normalizedDate), 'invalid_request', 'targetDate は YYYY-MM-DD 形式で指定してください', 400);
+      return normalizedDate;
+    }
+
+    function buildTaskCatalogTemplateId(storeId) {
+      return TASK_CATALOG_TEMPLATE_PREFIX + String(storeId || '');
+    }
+
+    function ensureTaskCatalogTemplate(storeId) {
+      var catalogTemplateId = buildTaskCatalogTemplateId(storeId);
+      var existingTemplate = repository.findTemplateById(catalogTemplateId);
+      if (existingTemplate) {
+        return existingTemplate;
+      }
+      var now = ns.toIsoString(clock.now());
+      return repository.createTemplate({
+        id: catalogTemplateId,
+        store_id: storeId,
+        name: 'タスクカタログ',
+        notify_time: '10:30',
+        closing_time: '00:00',
+        is_active: 'false',
+        created_by: 'admin',
+        created_at: now,
+        updated_at: now
+      });
+    }
+
+    function listCatalogTasksByStore(storeId) {
+      var catalogTemplate = ensureTaskCatalogTemplate(storeId);
+      return repository.listTemplateItems(catalogTemplate.id);
+    }
+
+    function buildAdminTaskResponse(item) {
+      return {
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        sortOrder: Number(item.sort_order)
+      };
+    }
+
+    function ensureRunForDate(storeId, targetDate) {
+      var existingRun = repository.findRunByStoreAndDate(storeId, targetDate);
+      if (existingRun) {
+        return existingRun;
+      }
+      var activeTemplate = repository.listActiveTemplates().find(function (template) {
+        return template.store_id === storeId;
+      });
+      ns.assert(activeTemplate, 'not_found', '有効なチェックリストテンプレートがありません', 404);
+      var now = ns.toIsoString(clock.now());
+      return repository.createChecklistRun({
+        id: Utilities.getUuid(),
+        template_id: activeTemplate.id,
+        store_id: storeId,
+        target_date: targetDate,
+        status: ns.RUN_STATUS.OPEN,
+        notified_at: now,
+        closed_at: '',
+        created_at: now
+      });
+    }
+
+    function buildAdminRunResponse(store, targetDate, run, items) {
+      return {
+        runId: run ? run.id : '',
+        targetDate: targetDate,
+        status: run ? run.status : ns.RUN_STATUS.OPEN,
+        storeName: store.name,
+        items: (items || []).map(buildRunItemResponse)
+      };
+    }
+
     return {
       getCurrentUser: requireAuthenticatedUser,
 
@@ -603,6 +767,271 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
       getDailyStats: function (query) {
         return buildDailyStats(query);
+      },
+
+      adminLogin: function (body) {
+        assertAdminCredentialConfigured();
+        var safeBody = body || {};
+        var loginId = ns.requireString(safeBody.loginId, 'loginId');
+        var password = ns.requireString(safeBody.password, 'password');
+        ns.assert(
+          loginId === adminLoginId && password === adminLoginPassword,
+          'unauthorized',
+          '管理者IDまたはパスワードが正しくありません',
+          401
+        );
+        var store = findCurrentStore();
+        var token = createAdminSessionToken();
+        var issuedAtMs = nowMillis();
+        var expiresAtMs = issuedAtMs + (adminSessionTtlSeconds * 1000);
+        persistAdminSession(token, {
+          token: token,
+          storeId: store.id,
+          issuedAtMs: issuedAtMs,
+          expiresAtMs: expiresAtMs
+        });
+        return {
+          session: {
+            token: token,
+            storeId: store.id,
+            storeName: store.name,
+            expiresAt: ns.toIsoString(new Date(expiresAtMs))
+          }
+        };
+      },
+
+      listAdminTasks: function (query, body) {
+        var session = requireAdminSession(query, body);
+        return {
+          tasks: listCatalogTasksByStore(session.storeId).map(buildAdminTaskResponse)
+        };
+      },
+
+      createAdminTask: function (query, body) {
+        var session = requireAdminSession(query, body);
+        var safeBody = body || {};
+        var title = ns.requireString(safeBody.title, 'title');
+        var description = String(safeBody.description || '').trim();
+        var catalogTasks = listCatalogTasksByStore(session.storeId);
+        var maxSortOrder = catalogTasks.reduce(function (maxValue, task) {
+          return Math.max(maxValue, Number(task.sort_order || 0));
+        }, 0);
+        var now = ns.toIsoString(clock.now());
+        var catalogTemplate = ensureTaskCatalogTemplate(session.storeId);
+        var createdTask = repository.createTemplateItem({
+          id: Utilities.getUuid(),
+          template_id: catalogTemplate.id,
+          title: title,
+          description: description,
+          sort_order: String(maxSortOrder + 1),
+          is_required: 'true',
+          is_active: 'true',
+          created_at: now,
+          updated_at: now
+        });
+        return {
+          task: buildAdminTaskResponse(createdTask)
+        };
+      },
+
+      listAdminTemplates: function (query, body) {
+        var session = requireAdminSession(query, body);
+        return {
+          templates: repository.listActiveTemplatesWithItems(session.storeId).map(function (entry) {
+            return {
+              id: entry.template.id,
+              name: entry.template.name,
+              itemCount: entry.items.length
+            };
+          })
+        };
+      },
+
+      createAdminTemplate: function (query, body) {
+        var session = requireAdminSession(query, body);
+        var safeBody = body || {};
+        var name = ns.requireString(safeBody.name, 'name');
+        var rawTaskIds = Array.isArray(safeBody.taskIds) ? safeBody.taskIds.map(function (taskId) {
+          return String(taskId || '').trim();
+        }).filter(function (taskId) {
+          return taskId !== '';
+        }) : [];
+        var deduplicatedTaskIds = [];
+        var taskIdSet = {};
+        rawTaskIds.forEach(function (taskId) {
+          if (taskIdSet[taskId]) {
+            return;
+          }
+          taskIdSet[taskId] = true;
+          deduplicatedTaskIds.push(taskId);
+        });
+        ns.assert(deduplicatedTaskIds.length > 0, 'invalid_request', 'taskIds は1件以上指定してください', 400);
+
+        var catalogTaskById = {};
+        listCatalogTasksByStore(session.storeId).forEach(function (task) {
+          catalogTaskById[task.id] = task;
+        });
+        var selectedTasks = deduplicatedTaskIds.map(function (taskId) {
+          var task = catalogTaskById[taskId];
+          ns.assert(task, 'not_found', '指定された taskId が見つかりません', 404);
+          return task;
+        });
+
+        var now = ns.toIsoString(clock.now());
+        var template = repository.createTemplate({
+          id: Utilities.getUuid(),
+          store_id: session.storeId,
+          name: name,
+          notify_time: '10:30',
+          closing_time: '00:00',
+          is_active: 'true',
+          created_by: 'admin',
+          created_at: now,
+          updated_at: now
+        });
+        selectedTasks.forEach(function (task, index) {
+          repository.createTemplateItem({
+            id: Utilities.getUuid(),
+            template_id: template.id,
+            title: task.title,
+            description: task.description,
+            sort_order: String(index + 1),
+            is_required: 'true',
+            is_active: 'true',
+            created_at: now,
+            updated_at: now
+          });
+        });
+        return {
+          template: {
+            id: template.id,
+            name: template.name,
+            itemCount: selectedTasks.length
+          }
+        };
+      },
+
+      getAdminRunByDate: function (query, body, targetDateRaw) {
+        var session = requireAdminSession(query, body);
+        var targetDate = parseAdminTargetDate(targetDateRaw);
+        var store = repository.findStoreById(session.storeId);
+        ns.assert(store, 'config_error', '店舗が見つかりません', 500);
+        var run = repository.findRunByStoreAndDate(session.storeId, targetDate);
+        var items = run ? repository.listRunItems(run.id) : [];
+        return {
+          checklist: buildAdminRunResponse(store, targetDate, run, items)
+        };
+      },
+
+      insertAdminRunItem: function (query, body, targetDateRaw) {
+        var session = requireAdminSession(query, body);
+        var targetDate = parseAdminTargetDate(targetDateRaw);
+        var safeBody = body || {};
+        var taskId = ns.requireString(safeBody.taskId, 'taskId');
+
+        var task = listCatalogTasksByStore(session.storeId).find(function (candidate) {
+          return candidate.id === taskId;
+        });
+        ns.assert(task, 'not_found', 'タスクが見つかりません', 404);
+
+        var run = ensureRunForDate(session.storeId, targetDate);
+        var runItems = repository.listRunItems(run.id);
+        var duplicated = runItems.some(function (runItem) {
+          return runItem.template_item_id === taskId;
+        });
+        ns.assert(!duplicated, 'conflict', '同じタスクはすでに追加されています', 409);
+        var maxSortOrder = runItems.reduce(function (maxValue, runItem) {
+          return Math.max(maxValue, Number(runItem.sort_order || 0));
+        }, 0);
+        var now = ns.toIsoString(clock.now());
+        var createdItem = repository.createRunItems([
+          {
+            id: Utilities.getUuid(),
+            run_id: run.id,
+            template_item_id: task.id,
+            title: task.title,
+            sort_order: String(maxSortOrder + 1),
+            status: ns.ITEM_STATUS.UNCHECKED,
+            checked_by: '',
+            checked_by_name: '',
+            checked_at: '',
+            updated_at: now
+          }
+        ])[0];
+        return {
+          item: buildRunItemResponse(createdItem)
+        };
+      },
+
+      applyAdminTemplateToRun: function (query, body, targetDateRaw, templateId) {
+        var session = requireAdminSession(query, body);
+        var targetDate = parseAdminTargetDate(targetDateRaw);
+        var normalizedTemplateId = String(templateId || '').trim();
+        ns.assert(normalizedTemplateId, 'invalid_request', 'templateId は必須です', 400);
+        var template = repository.findTemplateById(normalizedTemplateId);
+        ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
+        ns.assert(template.store_id === session.storeId, 'forbidden', '所属外のテンプレートは利用できません', 403);
+
+        var templateItems = repository.listTemplateItems(template.id);
+        ns.assert(templateItems.length > 0, 'invalid_request', 'テンプレートに項目がありません', 400);
+
+        var run = ensureRunForDate(session.storeId, targetDate);
+        var existingRunItems = repository.listRunItems(run.id);
+        var existingTemplateItemIds = {};
+        existingRunItems.forEach(function (runItem) {
+          if (runItem.template_item_id) {
+            existingTemplateItemIds[runItem.template_item_id] = true;
+          }
+        });
+        var maxSortOrder = existingRunItems.reduce(function (maxValue, runItem) {
+          return Math.max(maxValue, Number(runItem.sort_order || 0));
+        }, 0);
+        var now = ns.toIsoString(clock.now());
+        var newItems = templateItems.filter(function (templateItem) {
+          return !existingTemplateItemIds[templateItem.id];
+        }).map(function (templateItem, index) {
+          return {
+            id: Utilities.getUuid(),
+            run_id: run.id,
+            template_item_id: templateItem.id,
+            title: templateItem.title,
+            sort_order: String(maxSortOrder + index + 1),
+            status: ns.ITEM_STATUS.UNCHECKED,
+            checked_by: '',
+            checked_by_name: '',
+            checked_at: '',
+            updated_at: now
+          };
+        });
+        var insertedItems = newItems.length > 0 ? repository.createRunItems(newItems) : [];
+        return {
+          insertedCount: insertedItems.length,
+          items: insertedItems.map(buildRunItemResponse)
+        };
+      },
+
+      deleteAdminRunItem: function (query, body, targetDateRaw, runItemIdRaw) {
+        var session = requireAdminSession(query, body);
+        var targetDate = parseAdminTargetDate(targetDateRaw);
+        var runItemId = String(runItemIdRaw || '').trim();
+        ns.assert(runItemId, 'invalid_request', 'runItemId は必須です', 400);
+
+        var runItem = repository.findRunItemById(runItemId);
+        ns.assert(runItem, 'not_found', '削除対象のタスクが見つかりません', 404);
+        var run = repository.findRunById(runItem.run_id);
+        ns.assert(run, 'not_found', '対象チェックリストが見つかりません', 404);
+        ns.assert(run.store_id === session.storeId, 'forbidden', '所属外のタスクは削除できません', 403);
+        ns.assert(run.target_date === targetDate, 'invalid_request', '選択日と異なるタスクは削除できません', 400);
+
+        var allRunItems = repository.listTable('checklist_run_items');
+        var filteredRunItems = allRunItems.filter(function (item) {
+          return item.id !== runItemId;
+        });
+        ns.assert(filteredRunItems.length !== allRunItems.length, 'not_found', '削除対象のタスクが見つかりません', 404);
+        repository.replaceTable('checklist_run_items', filteredRunItems);
+        return {
+          deletedRunItemId: runItemId
+        };
       },
 
       checkItem: function (query, runItemId, body) {

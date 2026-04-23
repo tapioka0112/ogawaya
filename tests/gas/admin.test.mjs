@@ -8,7 +8,13 @@ async function createAdminApp(lineClient = {
     return { status: 'sent' };
   }
 }) {
-  const runtime = await loadGasRuntime();
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      ADMIN_LOGIN_ID: 'admin-login',
+      ADMIN_LOGIN_PASSWORD: 'admin-password'
+    },
+    enableCacheService: true
+  });
   const seed = createBaseDataset();
   seed.line_accounts = [
     {
@@ -81,6 +87,22 @@ async function createAdminApp(lineClient = {
       }
     }
   });
+}
+
+function loginAsAdmin(app) {
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/login',
+    query: {},
+    body: {
+      loginId: 'admin-login',
+      password: 'admin-password'
+    }
+  });
+  assert.equal(response.statusCode, 200);
+  assert.ok(response.body.session);
+  assert.ok(response.body.session.token);
+  return response.body.session.token;
 }
 
 test('ロール制限なしでテンプレート項目を追加できる', async () => {
@@ -241,4 +263,80 @@ test('手動通知の再試行では同一対象へ重複送信しない', async
   assert.equal(second.body.notifications.length, 0);
   assert.equal(calls.length, 2);
   assert.equal(app.repository.listTable('notifications').length, 2);
+});
+
+test('管理者画面向け API でログイン後にタスク作成・挿入・テンプレ適用・削除できる', async () => {
+  const app = await createAdminApp();
+  const token = loginAsAdmin(app);
+
+  const createTask = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/tasks',
+    query: { adminToken: token },
+    body: {
+      title: '追加タスク',
+      description: 'テスト用'
+    }
+  });
+  assert.equal(createTask.statusCode, 201);
+  const taskId = createTask.body.task.id;
+
+  const listTasks = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/admin/tasks',
+    query: { adminToken: token },
+    body: {}
+  });
+  assert.equal(listTasks.statusCode, 200);
+  assert.ok(listTasks.body.tasks.some((task) => task.id === taskId));
+
+  const insertTask = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/runs/2026-04-21/items:insert',
+    query: { adminToken: token },
+    body: {
+      taskId: taskId
+    }
+  });
+  assert.equal(insertTask.statusCode, 201);
+  const insertedRunItemId = insertTask.body.item.id;
+
+  const createTemplate = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/templates',
+    query: { adminToken: token },
+    body: {
+      name: '管理画面テンプレート',
+      taskIds: [taskId]
+    }
+  });
+  assert.equal(createTemplate.statusCode, 201);
+  const templateId = createTemplate.body.template.id;
+
+  const applyTemplate = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/runs/2026-04-21/templates/' + templateId + ':apply',
+    query: { adminToken: token },
+    body: {}
+  });
+  assert.equal(applyTemplate.statusCode, 201);
+
+  const getRun = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/admin/runs/2026-04-21',
+    query: { adminToken: token },
+    body: {}
+  });
+  assert.equal(getRun.statusCode, 200);
+  assert.ok(getRun.body.checklist);
+  assert.ok(Array.isArray(getRun.body.checklist.items));
+  assert.ok(getRun.body.checklist.items.length >= 1);
+
+  const deleteItem = app.handleApiRequest({
+    method: 'DELETE',
+    path: '/api/admin/runs/2026-04-21/items/' + insertedRunItemId,
+    query: { adminToken: token },
+    body: {}
+  });
+  assert.equal(deleteItem.statusCode, 200);
 });

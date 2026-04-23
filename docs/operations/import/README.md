@@ -47,5 +47,7 @@ Apps Script をまだ実行できない場合は、従来どおり CSV を手で
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LIFF_ID`
+- `ADMIN_LOGIN_ID`
+- `ADMIN_LOGIN_PASSWORD`
 - `store-001` や `user-*-001` などのサンプル ID
 - 店舗名、テンプレート名、項目名

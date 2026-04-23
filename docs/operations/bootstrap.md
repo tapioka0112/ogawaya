@@ -1,13 +1,14 @@
-# 初期データ投入と運用手順
+# 初期データ投入と運用手順（GAS 主系）
+
+この手順は `LIFF + GAS API + Spreadsheet` を主系として運用する前提です。
+Firestore はリアルタイム同期（read-only）で利用します。
 
 ## 1. Spreadsheet 初期シート
 
-最短は、Apps Script エディタで `bootstrapSpreadsheetTemplates` を 1 回実行して、以下のシートと最小サンプル行をまとめて作る方法です。
+最短は、Apps Script エディタで `bootstrapSpreadsheetTemplates` を1回実行する方法です。
+既存データがあるシートは fail-fast で停止し、上書きしません。
 
-対象シートに既存データがある場合は fail-fast で停止し、上書きしません。
-
-作られるシート名は以下のとおりです。
-
+作られるシート:
 - `stores`
 - `users`
 - `line_accounts`
@@ -18,105 +19,84 @@
 - `checklist_item_logs`
 - `notifications`
 
-手動で作りたい場合は [docs/operations/import/](./import/) 配下の同名 CSV を使う。
+手動作成する場合は [docs/operations/import/](./import/) の CSV を使用します。
 
 ## 2. Script Properties
 
-最低限以下を設定する。
-
+必須:
 - `SPREADSHEET_ID`
 - `LINE_CHANNEL_ID`
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LIFF_ID`
-- `ALLOW_ANONYMOUS_ACCESS`（`true` は閲覧フォールバックのみ。更新系は `idToken` 必須）
-- `DEBUG_EVENT_SHEET_ENABLED`（通常運用は `false` 推奨、調査時のみ `true`）
-- `SPREADSHEET_STATE_CACHE_ENABLED`（通常運用は `true` 推奨）
-- `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（通常運用は `300`）
-- `SPREADSHEET_STATE_CACHE_CHUNK_SIZE`（通常運用は `90000`）
+- `ADMIN_LOGIN_ID`
+- `ADMIN_LOGIN_PASSWORD`
 
-コピペ用のテンプレートは [script-properties.example.json](./import/script-properties.example.json) を使う。
+任意:
+- `ALLOW_ANONYMOUS_ACCESS`（通常は `false` 推奨）
+- `DEBUG_EVENT_SHEET_ENABLED`（通常 `false`）
+- `SPREADSHEET_STATE_CACHE_ENABLED`（通常 `true`）
+- `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（通常 `300`）
+- `SPREADSHEET_STATE_CACHE_CHUNK_SIZE`（通常 `90000`）
+- `ADMIN_SESSION_TTL_SECONDS`（通常 `43200`）
 
-Spreadsheet 初期シートだけ先に作るなら、まず `SPREADSHEET_ID` を設定してから `bootstrapSpreadsheetTemplates` を実行し、その後に残りの Script Properties を埋める。
-
-パフォーマンス確認は、Apps Script 実行ログの `api.request.success` / `api.request.failed` の `durationMs` を見る。
+テンプレートは [script-properties.example.json](./import/script-properties.example.json) を使用します。
 
 ## 3. デプロイ前チェック
 
-ローカルでは以下を確認する。
-
 1. `gas/.clasp.json` の `scriptId` が入っている
-2. `gas/appsscript.json` に以下 scope がある
-   - `https://www.googleapis.com/auth/script.external_request`
-   - `https://www.googleapis.com/auth/spreadsheets`
+2. `gas/appsscript.json` に必要 scope がある
 3. `npm test` が成功する
 
 ## 4. 初期データ
 
-`bootstrapSpreadsheetTemplates` 実行後は、最低限以下を実データへ置き換える。
+`bootstrapSpreadsheetTemplates` 実行後、最低限以下を実データに置換します。
+- `stores`
+- `checklist_templates`
+- `checklist_template_items`
 
-1. `stores`
-   - 店舗ID、名称、`status=active`
-2. `checklist_templates`
-   - 店舗ごとの有効テンプレート
-3. `checklist_template_items`
-   - テンプレートに紐づく日次項目
+## 5. LIFF (GitHub Pages)
 
-Apps Script をまだ実行できず、手動 import を使う場合は以下の順に入れる。
+`pages/config.json` に以下を設定:
+- `gasApiBaseUrl`
+- `liffId`
+- `defaultStoreId`
+- `allowAnonymousAccess`
+- `enableRealtimeSync`
+- `consistencyRefreshSeconds`
+- `firebase.apiKey`
+- `firebase.authDomain`
+- `firebase.projectId`
+- `firebase.appId`
 
-1. `stores.csv`
-2. `checklist_templates.csv`
-3. `checklist_template_items.csv`
-4. 残りの CSV はヘッダーのみ import する
-
-## 5. LIFF
-
-- LIFF 画面は GitHub Pages の `pages/` を公開して利用する（`https://<user>.github.io/<repo>/`）。
-- `pages/config.json` に以下を設定する。
-  - `gasApiBaseUrl`: GAS WebアプリURL（`.../exec`）
-  - `liffId`: LIFF ID（`1234567890-xxxxxxx`）
-  - `defaultStoreId`: 店舗ID（例: `store-hashimoto`）
-  - `enableRealtimeSync`: `true`（リアルタイム同期を使う場合）
-  - `consistencyRefreshSeconds`: `30`（推奨）
-  - `firebase.apiKey` / `firebase.authDomain` / `firebase.projectId` / `firebase.appId`
-- 更新系APIは `idToken` 必須。LIFF認証が通らない場合はチェック更新できない。
-- `/api/link` は廃止済み（`410`）。LINE 連携フォームは使用しない。
-- 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` にする。
-- Firestore は同期イベント + 初期表示スナップショットで使用し、統計は snapshot をクライアント集計する。正本データは従来どおり Spreadsheet を使用する。
-
-## 5.5 Firestore Rules（リアルタイム同期を使う場合のみ）
-
-1. Firebase Console で `Firestore Database > ルール` を開く。
-2. [docs/operations/firestore.rules](./firestore.rules) の内容をそのまま貼る。
-3. 公開ボタンで反映する。
-
-このルールは以下の挙動になる。
-
-- 許可: `stores/{storeId}/runs/{targetDate}/events/*` の `read` と `create`
-- 許可: `stores/{storeId}/runs/{targetDate}/snapshots/today` の `read` と `create/update`
-- 禁止: 上記以外の全パス（`read/write`）
-- 禁止: `events` の `update/delete`
-- 禁止: `snapshots` の `delete`
 補足:
+- `functionsApiBaseUrl` は空文字で運用可能です。
+- `/api/link` は廃止済みです。
 
-- 画面は snapshot を先に表示し、その後 API で整合するため、起動直後は短時間だけ古い状態が見えることがある。
-- 統計タブは `runs/{targetDate}/snapshots/today` を月単位で読み込み、クライアントで集計して表示する。
+## 6. 管理者画面
 
-## 5.6 Cloud Functions
+`/admin.html` は `ADMIN_LOGIN_ID` / `ADMIN_LOGIN_PASSWORD` でログインします。
+ログイン後、以下を実行できます。
+- タスク作成
+- タスク挿入
+- テンプレート作成
+- テンプレート読込
+- 日付別タスク削除
 
-現在の構成では Cloud Functions は必須ではない。
-Spark プランのまま運用できる。
+## 7. Firestore Rules（リアルタイム同期を使う場合）
 
-## 6. Trigger
+1. Firestore Database > ルールを開く
+2. [docs/operations/firestore.rules](./firestore.rules) を貼り付ける
+3. 公開する
 
-以下の 2 本を作成する。
+このルールは以下のみ許可します。
+- `stores/{storeId}/runs/{targetDate}/events/*` の read
+- `stores/{storeId}/runs/{targetDate}/snapshots/today` の read
 
-- `runDailyStart` を毎日 `10:30`
-- `runDailyClosing` を毎日 `0:00`
+上記以外の read/write は拒否します。
 
-## 7. 任意: Webhook
+## 8. Trigger
 
-Webhook を将来使う場合のみ有効化する。
-
-- GAS 入口は `signature` クエリ受け取り前提。
-- 直接 LINE から受ける場合は `X-Line-Signature` を `signature` クエリへ転送する受信経路を用意する。
+GAS の時間主導トリガーを設定:
+- `runDailyStart` を毎日 10:30
+- `runDailyClosing` を毎日 0:00

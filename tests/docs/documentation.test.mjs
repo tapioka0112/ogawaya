@@ -18,7 +18,7 @@ test('README に単一店舗前提・匿名運用・日次時刻・LINE表示名
   const readme = await readFile('README.md', 'utf8');
 
   assert.match(readme, /1ユーザー = 1店舗/);
-  assert.match(readme, /ALLOW_ANONYMOUS_ACCESS=true/);
+  assert.match(readme, /ALLOW_ANONYMOUS_ACCESS/);
   assert.match(readme, /checked_by_name/);
   assert.match(readme, /10:30/);
   assert.match(readme, /0:00/);
@@ -81,7 +81,7 @@ test('Firestore 同期用 rules の実体と適用手順が存在する', async 
   assert.match(firestoreRules, /match \/stores\/\{storeId\}\/runs\/\{targetDate\}\/events\/\{eventId\}/);
   assert.match(firestoreRules, /match \/stores\/\{storeId\}\/runs\/\{targetDate\}\/snapshots\/\{snapshotId\}/);
   assert.match(bootstrap, /snapshots\/today/);
-  assert.match(readme, /正本データは従来どおり GAS \+ Spreadsheet/);
-  assert.match(firestoreRules, /allow update, delete: if false/);
+  assert.match(readme, /正本データ: Spreadsheet/);
+  assert.match(firestoreRules, /allow create, update, delete: if false/);
   assert.match(firestoreRules, /match \/\{document=\*\*\}/);
 });

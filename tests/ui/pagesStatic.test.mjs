@@ -12,6 +12,7 @@ test('GitHub Pages 用 LIFF 画面は必要スクリプトと要素を持つ', a
   assert.match(html, /id="checklist-items"/);
   assert.match(html, /id="incomplete-items"/);
   assert.match(html, /id="error-message"/);
+  assert.match(html, /id="open-admin-button"/);
   assert.match(html, /id="tab-home"/);
   assert.match(html, /id="tab-stats"/);
   assert.match(html, /id="stats-content"/);
@@ -24,11 +25,13 @@ test('GitHub Pages の config.json は必須キーを持つ', async () => {
   const config = JSON.parse(content);
 
   assert.equal(typeof config.gasApiBaseUrl, 'string');
+  assert.equal(typeof config.functionsApiBaseUrl, 'string');
   assert.equal(typeof config.liffId, 'string');
   assert.equal(typeof config.defaultStoreId, 'string');
   assert.equal(typeof config.allowAnonymousAccess, 'boolean');
   assert.equal(typeof config.tryLiffAuthInAnonymous, 'boolean');
   assert.equal(typeof config.enableRealtimeSync, 'boolean');
+  assert.equal(typeof config.clientFirestoreWriteEnabled, 'boolean');
   assert.equal(typeof config.consistencyRefreshSeconds, 'number');
   assert.equal(typeof config.firebase, 'object');
   assert.equal(typeof config.firebase.apiKey, 'string');

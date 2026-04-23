@@ -62,6 +62,52 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return ns.createJsonResponse(200, { ok: true });
     }
 
+    if (method === 'POST' && path === '/api/admin/login') {
+      return ns.createJsonResponse(200, service.adminLogin(request.body));
+    }
+    if (method === 'GET' && path === '/api/admin/tasks') {
+      return ns.createJsonResponse(200, service.listAdminTasks(request.query, request.body));
+    }
+    if (method === 'POST' && path === '/api/admin/tasks') {
+      return ns.createJsonResponse(201, service.createAdminTask(request.query, request.body));
+    }
+    if (method === 'GET' && path.match(/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})$/)) {
+      var runByDateMatch = path.match(/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})$/);
+      return ns.createJsonResponse(200, service.getAdminRunByDate(request.query, request.body, runByDateMatch[1]));
+    }
+    if (method === 'POST' && path.match(/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/items:insert$/)) {
+      var insertRunItemMatch = path.match(/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/items:insert$/);
+      return ns.createJsonResponse(201, service.insertAdminRunItem(request.query, request.body, insertRunItemMatch[1]));
+    }
+    if (method === 'POST' && path.match(/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/templates\/([^/]+):apply$/)) {
+      var applyTemplateMatch = path.match(/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/templates\/([^/]+):apply$/);
+      return ns.createJsonResponse(
+        201,
+        service.applyAdminTemplateToRun(request.query, request.body, applyTemplateMatch[1], applyTemplateMatch[2])
+      );
+    }
+    if (method === 'DELETE' && path.match(/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/items\/([^/]+)$/)) {
+      var deleteRunItemMatch = path.match(/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/items\/([^/]+)$/);
+      return ns.createJsonResponse(
+        200,
+        service.deleteAdminRunItem(request.query, request.body, deleteRunItemMatch[1], deleteRunItemMatch[2])
+      );
+    }
+    if (method === 'GET' && path === '/api/admin/templates') {
+      var adminToken = String((request.query && request.query.adminToken) || '');
+      if (adminToken) {
+        return ns.createJsonResponse(200, service.listAdminTemplates(request.query, request.body));
+      }
+    }
+    if (method === 'POST' && path === '/api/admin/templates') {
+      var adminTemplateToken = String(
+        ((request.query && request.query.adminToken) || (request.body && request.body.adminToken) || '')
+      );
+      if (adminTemplateToken) {
+        return ns.createJsonResponse(201, service.createAdminTemplate(request.query, request.body));
+      }
+    }
+
     if (method === 'GET' && path === '/api/me') {
       return ns.createJsonResponse(200, service.getMe(request.query));
     }
@@ -158,7 +204,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       notificationService: notificationService,
       appBaseUrl: appBaseUrl,
       lineChannelId: options.lineChannelId || scriptProperties.getProperty('LINE_CHANNEL_ID'),
-      allowAnonymousAccess: allowAnonymousAccess
+      allowAnonymousAccess: allowAnonymousAccess,
+      adminLoginId: options.adminLoginId || scriptProperties.getProperty('ADMIN_LOGIN_ID'),
+      adminLoginPassword: options.adminLoginPassword || scriptProperties.getProperty('ADMIN_LOGIN_PASSWORD'),
+      adminSessionTtlSeconds: options.adminSessionTtlSeconds || scriptProperties.getProperty('ADMIN_SESSION_TTL_SECONDS')
     });
     var webhookHandler = ns.createWebhookHandler({
       appBaseUrl: appBaseUrl,

@@ -82,9 +82,10 @@
     }
     var payload = await response.json();
     var gasApiBaseUrl = normalizeBaseUrl(payload.gasApiBaseUrl || '');
+    var functionsApiBaseUrl = normalizeBaseUrl(payload.functionsApiBaseUrl || '');
     var liffId = String(payload.liffId || '').trim();
-    if (!gasApiBaseUrl) {
-      throw new Error('config.json の gasApiBaseUrl が未設定です');
+    if (!gasApiBaseUrl && !functionsApiBaseUrl) {
+      throw new Error('config.json の gasApiBaseUrl または functionsApiBaseUrl を設定してください');
     }
     if (!liffId) {
       throw new Error('config.json の liffId が未設定です');
@@ -98,11 +99,13 @@
 
     return {
       gasApiBaseUrl: gasApiBaseUrl,
+      functionsApiBaseUrl: functionsApiBaseUrl,
       liffId: liffId,
       defaultStoreId: defaultStoreId,
       allowAnonymousAccess: payload.allowAnonymousAccess === true,
       tryLiffAuthInAnonymous: payload.tryLiffAuthInAnonymous === true,
       enableRealtimeSync: payload.enableRealtimeSync !== false,
+      clientFirestoreWriteEnabled: payload.clientFirestoreWriteEnabled === true,
       consistencyRefreshSeconds: consistencyRefreshSeconds,
       firebase: normalizeFirebaseConfig(payload.firebase)
     };
@@ -210,10 +213,13 @@
     }
   }
 
-  function createApi(baseUrl) {
-    var normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  function createApi(options) {
+    var normalizedGasBaseUrl = normalizeBaseUrl(options && options.gasApiBaseUrl ? options.gasApiBaseUrl : '');
+    var normalizedFunctionsBaseUrl = normalizeBaseUrl(options && options.functionsApiBaseUrl ? options.functionsApiBaseUrl : '');
+    var defaultStoreId = String(options && options.defaultStoreId ? options.defaultStoreId : '');
+    var useFunctionsApi = normalizedFunctionsBaseUrl !== '';
 
-    async function request(method, path, idToken, body, queryExtras) {
+    async function requestLegacyGas(method, path, idToken, body, queryExtras) {
       var query = {
         path: String(path || '').replace(/^\/+/, '')
       };
@@ -231,7 +237,7 @@
         options.body = JSON.stringify(body || {});
       }
 
-      var response = await fetch(appendQuery(normalizedBaseUrl, query), options);
+      var response = await fetch(appendQuery(normalizedGasBaseUrl, query), options);
       var rawText = await response.text();
       var payload = null;
       try {
@@ -250,6 +256,59 @@
         throw apiError;
       }
       return payload;
+    }
+
+    async function requestFunctionsApi(method, path, idToken, body, queryExtras) {
+      var query = Object.assign({}, queryExtras || {});
+      if (idToken) {
+        query.idToken = idToken;
+      }
+      if (defaultStoreId && !query.storeId) {
+        query.storeId = defaultStoreId;
+      }
+      var url = appendQuery(normalizedFunctionsBaseUrl + String(path || ''), query);
+      var options = {
+        method: method
+      };
+      if (method !== 'GET' && method !== 'DELETE') {
+        options.headers = { 'Content-Type': 'application/json' };
+        options.body = JSON.stringify(body || {});
+      }
+      var response = await fetch(url, options);
+      var rawText = await response.text();
+      var payload = null;
+      try {
+        payload = JSON.parse(rawText);
+      } catch (error) {
+        throw new Error('API 応答の解析に失敗しました');
+      }
+      var statusCode = typeof payload.statusCode === 'number'
+        ? payload.statusCode
+        : Number(payload.statusCode) || response.status || 500;
+      if (!payload || payload.ok === false || statusCode >= 400) {
+        var apiError = new Error(payload && payload.message ? payload.message : 'API request failed');
+        apiError.code = payload && payload.code ? payload.code : '';
+        apiError.statusCode = statusCode;
+        throw apiError;
+      }
+      return payload;
+    }
+
+    function request(method, legacyPath, idToken, body, queryExtras) {
+      if (useFunctionsApi) {
+        if (legacyPath === 'api/checklists/today') {
+          return requestFunctionsApi('GET', '/v1/user/checklists/today', idToken, body, queryExtras);
+        }
+        var checkMatch = String(legacyPath).match(/^api\/checklist-items\/([^/]+)\/check$/);
+        if (checkMatch) {
+          return requestFunctionsApi('POST', '/v1/user/checklist-items/' + encodeURIComponent(checkMatch[1]) + '/check', idToken, body, queryExtras);
+        }
+        var uncheckMatch = String(legacyPath).match(/^api\/checklist-items\/([^/]+)\/uncheck$/);
+        if (uncheckMatch) {
+          return requestFunctionsApi('POST', '/v1/user/checklist-items/' + encodeURIComponent(uncheckMatch[1]) + '/uncheck', idToken, body, queryExtras);
+        }
+      }
+      return requestLegacyGas(method, legacyPath, idToken, body, queryExtras);
     }
 
     return {
@@ -343,6 +402,7 @@
     incompleteSummary: document.getElementById('incomplete-summary'),
     incompleteItems: document.getElementById('incomplete-items'),
     refreshButton: document.getElementById('refresh-button'),
+    openAdminButton: document.getElementById('open-admin-button'),
     hamburgerButton: document.getElementById('hamburger-button'),
     todoMenu: document.getElementById('todo-menu'),
     tabHome: document.getElementById('tab-home'),
@@ -1529,6 +1589,9 @@
   }
 
   function persistChecklistSnapshot() {
+    if (!state.config || state.config.clientFirestoreWriteEnabled !== true) {
+      return Promise.resolve();
+    }
     if (!state.checklist || !initializeRealtimeClient()) {
       return Promise.resolve();
     }
@@ -1564,6 +1627,9 @@
   }
 
   function emitRealtimeEvent(updatedItem) {
+    if (!state.config || state.config.clientFirestoreWriteEnabled !== true) {
+      return Promise.resolve();
+    }
     if (!state.realtimeEnabled || !state.firestore || !updatedItem) {
       return Promise.resolve();
     }
@@ -2074,12 +2140,16 @@
 
     var config = await loadConfig();
     state.config = config;
-    global.OGAWAYA_APP_BASE_URL = config.gasApiBaseUrl;
+    global.OGAWAYA_APP_BASE_URL = config.gasApiBaseUrl || config.functionsApiBaseUrl;
     global.OGAWAYA_LIFF_ID = config.liffId;
     global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = config.allowAnonymousAccess;
     global.OGAWAYA_TRY_LIFF_AUTH_IN_ANONYMOUS = config.tryLiffAuthInAnonymous;
 
-    state.api = createApi(config.gasApiBaseUrl);
+    state.api = createApi({
+      gasApiBaseUrl: config.gasApiBaseUrl,
+      functionsApiBaseUrl: config.functionsApiBaseUrl,
+      defaultStoreId: config.defaultStoreId
+    });
     state.idToken = await initializeAuth(config.liffId);
     state.authUserContext = extractUserContextFromIdToken(state.idToken);
     var loadedFromSnapshot = false;
@@ -2123,6 +2193,12 @@
         }).catch(function (error) {
           setError(buildApiErrorMessage(error, 'チェックリスト取得に失敗しました'));
         });
+      });
+    }
+    if (elements.openAdminButton) {
+      elements.openAdminButton.addEventListener('click', function () {
+        setMenuOpen(false);
+        global.location.href = './admin.html';
       });
     }
 
