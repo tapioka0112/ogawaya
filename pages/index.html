@@ -6,6 +6,8 @@
     <title>従業員画面</title>
     <link rel="stylesheet" href="./style.css" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
   </head>
   <body>
     <main class="page-shell">
@@ -43,7 +45,7 @@
             </div>
           </div>
           <div class="status-strip">
-            <div class="meta-line">チェックと取消は画面更新ではなく API 再取得で整合を取ります。</div>
+            <div class="meta-line">チェックは即時反映し、他端末の更新は自動同期されます。</div>
           </div>
           <ul class="checklist-list" id="checklist-items"></ul>
         </section>

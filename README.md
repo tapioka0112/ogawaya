@@ -83,15 +83,22 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 2. [gas/appsscript.json](/home/sota411/Documents/project/ogawaya/gas/appsscript.json) の必要権限（External Request / Spreadsheet）を設定する。
 3. `gas/src` 配下の `.gs` を実装する。
 4. `pages/config.json` に `gasApiBaseUrl` と `liffId` を設定する。
-5. Script Properties に `ALLOW_ANONYMOUS_ACCESS` を設定する（`true` は閲覧のみフォールバック）。
-6. `clasp push` で GAS を反映する。
-7. GitHub Pages を有効化し、`Deploy LIFF Pages` ワークフローで `pages/` を公開する。
-8. Trigger を2本作成する。
+5. 複数端末の即時同期を使う場合は `pages/config.json` の `firebase`（`apiKey` / `authDomain` / `projectId` / `appId`）を設定する。
+6. Script Properties に `ALLOW_ANONYMOUS_ACCESS` を設定する（`true` は閲覧のみフォールバック）。
+7. `clasp push` で GAS を反映する。
+8. GitHub Pages を有効化し、`Deploy LIFF Pages` ワークフローで `pages/` を公開する。
+9. Trigger を2本作成する。
    - 10:30: `runDailyStart`
    - 0:00: `runDailyClosing`
-9. LINE Developers の LIFF Endpoint URL を `https://<user>.github.io/<repo>/` に設定する。
-10. LIFF URL（`https://liff.line.me/<LIFF_ID>`）をLINEリッチメニューに紐づける。
-11. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
+10. LINE Developers の LIFF Endpoint URL を `https://<user>.github.io/<repo>/` に設定する。
+11. LIFF URL（`https://liff.line.me/<LIFF_ID>`）をLINEリッチメニューに紐づける。
+12. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
+
+## リアルタイム同期（Firestore）
+- 正本データは従来どおり GAS + Spreadsheet。Firestore は画面の同期イベント配信専用で使う。
+- `pages/config.json` の `enableRealtimeSync=true` かつ `firebase` が有効なときだけリアルタイム同期が動作する。
+- イベント配信先は `stores/{storeId}/runs/{targetDate}/events`。
+- 画面側は Firestore 購読に加えて 30 秒周期の整合リフレッシュを実施する。
 
 詳細な初期データ投入と運用手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照する。
 

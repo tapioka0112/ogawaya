@@ -22,6 +22,8 @@ test('README に単一店舗前提・匿名運用・日次時刻・LINE表示名
   assert.match(readme, /checked_by_name/);
   assert.match(readme, /10:30/);
   assert.match(readme, /0:00/);
+  assert.match(readme, /Firestore/);
+  assert.match(readme, /enableRealtimeSync/);
 });
 
 test('import 用アセットに CSV と Script Properties テンプレートが揃っている', async () => {
@@ -62,4 +64,6 @@ test('import 手順は一括初期化関数を案内し、CSV import を fallbac
   assert.match(importReadme, /bootstrapSpreadsheetTemplates/);
   assert.match(importReadme, /CSV import は手動 fallback/);
   assert.match(bootstrap, /bootstrapSpreadsheetTemplates/);
+  assert.match(bootstrap, /firebase\.apiKey/);
+  assert.match(bootstrap, /enableRealtimeSync/);
 });

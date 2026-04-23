@@ -2,5 +2,13 @@
   "gasApiBaseUrl": "https://script.google.com/macros/s/AKfycbwHus8fdYWaLzkL0qrj6mX2rEDBphVlqWA4IAzETnsNXmanUgD5xLiMZZooGkeLI4pbMg/exec",
   "liffId": "2009859108-sJ31BCFx",
   "allowAnonymousAccess": false,
-  "tryLiffAuthInAnonymous": false
+  "tryLiffAuthInAnonymous": false,
+  "enableRealtimeSync": true,
+  "consistencyRefreshSeconds": 30,
+  "firebase": {
+    "apiKey": "REPLACE_FIREBASE_API_KEY",
+    "authDomain": "REPLACE_FIREBASE_AUTH_DOMAIN",
+    "projectId": "REPLACE_FIREBASE_PROJECT_ID",
+    "appId": "REPLACE_FIREBASE_APP_ID"
+  }
 }

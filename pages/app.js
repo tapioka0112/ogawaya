@@ -47,6 +47,34 @@
     });
   }
 
+  function isConfiguredValue(value) {
+    var normalized = String(value || '').trim();
+    return normalized !== '' && normalized.indexOf('REPLACE_') !== 0;
+  }
+
+  function normalizeFirebaseConfig(rawConfig) {
+    if (!rawConfig || typeof rawConfig !== 'object') {
+      return null;
+    }
+    var normalized = {};
+    [
+      'apiKey',
+      'authDomain',
+      'projectId',
+      'appId',
+      'messagingSenderId',
+      'storageBucket'
+    ].forEach(function (key) {
+      if (isConfiguredValue(rawConfig[key])) {
+        normalized[key] = String(rawConfig[key]).trim();
+      }
+    });
+    if (!normalized.apiKey || !normalized.projectId || !normalized.appId) {
+      return null;
+    }
+    return normalized;
+  }
+
   async function loadConfig() {
     var response = await fetch('./config.json', { cache: 'no-store' });
     if (!response.ok) {
@@ -61,11 +89,20 @@
     if (!liffId) {
       throw new Error('config.json の liffId が未設定です');
     }
+
+    var consistencyRefreshSeconds = Number(payload.consistencyRefreshSeconds);
+    if (!isFinite(consistencyRefreshSeconds) || consistencyRefreshSeconds < 5) {
+      consistencyRefreshSeconds = 30;
+    }
+
     return {
       gasApiBaseUrl: gasApiBaseUrl,
       liffId: liffId,
       allowAnonymousAccess: payload.allowAnonymousAccess === true,
-      tryLiffAuthInAnonymous: payload.tryLiffAuthInAnonymous === true
+      tryLiffAuthInAnonymous: payload.tryLiffAuthInAnonymous === true,
+      enableRealtimeSync: payload.enableRealtimeSync !== false,
+      consistencyRefreshSeconds: consistencyRefreshSeconds,
+      firebase: normalizeFirebaseConfig(payload.firebase)
     };
   }
 
@@ -154,8 +191,16 @@
   var state = {
     idToken: '',
     checklist: null,
-    pendingItemActions: {},
-    api: null
+    api: null,
+    config: null,
+    itemActions: {},
+    firebaseApp: null,
+    firestore: null,
+    realtimeEnabled: false,
+    syncUnsubscribe: null,
+    syncSessionStartedAtMs: 0,
+    consistencyTimerId: null,
+    visibilityHandlerBound: false
   };
 
   var elements = {
@@ -256,6 +301,17 @@
     return values.month + '月' + values.day + '日' + values.hour + '時' + values.minute + '分';
   }
 
+  function cloneChecklistItem(item) {
+    return {
+      id: item.id,
+      title: item.title,
+      status: item.status,
+      checkedBy: item.checkedBy,
+      checkedByUserId: item.checkedByUserId,
+      checkedAt: item.checkedAt
+    };
+  }
+
   function recomputeProgress() {
     if (!state.checklist) {
       return;
@@ -277,6 +333,17 @@
     return state.checklist.items.find(function (item) {
       return item.id === runItemId;
     }) || null;
+  }
+
+  function getItemActionState(runItemId) {
+    if (!state.itemActions[runItemId]) {
+      state.itemActions[runItemId] = {
+        desiredStatus: null,
+        inFlight: false,
+        lastSyncedAtMs: 0
+      };
+    }
+    return state.itemActions[runItemId];
   }
 
   function applyChecklistItemUpdate(updatedItem) {
@@ -324,77 +391,270 @@
     return false;
   }
 
-  function withPendingItemAction(runItemId, action) {
-    if (state.pendingItemActions[runItemId]) {
+  function buildApiErrorMessage(error, fallbackMessage) {
+    return error && error.message ? String(error.message) : fallbackMessage;
+  }
+
+  function parseTimestampMillis(value) {
+    if (!value) {
+      return 0;
+    }
+    if (typeof value === 'number' && isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      var parsed = Date.parse(value);
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    if (typeof value.toMillis === 'function') {
+      return Number(value.toMillis()) || 0;
+    }
+    if (typeof value.seconds === 'number') {
+      return value.seconds * 1000;
+    }
+    return 0;
+  }
+
+  function ensureSyncTargetInfo() {
+    if (!state.checklist || !state.checklist.currentUser || !state.checklist.currentUser.store) {
+      return null;
+    }
+    var storeId = String(state.checklist.currentUser.store.id || '');
+    var targetDate = String(state.checklist.targetDate || '');
+    var runId = String(state.checklist.runId || '');
+    if (!storeId || !targetDate || !runId) {
+      return null;
+    }
+    return {
+      storeId: storeId,
+      targetDate: targetDate,
+      runId: runId
+    };
+  }
+
+  function emitRealtimeEvent(updatedItem) {
+    if (!state.realtimeEnabled || !state.firestore || !updatedItem) {
+      return Promise.resolve();
+    }
+    var targetInfo = ensureSyncTargetInfo();
+    if (!targetInfo) {
+      return Promise.resolve();
+    }
+    var sourceUserId = state.checklist && state.checklist.currentUser
+      ? String(state.checklist.currentUser.userId || '')
+      : '';
+
+    var payload = {
+      runId: targetInfo.runId,
+      targetDate: targetInfo.targetDate,
+      storeId: targetInfo.storeId,
+      itemId: String(updatedItem.id || ''),
+      status: String(updatedItem.status || ''),
+      checkedBy: updatedItem.checkedBy || '',
+      checkedByUserId: updatedItem.checkedByUserId || '',
+      checkedAt: updatedItem.checkedAt || '',
+      sourceUserId: sourceUserId,
+      emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    return state.firestore
+      .collection('stores')
+      .doc(targetInfo.storeId)
+      .collection('runs')
+      .doc(targetInfo.targetDate)
+      .collection('events')
+      .add(payload)
+      .catch(function (error) {
+        console.error('[sync] failed to emit realtime event', error);
+      });
+  }
+
+  function applyRealtimeEvent(eventPayload, emittedAtMs) {
+    if (!eventPayload || !state.checklist) {
       return;
     }
-    state.pendingItemActions[runItemId] = true;
-    renderChecklist();
-    action().finally(function () {
-      delete state.pendingItemActions[runItemId];
+    if (String(eventPayload.runId || '') !== String(state.checklist.runId || '')) {
+      return;
+    }
+    var runItemId = String(eventPayload.itemId || '');
+    if (!runItemId) {
+      return;
+    }
+    var actionState = getItemActionState(runItemId);
+    if (actionState.inFlight) {
+      return;
+    }
+    if (emittedAtMs > 0 && emittedAtMs <= actionState.lastSyncedAtMs) {
+      return;
+    }
+    if (emittedAtMs > 0) {
+      actionState.lastSyncedAtMs = emittedAtMs;
+    }
+    applyChecklistItemUpdate({
+      id: runItemId,
+      status: eventPayload.status,
+      checkedBy: eventPayload.checkedBy || null,
+      checkedByUserId: eventPayload.checkedByUserId || null,
+      checkedAt: eventPayload.checkedAt || null
+    });
+  }
+
+  function stopRealtimeSync() {
+    if (typeof state.syncUnsubscribe === 'function') {
+      state.syncUnsubscribe();
+    }
+    state.syncUnsubscribe = null;
+    state.realtimeEnabled = false;
+  }
+
+  function startRealtimeSync() {
+    stopRealtimeSync();
+    if (!state.config || !state.config.enableRealtimeSync || !state.config.firebase) {
+      return;
+    }
+    if (!global.firebase || typeof global.firebase.initializeApp !== 'function' || typeof global.firebase.firestore !== 'function') {
+      console.error('[sync] firebase sdk is not available');
+      return;
+    }
+
+    var targetInfo = ensureSyncTargetInfo();
+    if (!targetInfo) {
+      return;
+    }
+
+    try {
+      if (!state.firebaseApp) {
+        if (Array.isArray(global.firebase.apps) && global.firebase.apps.length > 0) {
+          state.firebaseApp = global.firebase.app();
+        } else {
+          state.firebaseApp = global.firebase.initializeApp(state.config.firebase);
+        }
+      }
+      if (!state.firestore) {
+        state.firestore = global.firebase.firestore();
+      }
+      state.syncSessionStartedAtMs = Date.now();
+
+      var query = state.firestore
+        .collection('stores')
+        .doc(targetInfo.storeId)
+        .collection('runs')
+        .doc(targetInfo.targetDate)
+        .collection('events')
+        .orderBy('emittedAt', 'desc')
+        .limit(40);
+
+      state.syncUnsubscribe = query.onSnapshot(function (snapshot) {
+        snapshot.docChanges().forEach(function (change) {
+          if (change.type !== 'added' && change.type !== 'modified') {
+            return;
+          }
+          var payload = change.doc.data() || {};
+          var emittedAtMs = parseTimestampMillis(payload.emittedAt);
+          if (emittedAtMs > 0 && emittedAtMs < state.syncSessionStartedAtMs - 5000) {
+            return;
+          }
+          applyRealtimeEvent(payload, emittedAtMs);
+        });
+      }, function (error) {
+        console.error('[sync] realtime listener failed', error);
+      });
+
+      state.realtimeEnabled = true;
+    } catch (error) {
+      console.error('[sync] failed to initialize realtime sync', error);
+      stopRealtimeSync();
+    }
+  }
+
+  function mergeChecklistPreservingInFlight(serverChecklist) {
+    if (!state.checklist || !Array.isArray(state.checklist.items)) {
+      return serverChecklist;
+    }
+    var localItems = {};
+    state.checklist.items.forEach(function (item) {
+      localItems[item.id] = item;
+    });
+    var nextChecklist = serverChecklist || {};
+    var nextItems = Array.isArray(nextChecklist.items) ? nextChecklist.items : [];
+    nextChecklist.items = nextItems.map(function (serverItem) {
+      var localItem = localItems[serverItem.id];
+      if (!localItem) {
+        return serverItem;
+      }
+      var actionState = getItemActionState(serverItem.id);
+      if (actionState.inFlight) {
+        return cloneChecklistItem(localItem);
+      }
+      return serverItem;
+    });
+    return nextChecklist;
+  }
+
+  function requestItemStatusChange(runItemId, desiredStatus) {
+    if (!ensureWritableSession()) {
+      return;
+    }
+    var currentItem = findChecklistItemById(runItemId);
+    if (!currentItem) {
+      return;
+    }
+    var actionState = getItemActionState(runItemId);
+    actionState.desiredStatus = desiredStatus;
+    processItemStatusChange(runItemId);
+  }
+
+  function processItemStatusChange(runItemId) {
+    var actionState = getItemActionState(runItemId);
+    if (actionState.inFlight) {
+      return;
+    }
+    var currentItem = findChecklistItemById(runItemId);
+    if (!currentItem) {
+      return;
+    }
+    var desiredStatus = actionState.desiredStatus;
+    if (!desiredStatus || currentItem.status === desiredStatus) {
+      actionState.desiredStatus = currentItem.status;
+      return;
+    }
+
+    var rollbackItem = cloneChecklistItem(currentItem);
+    actionState.inFlight = true;
+
+    if (desiredStatus === 'checked') {
+      applyChecklistItemUpdate(buildOptimisticCheckedItem(currentItem));
+      setStatus('チェックを更新しました');
+    } else {
+      applyChecklistItemUpdate(buildOptimisticUncheckedItem(currentItem));
+      setStatus('チェックを取り消しました');
+    }
+
+    var requestPromise = desiredStatus === 'checked'
+      ? state.api.checkItem(state.idToken, runItemId)
+      : state.api.uncheckItem(state.idToken, runItemId);
+
+    requestPromise.then(function (response) {
+      if (response && response.item) {
+        applyChecklistItemUpdate(response.item);
+        return emitRealtimeEvent(response.item);
+      }
+      return Promise.resolve();
+    }).catch(function (error) {
+      applyChecklistItemUpdate(rollbackItem);
+      setError(buildApiErrorMessage(error, 'チェック更新に失敗しました'));
+    }).finally(function () {
+      actionState.inFlight = false;
+      var latestItem = findChecklistItemById(runItemId);
+      if (!latestItem) {
+        return;
+      }
+      if (actionState.desiredStatus !== latestItem.status) {
+        processItemStatusChange(runItemId);
+        return;
+      }
+      actionState.desiredStatus = latestItem.status;
       renderChecklist();
-    });
-  }
-
-  function handleCheck(runItemId) {
-    if (!ensureWritableSession()) {
-      return;
-    }
-    var currentItem = findChecklistItemById(runItemId);
-    if (!currentItem || currentItem.status === 'checked') {
-      return;
-    }
-    var rollbackItem = {
-      id: currentItem.id,
-      title: currentItem.title,
-      status: currentItem.status,
-      checkedBy: currentItem.checkedBy,
-      checkedByUserId: currentItem.checkedByUserId,
-      checkedAt: currentItem.checkedAt
-    };
-    applyChecklistItemUpdate(buildOptimisticCheckedItem(currentItem));
-    setStatus('チェックを更新しました');
-
-    withPendingItemAction(runItemId, function () {
-      return state.api.checkItem(state.idToken, runItemId).then(function (response) {
-        if (response && response.item) {
-          applyChecklistItemUpdate(response.item);
-        }
-      }).catch(function (error) {
-        applyChecklistItemUpdate(rollbackItem);
-        setError(error && error.message ? String(error.message) : 'チェック更新に失敗しました');
-      });
-    });
-  }
-
-  function handleUncheck(runItemId) {
-    if (!ensureWritableSession()) {
-      return;
-    }
-    var currentItem = findChecklistItemById(runItemId);
-    if (!currentItem || currentItem.status === 'unchecked') {
-      return;
-    }
-    var rollbackItem = {
-      id: currentItem.id,
-      title: currentItem.title,
-      status: currentItem.status,
-      checkedBy: currentItem.checkedBy,
-      checkedByUserId: currentItem.checkedByUserId,
-      checkedAt: currentItem.checkedAt
-    };
-    applyChecklistItemUpdate(buildOptimisticUncheckedItem(currentItem));
-    setStatus('チェックを取り消しました');
-
-    withPendingItemAction(runItemId, function () {
-      return state.api.uncheckItem(state.idToken, runItemId).then(function (response) {
-        if (response && response.item) {
-          applyChecklistItemUpdate(response.item);
-        }
-      }).catch(function (error) {
-        applyChecklistItemUpdate(rollbackItem);
-        setError(error && error.message ? String(error.message) : 'チェック取消に失敗しました');
-      });
     });
   }
 
@@ -452,11 +712,11 @@
         checkButton.type = 'button';
         checkButton.className = 'action-button';
         checkButton.textContent = 'チェックする';
-        checkButton.disabled = !!state.pendingItemActions[item.id] || !state.idToken;
+        checkButton.disabled = !state.idToken;
         checkButton.addEventListener('click', function () {
           clearError();
           clearStatus();
-          handleCheck(item.id);
+          requestItemStatusChange(item.id, 'checked');
         });
         actions.appendChild(checkButton);
       } else {
@@ -464,11 +724,11 @@
         uncheckButton.type = 'button';
         uncheckButton.className = 'action-button ghost-button';
         uncheckButton.textContent = '取消';
-        uncheckButton.disabled = !!state.pendingItemActions[item.id] || !state.idToken;
+        uncheckButton.disabled = !state.idToken;
         uncheckButton.addEventListener('click', function () {
           clearError();
           clearStatus();
-          handleUncheck(item.id);
+          requestItemStatusChange(item.id, 'unchecked');
         });
         actions.appendChild(uncheckButton);
       }
@@ -501,12 +761,52 @@
     }
   }
 
-  async function refreshChecklist() {
+  async function refreshChecklist(options) {
+    var refreshOptions = options || {};
     var checklist = await state.api.getTodayChecklist(state.idToken);
-    state.checklist = checklist;
+    state.checklist = mergeChecklistPreservingInFlight(checklist);
+    recomputeProgress();
     renderOverview();
     renderChecklist();
     renderIncomplete();
+    if (refreshOptions.restartSync !== false) {
+      startRealtimeSync();
+    }
+  }
+
+  function startConsistencyRefresh() {
+    if (!state.config) {
+      return;
+    }
+    if (state.consistencyTimerId) {
+      global.clearInterval(state.consistencyTimerId);
+    }
+    state.consistencyTimerId = global.setInterval(function () {
+      if (typeof document.visibilityState === 'string' && document.visibilityState !== 'visible') {
+        return;
+      }
+      refreshChecklist({ restartSync: false }).catch(function (error) {
+        console.error('[sync] consistency refresh failed', error);
+      });
+    }, state.config.consistencyRefreshSeconds * 1000);
+
+    if (!state.visibilityHandlerBound) {
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') {
+          refreshChecklist({ restartSync: false }).catch(function (error) {
+            console.error('[sync] refresh on visible failed', error);
+          });
+        }
+      });
+      state.visibilityHandlerBound = true;
+    }
+  }
+
+  function stopConsistencyRefresh() {
+    if (state.consistencyTimerId) {
+      global.clearInterval(state.consistencyTimerId);
+    }
+    state.consistencyTimerId = null;
   }
 
   async function boot() {
@@ -515,6 +815,7 @@
     clearStatus();
 
     var config = await loadConfig();
+    state.config = config;
     global.OGAWAYA_APP_BASE_URL = config.gasApiBaseUrl;
     global.OGAWAYA_LIFF_ID = config.liffId;
     global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = config.allowAnonymousAccess;
@@ -523,6 +824,7 @@
     state.api = createApi(config.gasApiBaseUrl);
     state.idToken = await initializeAuth(config.liffId);
     await refreshChecklist();
+    startConsistencyRefresh();
   }
 
   function start() {
@@ -530,13 +832,18 @@
       elements.refreshButton.addEventListener('click', function () {
         clearError();
         setStatus('最新状態を取得中です...');
-        refreshChecklist().then(function () {
+        refreshChecklist({ restartSync: false }).then(function () {
           clearStatus();
         }).catch(function (error) {
-          setError(error && error.message ? String(error.message) : 'チェックリスト取得に失敗しました');
+          setError(buildApiErrorMessage(error, 'チェックリスト取得に失敗しました'));
         });
       });
     }
+
+    global.addEventListener('beforeunload', function () {
+      stopRealtimeSync();
+      stopConsistencyRefresh();
+    });
 
     boot().catch(function (error) {
       setError(error && error.message ? String(error.message) : 'LIFF の初期化に失敗しました');

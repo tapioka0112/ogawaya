@@ -75,9 +75,13 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 - `pages/config.json` に以下を設定する。
   - `gasApiBaseUrl`: GAS WebアプリURL（`.../exec`）
   - `liffId`: LIFF ID（`1234567890-xxxxxxx`）
+  - `enableRealtimeSync`: `true`（リアルタイム同期を使う場合）
+  - `consistencyRefreshSeconds`: `30`（推奨）
+  - `firebase.apiKey` / `firebase.authDomain` / `firebase.projectId` / `firebase.appId`
 - 更新系APIは `idToken` 必須。LIFF認証が通らない場合はチェック更新できない。
 - `/api/link` は廃止済み（`410`）。LINE 連携フォームは使用しない。
 - 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` にする。
+- Firestore は同期イベント専用で、正本データは従来どおり Spreadsheet を使用する。
 
 ## 6. Trigger
 
