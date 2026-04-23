@@ -40,3 +40,13 @@ test('GitHub Pages は pending 中でもクリックを無効化しない', asyn
   assert.doesNotMatch(css, /pointer-events\s*:\s*none/);
   assert.doesNotMatch(appJs, /if\s*\(actionState\.inFlight\)\s*\{\s*return;\s*\}\s*clearError\(\);\s*clearStatus\(\);/);
 });
+
+test('GitHub Pages の連打制御は confirmedItem 基準で latest-wins を維持する', async () => {
+  const appJs = await readFile('pages/app.js', 'utf8');
+
+  assert.match(appJs, /confirmedItem:\s*null/);
+  assert.match(appJs, /if\s*\(!actionState\.confirmedItem\)\s*\{\s*actionState\.confirmedItem = cloneChecklistItem\(currentItem\);\s*\}/);
+  assert.match(appJs, /applyOptimisticStatus\(runItemId,\s*desiredStatus\);/);
+  assert.match(appJs, /if\s*\(requestFailed\)\s*\{\s*actionState\.desiredStatus = latestConfirmedStatus;/);
+  assert.match(appJs, /if\s*\(latestDesiredStatus && latestConfirmedStatus && latestDesiredStatus !== latestConfirmedStatus\)\s*\{/);
+});

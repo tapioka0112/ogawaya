@@ -551,7 +551,8 @@
       state.itemActions[runItemId] = {
         desiredStatus: null,
         inFlight: false,
-        lastSyncedAtMs: 0
+        lastSyncedAtMs: 0,
+        confirmedItem: null
       };
     }
     return state.itemActions[runItemId];
@@ -592,6 +593,20 @@
       checkedByUserId: null,
       checkedAt: null
     };
+  }
+
+  function applyOptimisticStatus(runItemId, desiredStatus) {
+    var currentItem = findChecklistItemById(runItemId);
+    if (!currentItem || currentItem.status === desiredStatus) {
+      return;
+    }
+    if (desiredStatus === 'checked') {
+      applyChecklistItemUpdate(buildOptimisticCheckedItem(currentItem));
+      setStatus('チェックを更新しました');
+      return;
+    }
+    applyChecklistItemUpdate(buildOptimisticUncheckedItem(currentItem));
+    setStatus('チェックを取り消しました');
   }
 
   function ensureWritableSession() {
@@ -806,13 +821,17 @@
     if (emittedAtMs > 0) {
       actionState.lastSyncedAtMs = emittedAtMs;
     }
-    applyChecklistItemUpdate({
+    var currentItem = findChecklistItemById(runItemId);
+    var syncedItem = {
       id: runItemId,
+      title: currentItem ? currentItem.title : '',
       status: eventPayload.status,
       checkedBy: eventPayload.checkedBy || null,
       checkedByUserId: eventPayload.checkedByUserId || null,
       checkedAt: eventPayload.checkedAt || null
-    });
+    };
+    applyChecklistItemUpdate(syncedItem);
+    actionState.confirmedItem = cloneChecklistItem(syncedItem);
     persistChecklistSnapshot();
   }
 
@@ -903,8 +922,14 @@
       return;
     }
     var actionState = getItemActionState(runItemId);
+    if (!actionState.confirmedItem) {
+      actionState.confirmedItem = cloneChecklistItem(currentItem);
+    }
     actionState.desiredStatus = desiredStatus;
-    processItemStatusChange(runItemId);
+    applyOptimisticStatus(runItemId, desiredStatus);
+    if (!actionState.inFlight) {
+      processItemStatusChange(runItemId);
+    }
   }
 
   function processItemStatusChange(runItemId) {
@@ -916,49 +941,51 @@
     if (!currentItem) {
       return;
     }
+    if (!actionState.confirmedItem) {
+      actionState.confirmedItem = cloneChecklistItem(currentItem);
+    }
     var desiredStatus = actionState.desiredStatus;
-    if (!desiredStatus || currentItem.status === desiredStatus) {
-      actionState.desiredStatus = currentItem.status;
+    var confirmedStatus = actionState.confirmedItem.status;
+    if (!desiredStatus || desiredStatus === confirmedStatus) {
+      actionState.desiredStatus = confirmedStatus;
       return;
     }
-
-    var rollbackItem = cloneChecklistItem(currentItem);
     actionState.inFlight = true;
-
-    if (desiredStatus === 'checked') {
-      applyChecklistItemUpdate(buildOptimisticCheckedItem(currentItem));
-      setStatus('チェックを更新しました');
-    } else {
-      applyChecklistItemUpdate(buildOptimisticUncheckedItem(currentItem));
-      setStatus('チェックを取り消しました');
-    }
+    var requestFailed = false;
 
     var requestPromise = desiredStatus === 'checked'
       ? state.api.checkItem(state.idToken, runItemId)
       : state.api.uncheckItem(state.idToken, runItemId);
 
     requestPromise.then(function (response) {
-      if (response && response.item) {
-        applyChecklistItemUpdate(response.item);
-        return emitRealtimeEvent(response.item).then(function () {
-          return persistChecklistSnapshot();
-        });
+      if (!response || !response.item) {
+        requestFailed = true;
+        return Promise.resolve();
       }
-      return Promise.resolve();
+      actionState.confirmedItem = cloneChecklistItem(response.item);
+      applyChecklistItemUpdate(response.item);
+      return emitRealtimeEvent(response.item).then(function () {
+        return persistChecklistSnapshot();
+      });
     }).catch(function (error) {
-      applyChecklistItemUpdate(rollbackItem);
+      requestFailed = true;
+      applyChecklistItemUpdate(actionState.confirmedItem);
       setError(buildApiErrorMessage(error, 'チェック更新に失敗しました'));
     }).finally(function () {
       actionState.inFlight = false;
-      var latestItem = findChecklistItemById(runItemId);
-      if (!latestItem) {
+      var latestDesiredStatus = actionState.desiredStatus;
+      var latestConfirmedStatus = actionState.confirmedItem ? actionState.confirmedItem.status : '';
+      if (requestFailed) {
+        actionState.desiredStatus = latestConfirmedStatus;
+        renderChecklist();
         return;
       }
-      if (actionState.desiredStatus !== latestItem.status) {
+      if (latestDesiredStatus && latestConfirmedStatus && latestDesiredStatus !== latestConfirmedStatus) {
+        applyOptimisticStatus(runItemId, latestDesiredStatus);
         processItemStatusChange(runItemId);
         return;
       }
-      actionState.desiredStatus = latestItem.status;
+      actionState.desiredStatus = latestConfirmedStatus;
       renderChecklist();
     });
   }
