@@ -110,6 +110,7 @@
 
   var LAST_STORE_ID_STORAGE_KEY = 'ogawaya:last-store-id';
   var SNAPSHOT_DOC_ID = 'today';
+  // 統計タブは Firestore snapshot をクライアント集計して表示する。
   var ITEM_ACTION_DISPATCH_DEBOUNCE_MS = 120;
   var ITEM_ACTION_REQUEST_TIMEOUT_MS = 2500;
   var ITEM_ACTION_RETRY_MAX_ATTEMPTS = 6;
