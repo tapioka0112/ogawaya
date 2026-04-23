@@ -27,6 +27,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（既定 `300`）で state cache の保持秒数を調整できる。
 - `SPREADSHEET_STATE_CACHE_CHUNK_SIZE`（既定 `90000`）で cache 分割サイズを調整できる。
 - API 実行ログ `api.request.success` / `api.request.failed` には `durationMs` が出るため、遅延の実測比較に使える。
+- 統計タブは `GET /api/stats/monthly?year=YYYY&month=M&idToken=...` を使い、月次の達成日数・個人チェック件数・日別カレンダーを取得する。
 
 ## 目的
 - 店舗別の日次チェックリストをLINE上で共有する。

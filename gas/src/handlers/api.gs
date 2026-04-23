@@ -74,6 +74,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     if (method === 'GET' && path === '/api/checklists/today/incomplete') {
       return ns.createJsonResponse(200, service.getTodayIncomplete(request.query));
     }
+    if (method === 'GET' && path === '/api/stats/monthly') {
+      return ns.createJsonResponse(200, service.getMonthlyStats(request.query));
+    }
 
     var checkMatch = path.match(/^\/api\/checklist-items\/([^/]+)\/check$/);
     if (method === 'POST' && checkMatch) {

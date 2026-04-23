@@ -309,6 +309,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }).map(ns.clone);
     }
 
+    function listRunsByStoreAndMonth(storeId, year, month) {
+      var monthNumber = Number(month);
+      var normalizedMonth = monthNumber < 10 ? '0' + monthNumber : String(monthNumber);
+      var targetPrefix = String(year) + '-' + normalizedMonth + '-';
+      return getTableRowsUnsafe('checklist_runs').filter(function (run) {
+        return run.store_id === storeId && String(run.target_date || '').indexOf(targetPrefix) === 0;
+      }).map(ns.clone);
+    }
+
     function createChecklistRun(run) {
       return appendRow('checklist_runs', run);
     }
@@ -327,6 +336,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return ns.sortBySortOrder(getTableRowsUnsafe('checklist_run_items').filter(function (item) {
         return item.run_id === runId;
       }).map(ns.clone));
+    }
+
+    function listRunItemsByRunIds(runIds) {
+      var runIdSet = {};
+      (runIds || []).forEach(function (runId) {
+        runIdSet[runId] = true;
+      });
+      return getTableRowsUnsafe('checklist_run_items').filter(function (item) {
+        return !!runIdSet[item.run_id];
+      }).map(ns.clone);
     }
 
     function createRunItems(items) {
@@ -546,7 +565,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       listLogsByRunItemIds: listLogsByRunItemIds,
       listLogsByRunId: listLogsByRunId,
       listRunItems: listRunItems,
+      listRunItemsByRunIds: listRunItemsByRunIds,
       listRunsByDate: listRunsByDate,
+      listRunsByStoreAndMonth: listRunsByStoreAndMonth,
       listTableUnsafe: readState,
       listTemplateItems: listTemplateItems,
       listUsersByStore: listUsersByStore,

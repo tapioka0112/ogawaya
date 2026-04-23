@@ -405,6 +405,84 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       });
     }
 
+    function parseRequiredInteger(value, fieldName) {
+      var normalized = String(value || '').trim();
+      ns.assert(normalized !== '', 'invalid_request', fieldName + ' は必須です', 400);
+      ns.assert(/^-?\d+$/.test(normalized), 'invalid_request', fieldName + ' は整数で指定してください', 400);
+      return Number(normalized);
+    }
+
+    function parseMonthlyStatsPeriod(query) {
+      var safeQuery = query || {};
+      var year = parseRequiredInteger(safeQuery.year, 'year');
+      var month = parseRequiredInteger(safeQuery.month, 'month');
+      ns.assert(month >= 1 && month <= 12, 'invalid_request', 'month は 1〜12 で指定してください', 400);
+      return {
+        year: year,
+        month: month
+      };
+    }
+
+    function buildMonthlyStats(query) {
+      var period = parseMonthlyStatsPeriod(query);
+      var currentUser = requireAuthenticatedUser(query);
+      var runs = repository.listRunsByStoreAndMonth(currentUser.user.store_id, period.year, period.month);
+
+      var runDateById = {};
+      var dayStatsByDate = {};
+      runs.forEach(function (run) {
+        runDateById[run.id] = run.target_date;
+        if (!dayStatsByDate[run.target_date]) {
+          dayStatsByDate[run.target_date] = {
+            date: run.target_date,
+            total: 0,
+            checked: 0
+          };
+        }
+      });
+
+      var runIds = runs.map(function (run) {
+        return run.id;
+      });
+      var items = repository.listRunItemsByRunIds(runIds);
+      var myCheckedItems = 0;
+      items.forEach(function (item) {
+        var targetDate = runDateById[item.run_id];
+        ns.assert(targetDate, 'internal_error', 'run item に対応する run が見つかりません', 500);
+        dayStatsByDate[targetDate].total += 1;
+        if (item.status === ns.ITEM_STATUS.CHECKED) {
+          dayStatsByDate[targetDate].checked += 1;
+          if (item.checked_by === currentUser.user.id) {
+            myCheckedItems += 1;
+          }
+        }
+      });
+
+      var calendar = Object.keys(dayStatsByDate).sort().map(function (date) {
+        var dayStats = dayStatsByDate[date];
+        return {
+          date: dayStats.date,
+          achieved: dayStats.total > 0 && dayStats.checked === dayStats.total,
+          total: dayStats.total,
+          checked: dayStats.checked
+        };
+      });
+
+      var totalItems = items.length;
+      var achievedDays = calendar.filter(function (entry) {
+        return entry.achieved;
+      }).length;
+      return {
+        year: period.year,
+        month: period.month,
+        totalDays: calendar.length,
+        achievedDays: achievedDays,
+        totalItems: totalItems,
+        myCheckedItems: myCheckedItems,
+        calendar: calendar
+      };
+    }
+
     return {
       getCurrentUser: requireAuthenticatedUser,
 
@@ -460,6 +538,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             };
           })
         };
+      },
+
+      getMonthlyStats: function (query) {
+        return buildMonthlyStats(query);
       },
 
       checkItem: function (query, runItemId, body) {
