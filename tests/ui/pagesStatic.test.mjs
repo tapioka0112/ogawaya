@@ -161,15 +161,17 @@ test('GitHub Pages のタブUIはホームと統計を切り替えられる', as
   assert.match(css, /#stats-content:not\(\[hidden\]\)\s*\{\s*display:\s*flex;/);
 });
 
-test('GitHub Pages の統計タブは Firestore 統計ドキュメントを購読して表示する', async () => {
+test('GitHub Pages の統計タブは Firestore snapshot からクライアント集計して表示する', async () => {
   const appJs = await readFile('pages/app.js', 'utf8');
 
-  assert.match(appJs, /function buildMonthlyStatsDocRef\(storeId,\s*year,\s*month\)/);
-  assert.match(appJs, /function buildDailyStatsDocRef\(storeId,\s*targetDate\)/);
-  assert.match(appJs, /function subscribeMonthlyStats\(year,\s*month\)/);
-  assert.match(appJs, /function subscribeDailyStats\(targetDate\)/);
-  assert.match(appJs, /state\.monthlyStatsUnsubscribe = docRef\.onSnapshot\(function \(doc\)/);
-  assert.match(appJs, /state\.dailyStatsUnsubscribe = docRef\.onSnapshot\(function \(doc\)/);
+  assert.match(appJs, /function buildSnapshotDocRef\(storeId,\s*targetDate\)/);
+  assert.match(appJs, /function buildMonthTargetDates\(year,\s*month\)/);
+  assert.match(appJs, /function loadMonthlyStatsFromSnapshots\(year,\s*month\)/);
+  assert.match(appJs, /Promise\.all\(targetDates\.map\(function \(targetDate\)/);
+  assert.match(appJs, /function loadDailyStatsFromSnapshot\(targetDate\)/);
+  assert.match(appJs, /function startStatsTodaySnapshotSubscription\(\)/);
+  assert.doesNotMatch(appJs, /\.collection\('monthly_stats'\)/);
+  assert.doesNotMatch(appJs, /\.collection\('daily_stats'\)/);
   assert.doesNotMatch(appJs, /state\.api\.getMonthlyStats\(/);
   assert.doesNotMatch(appJs, /state\.api\.getDailyStats\(/);
 });

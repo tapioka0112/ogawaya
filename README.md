@@ -27,7 +27,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（既定 `300`）で state cache の保持秒数を調整できる。
 - `SPREADSHEET_STATE_CACHE_CHUNK_SIZE`（既定 `90000`）で cache 分割サイズを調整できる。
 - API 実行ログ `api.request.success` / `api.request.failed` には `durationMs` が出るため、遅延の実測比較に使える。
-- 統計タブは `GET /api/stats/monthly?year=YYYY&month=M&idToken=...` を使い、月次の達成日数・個人チェック件数・日別カレンダーを取得する。
+- 統計タブは Firestore の `runs/{targetDate}/snapshots/today` を月内で読み取り、クライアント側で月次・日次を集計する。
 
 ## 目的
 - 店舗別の日次チェックリストをLINE上で共有する。
@@ -86,9 +86,6 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 4. `pages/config.json` に `gasApiBaseUrl` と `liffId` を設定する。
 5. `pages/config.json` の `defaultStoreId` に運用店舗IDを設定する（初回起動時の snapshot 読み込みで使用）。
 6. 複数端末の即時同期を使う場合は `pages/config.json` の `firebase`（`apiKey` / `authDomain` / `projectId` / `appId`）を設定する。
-7. 統計タブを Firestore 集計で運用する場合は Cloud Functions をデプロイする。
-   - `cd firebase/functions` で `npm install`
-   - `cd ../` して `firebase deploy --project owagaya-fd93b --only functions:syncStatsFromSnapshot`
 7. Script Properties に `ALLOW_ANONYMOUS_ACCESS` を設定する（`true` は閲覧のみフォールバック）。
 8. `clasp push` で GAS を反映する。
 9. GitHub Pages を有効化し、`Deploy LIFF Pages` ワークフローで `pages/` を公開する。
@@ -104,8 +101,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - `pages/config.json` の `enableRealtimeSync=true` かつ `firebase` が有効なときだけリアルタイム同期が動作する。
 - イベント配信先は `stores/{storeId}/runs/{targetDate}/events`。
 - 初期表示用スナップショットは `stores/{storeId}/runs/{targetDate}/snapshots/today` に保存する。
-- 統計表示用に Cloud Functions が `stores/{storeId}/monthly_stats/{YYYY-MM}` と `stores/{storeId}/daily_stats/{YYYY-MM-DD}` を更新する。
-- 統計タブは GAS API を叩かず、上記 Firestore ドキュメント購読で表示する。
+- 統計タブは GAS API を叩かず、`snapshots/today` を月内で読み込んでクライアント側で集計する。
 - チェック更新は `Firestore 先行反映 -> GAS API バックグラウンド同期` の順で処理し、UI は API 応答待ちをしない。
 - API 同期が失敗した場合はクライアント側で指数バックオフ再試行し、成功時に Spreadsheet 正本へ反映する。
 - API 同期は 2.5 秒でタイムアウト判定し、停滞時も UI 更新を止めず再試行へ移る。
