@@ -74,6 +74,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     if (method === 'GET' && path === '/api/checklists/today/incomplete') {
       return ns.createJsonResponse(200, service.getTodayIncomplete(request.query));
     }
+    if (method === 'GET' && path === '/api/stats/monthly') {
+      return ns.createJsonResponse(200, service.getMonthlyStats(request.query, request.query.month || ''));
+    }
+    var dateChecklistMatch = path.match(/^\/api\/checklists\/date\/([^/]+)$/);
+    if (method === 'GET' && dateChecklistMatch) {
+      return ns.createJsonResponse(200, service.getDateChecklist(request.query, dateChecklistMatch[1]));
+    }
 
     var checkMatch = path.match(/^\/api\/checklist-items\/([^/]+)\/check$/);
     if (method === 'POST' && checkMatch) {

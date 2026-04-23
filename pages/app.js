@@ -233,11 +233,17 @@
       getTodayChecklist: function (idToken) {
         return request('GET', 'api/checklists/today', idToken);
       },
-      checkItem: function (idToken, runItemId) {
-        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, { comment: '' });
+      checkItem: function (idToken, runItemId, mutationId) {
+        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, {
+          mutationId: mutationId,
+          comment: ''
+        });
       },
-      uncheckItem: function (idToken, runItemId) {
-        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/uncheck', idToken, { reason: '' });
+      uncheckItem: function (idToken, runItemId, mutationId) {
+        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/uncheck', idToken, {
+          mutationId: mutationId,
+          reason: ''
+        });
       }
     };
   }
@@ -550,12 +556,24 @@
     if (!state.itemActions[runItemId]) {
       state.itemActions[runItemId] = {
         desiredStatus: null,
+        desiredMutationId: '',
         inFlight: false,
+        inFlightMutationId: '',
         lastSyncedAtMs: 0,
         confirmedItem: null
       };
     }
     return state.itemActions[runItemId];
+  }
+
+  function createMutationId() {
+    if (
+      global.crypto &&
+      typeof global.crypto.randomUUID === 'function'
+    ) {
+      return global.crypto.randomUUID();
+    }
+    return 'mutation-' + Date.now() + '-' + Math.floor(Math.random() * 1000000000);
   }
 
   function applyChecklistItemUpdate(updatedItem) {
@@ -884,6 +902,9 @@
           if (change.type !== 'added' && change.type !== 'modified') {
             return;
           }
+          if (change.doc && change.doc.metadata && change.doc.metadata.hasPendingWrites) {
+            return;
+          }
           var payload = change.doc.data() || {};
           var emittedAtMs = parseTimestampMillis(payload.emittedAt);
           if (emittedAtMs > 0 && emittedAtMs < state.syncSessionStartedAtMs - 5000) {
@@ -946,6 +967,7 @@
       actionState.confirmedItem = cloneChecklistItem(currentItem);
     }
     actionState.desiredStatus = desiredStatus;
+    actionState.desiredMutationId = createMutationId();
     applyOptimisticStatus(runItemId, desiredStatus);
     if (!actionState.inFlight) {
       processItemStatusChange(runItemId);
@@ -965,25 +987,38 @@
       actionState.confirmedItem = cloneChecklistItem(currentItem);
     }
     var desiredStatus = actionState.desiredStatus;
+    var desiredMutationId = String(actionState.desiredMutationId || '');
     var confirmedStatus = actionState.confirmedItem.status;
-    if (!desiredStatus || desiredStatus === confirmedStatus) {
+    if (!desiredStatus || !desiredMutationId || desiredStatus === confirmedStatus) {
       actionState.desiredStatus = confirmedStatus;
+      actionState.desiredMutationId = '';
       return;
     }
     actionState.inFlight = true;
+    actionState.inFlightMutationId = desiredMutationId;
     var requestFailed = false;
+    var responseMutationId = '';
 
     var requestPromise = desiredStatus === 'checked'
-      ? state.api.checkItem(state.idToken, runItemId)
-      : state.api.uncheckItem(state.idToken, runItemId);
+      ? state.api.checkItem(state.idToken, runItemId, desiredMutationId)
+      : state.api.uncheckItem(state.idToken, runItemId, desiredMutationId);
 
     requestPromise.then(function (response) {
       if (!response || !response.item) {
         requestFailed = true;
         return Promise.resolve();
       }
+      responseMutationId = String(response.mutationId || actionState.inFlightMutationId || '');
       actionState.confirmedItem = cloneChecklistItem(response.item);
-      var latestDesiredStatusAtResponse = actionState.desiredStatus;
+      var latestDesiredStatusAtResponse = String(actionState.desiredStatus || '');
+      var latestDesiredMutationIdAtResponse = String(actionState.desiredMutationId || '');
+      if (
+        latestDesiredMutationIdAtResponse &&
+        responseMutationId &&
+        latestDesiredMutationIdAtResponse !== responseMutationId
+      ) {
+        return Promise.resolve();
+      }
       if (
         latestDesiredStatusAtResponse &&
         latestDesiredStatusAtResponse !== response.item.status
@@ -1003,19 +1038,33 @@
       setError(buildApiErrorMessage(error, 'チェック更新に失敗しました'));
     }).finally(function () {
       actionState.inFlight = false;
+      actionState.inFlightMutationId = '';
       var latestDesiredStatus = actionState.desiredStatus;
+      var latestDesiredMutationId = String(actionState.desiredMutationId || '');
       var latestConfirmedStatus = actionState.confirmedItem ? actionState.confirmedItem.status : '';
       if (requestFailed) {
         actionState.desiredStatus = latestConfirmedStatus;
+        actionState.desiredMutationId = '';
         renderChecklist();
         return;
       }
-      if (latestDesiredStatus && latestConfirmedStatus && latestDesiredStatus !== latestConfirmedStatus) {
+      if (
+        latestDesiredMutationId &&
+        responseMutationId &&
+        latestDesiredMutationId !== responseMutationId
+      ) {
         applyOptimisticStatus(runItemId, latestDesiredStatus);
         processItemStatusChange(runItemId);
         return;
       }
+      if (latestDesiredStatus && latestConfirmedStatus && latestDesiredStatus !== latestConfirmedStatus) {
+        applyOptimisticStatus(runItemId, latestDesiredStatus);
+        actionState.desiredMutationId = createMutationId();
+        processItemStatusChange(runItemId);
+        return;
+      }
       actionState.desiredStatus = latestConfirmedStatus;
+      actionState.desiredMutationId = '';
       renderChecklist();
     });
   }

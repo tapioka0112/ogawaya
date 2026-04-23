@@ -772,6 +772,284 @@
     margin-top: 4px;
   }
 
+  /* --- タブバー --- */
+  .user-mode .todo-shell {
+    padding-bottom: 80px;
+  }
+
+  .user-mode .tab-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    background: var(--u-surface);
+    border-top: 1px solid var(--u-line);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.06);
+    z-index: 20;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .user-mode .tab-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px 8px;
+    border: 0;
+    background: transparent;
+    color: var(--u-muted);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 140ms ease;
+  }
+
+  .user-mode .tab-btn[data-active='true'] {
+    color: var(--u-accent);
+  }
+
+  .user-mode .tab-btn svg {
+    transition: transform 140ms ease;
+  }
+
+  .user-mode .tab-btn[data-active='true'] svg {
+    transform: scale(1.1);
+  }
+
+  /* --- 日付ナビゲーション --- */
+  .user-mode .date-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: var(--u-surface);
+    border-radius: var(--u-radius);
+    box-shadow: var(--u-shadow);
+  }
+
+  .user-mode .date-nav-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--u-line);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--u-ink);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .user-mode .date-nav-btn:hover {
+    background: var(--u-accent-soft);
+  }
+
+  .user-mode .date-nav-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--u-ink);
+    flex: 1;
+    text-align: center;
+    letter-spacing: 0.02em;
+  }
+
+  /* --- 統計ページ --- */
+  .user-mode .stats-title-area {
+    padding: 8px 4px 4px;
+  }
+
+  .user-mode .stats-page-title {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--u-ink);
+  }
+
+  .user-mode .stats-page-sub {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--u-muted);
+  }
+
+  .user-mode .stats-card {
+    margin-top: 14px;
+    padding: 16px 18px;
+    background: var(--u-surface);
+    border-radius: var(--u-radius);
+    box-shadow: var(--u-shadow);
+  }
+
+  .user-mode .stats-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .user-mode .stats-card-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--u-ink);
+  }
+
+  .user-mode .stats-card-icon {
+    color: var(--u-accent);
+  }
+
+  .user-mode .stats-ring-row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .user-mode .stats-ring-wrap {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    flex: 0 0 80px;
+  }
+
+  .user-mode .stats-ring {
+    display: block;
+  }
+
+  .user-mode .stats-ring-track {
+    stroke: #e6eae7;
+  }
+
+  .user-mode .stats-ring-progress {
+    stroke: var(--u-accent);
+    stroke-dasharray: 201.06;
+    stroke-dashoffset: 201.06;
+    transition: stroke-dashoffset 400ms ease;
+  }
+
+  .user-mode .stats-ring-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--u-accent-strong);
+  }
+
+  .user-mode .stats-ring-info {
+    flex: 1;
+  }
+
+  .user-mode .stats-ring-count {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--u-ink);
+  }
+
+  .user-mode .stats-ring-sub {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--u-muted);
+  }
+
+  /* --- カレンダー --- */
+  .user-mode .stats-calendar-card .stats-card-head {
+    justify-content: space-between;
+  }
+
+  .user-mode .cal-nav-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--u-line);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--u-ink);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .user-mode .cal-nav-btn:hover {
+    background: var(--u-accent-soft);
+  }
+
+  .user-mode .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .user-mode .cal-head {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--u-muted);
+    padding: 4px 0;
+  }
+
+  .user-mode .cal-cell {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 120ms ease;
+    color: var(--u-ink);
+  }
+
+  .user-mode .cal-cell.cal-empty {
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .user-mode .cal-cell.cal-achieved {
+    background: var(--u-accent);
+    color: #ffffff;
+  }
+
+  .user-mode .cal-cell.cal-partial {
+    background: rgba(54, 161, 139, 0.18);
+    color: var(--u-accent-strong);
+  }
+
+  .user-mode .cal-cell.cal-today:not(.cal-achieved):not(.cal-partial) {
+    border: 2px solid var(--u-accent);
+    color: var(--u-accent-strong);
+  }
+
+  .user-mode .cal-cell.cal-selected {
+    box-shadow: 0 0 0 2px var(--u-accent);
+  }
+
+  .user-mode .cal-cell:not(.cal-empty):hover {
+    background: var(--u-accent-soft);
+    color: var(--u-accent-strong);
+  }
+
+  .user-mode .cal-cell.cal-achieved:hover {
+    background: var(--u-accent-strong);
+    color: #ffffff;
+  }
+
+  .user-mode .stats-loading {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 20px;
+    color: var(--u-muted);
+    font-size: 13px;
+  }
+
   .user-mode .action-button {
     border-radius: 12px;
     background: var(--u-accent);
