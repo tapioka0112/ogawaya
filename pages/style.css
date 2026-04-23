@@ -7,12 +7,12 @@
     --ink: #1c2b22;
     --muted: #5d665f;
     --line: rgba(28, 43, 34, 0.12);
-    --accent: #214838;
-    --accent-soft: #dce8dd;
-    --accent-strong: #163227;
+    --accent: #f47a39;
+    --accent-soft: #ffe4d6;
+    --accent-strong: #d96528;
     --warn: #9b4620;
-    --ok: #1e6c48;
-    --ok-soft: rgba(30, 108, 72, 0.1);
+    --ok: #d96528;
+    --ok-soft: rgba(244, 122, 57, 0.12);
     --shadow: 0 24px 60px rgba(39, 52, 46, 0.14);
     --radius: 24px;
   }
@@ -31,8 +31,8 @@
     color: var(--ink);
     font-family: 'IBM Plex Sans JP', sans-serif;
     background:
-      radial-gradient(circle at top left, rgba(33, 72, 56, 0.18), transparent 28%),
-      radial-gradient(circle at bottom right, rgba(155, 70, 32, 0.12), transparent 26%),
+      radial-gradient(circle at top left, rgba(244, 122, 57, 0.2), transparent 28%),
+      radial-gradient(circle at bottom right, rgba(217, 101, 40, 0.12), transparent 26%),
       linear-gradient(135deg, #f7f2e7 0%, #efe7d6 100%);
   }
 
@@ -91,7 +91,7 @@
     width: 180px;
     height: 180px;
     border-radius: 999px;
-    background: radial-gradient(circle, rgba(33, 72, 56, 0.15), transparent 70%);
+    background: radial-gradient(circle, rgba(244, 122, 57, 0.15), transparent 70%);
   }
 
   .eyebrow {
@@ -223,8 +223,8 @@
     gap: 8px;
     padding: 12px 18px;
     border-radius: 999px;
-    border: 1px solid rgba(33, 72, 56, 0.18);
-    background: linear-gradient(135deg, rgba(33, 72, 56, 0.96), rgba(49, 91, 72, 0.9));
+    border: 1px solid rgba(244, 122, 57, 0.18);
+    background: linear-gradient(135deg, rgba(244, 122, 57, 0.96), rgba(217, 101, 40, 0.9));
     color: #fff;
     font-weight: 700;
     cursor: pointer;
@@ -269,8 +269,8 @@
     justify-content: space-between;
     gap: 16px;
     margin-bottom: 14px;
-    background: rgba(33, 72, 56, 0.08);
-    border: 1px solid rgba(33, 72, 56, 0.12);
+    background: rgba(244, 122, 57, 0.08);
+    border: 1px solid rgba(244, 122, 57, 0.12);
   }
 
   .checklist-list,
@@ -311,7 +311,7 @@
     height: 18px;
     border-radius: 999px;
     margin-top: 4px;
-    border: 2px solid rgba(33, 72, 56, 0.28);
+    border: 2px solid rgba(244, 122, 57, 0.28);
     flex-shrink: 0;
   }
 
@@ -373,7 +373,7 @@
 
   .mode-card:hover {
     transform: translateY(-4px);
-    border-color: rgba(33, 72, 56, 0.28);
+    border-color: rgba(244, 122, 57, 0.28);
   }
 
   .panel-stack {
@@ -405,9 +405,9 @@
      ============================================================= */
 
   body.user-mode {
-    --u-accent: #36a18b;
-    --u-accent-strong: #2a8670;
-    --u-accent-soft: #e4f3ee;
+    --u-accent: #f47a39;
+    --u-accent-strong: #d96528;
+    --u-accent-soft: #ffe4d6;
     --u-surface: #ffffff;
     --u-page-bg: #f5f7f6;
     --u-ink: #1f2b25;
@@ -416,7 +416,7 @@
     --u-shadow: 0 4px 14px rgba(31, 43, 37, 0.06);
     --u-radius: 14px;
     background:
-      radial-gradient(circle at top left, rgba(54, 161, 139, 0.08), transparent 40%),
+      radial-gradient(circle at top left, rgba(244, 122, 57, 0.1), transparent 40%),
       var(--u-page-bg);
     color: var(--u-ink);
   }
@@ -1027,6 +1027,17 @@
     font-size: 12px;
     font-weight: 500;
     color: var(--u-muted);
+    border: none;
+    background: transparent;
+  }
+
+  .stats-cal-day[data-date] {
+    cursor: pointer;
+  }
+
+  .stats-cal-day[data-date]:focus-visible {
+    outline: 2px solid var(--u-accent);
+    outline-offset: 1px;
   }
 
   .stats-cal-day--achieved {
@@ -1044,4 +1055,56 @@
   .stats-cal-day--today {
     outline: 2px solid var(--u-accent);
     outline-offset: 1px;
+  }
+
+  .stats-cal-day--selected {
+    box-shadow: 0 0 0 2px var(--u-accent-strong);
+  }
+
+  .stats-day-card {
+    display: grid;
+    gap: 10px;
+  }
+
+  .stats-day-summary {
+    margin: 0;
+    font-size: 12px;
+    color: var(--u-muted);
+    line-height: 1.5;
+  }
+
+  .stats-day-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .stats-day-item {
+    border: 1px solid var(--u-line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #fff;
+  }
+
+  .stats-day-item-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--u-ink);
+  }
+
+  .stats-day-item-meta {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--u-muted);
+  }
+
+  .stats-day-item[data-status='checked'] {
+    border-color: rgba(244, 122, 57, 0.25);
+    background: rgba(255, 228, 214, 0.25);
+  }
+
+  .stats-day-item[data-status='unchecked'] {
+    border-style: dashed;
   }

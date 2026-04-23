@@ -423,6 +423,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       };
     }
 
+    function parseDailyStatsDate(query) {
+      var safeQuery = query || {};
+      var date = String(safeQuery.date || '').trim();
+      ns.assert(date !== '', 'invalid_request', 'date は必須です', 400);
+      ns.assert(ns.isDateString(date), 'invalid_request', 'date は YYYY-MM-DD 形式で指定してください', 400);
+      return date;
+    }
+
     function buildMonthlyStats(query) {
       var period = parseMonthlyStatsPeriod(query);
       var currentUser = requireAuthenticatedUser(query);
@@ -480,6 +488,37 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         totalItems: totalItems,
         myCheckedItems: myCheckedItems,
         calendar: calendar
+      };
+    }
+
+    function buildDailyStats(query) {
+      var targetDate = parseDailyStatsDate(query);
+      var currentUser = requireAuthenticatedUser(query);
+      var runs = repository.listRunsByDate(targetDate).filter(function (run) {
+        return run.store_id === currentUser.user.store_id;
+      });
+      var runIds = runs.map(function (run) {
+        return run.id;
+      });
+      var runIdSet = {};
+      runIds.forEach(function (runId) {
+        runIdSet[runId] = true;
+      });
+      var runItems = ns.sortBySortOrder(repository.listRunItemsByRunIds(runIds)).filter(function (item) {
+        return !!runIdSet[item.run_id];
+      });
+      var checkedItems = runItems.filter(function (item) {
+        return item.status === ns.ITEM_STATUS.CHECKED;
+      }).length;
+      return {
+        date: targetDate,
+        runCount: runs.length,
+        total: runItems.length,
+        checked: checkedItems,
+        achieved: runItems.length > 0 && checkedItems === runItems.length,
+        items: runItems.map(function (item) {
+          return buildRunItemResponse(item);
+        })
       };
     }
 
@@ -542,6 +581,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
       getMonthlyStats: function (query) {
         return buildMonthlyStats(query);
+      },
+
+      getDailyStats: function (query) {
+        return buildDailyStats(query);
       },
 
       checkItem: function (query, runItemId, body) {

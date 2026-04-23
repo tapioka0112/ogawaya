@@ -174,6 +174,17 @@
           <div class="stats-cal-grid-header" id="stats-cal-grid-header"></div>
           <div class="stats-cal-grid" id="stats-calendar"></div>
         </div>
+        <div class="stats-card stats-day-card" id="stats-day-detail-card" hidden>
+          <div class="stats-card-heading">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 2v4" /><path d="M16 2v4" /><rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M3 10h18" />
+            </svg>
+            <span id="stats-day-detail-title">日別の詳細</span>
+          </div>
+          <p class="stats-day-summary" id="stats-day-detail-summary">カレンダーの日付を選択すると、当日の達成状況が表示されます。</p>
+          <ul class="stats-day-list" id="stats-day-detail-items"></ul>
+        </div>
       </section>
     </main>
 

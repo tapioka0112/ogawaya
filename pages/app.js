@@ -111,6 +111,7 @@
   var LAST_STORE_ID_STORAGE_KEY = 'ogawaya:last-store-id';
   var SNAPSHOT_DOC_ID = 'today';
   var ITEM_ACTION_DISPATCH_DEBOUNCE_MS = 120;
+  var STATS_REFRESH_DEBOUNCE_MS = 180;
 
   function getTodayDateInJst() {
     var formatter = new Intl.DateTimeFormat('en-CA', {
@@ -243,6 +244,11 @@
           month: String(month)
         });
       },
+      getDailyStats: function (idToken, date) {
+        return request('GET', 'api/stats/daily', idToken, {}, {
+          date: String(date)
+        });
+      },
       checkItem: function (idToken, runItemId) {
         return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, { comment: '' });
       },
@@ -298,6 +304,13 @@
     statsYear: new Date().getFullYear(),
     statsMonth: new Date().getMonth() + 1,
     statsData: null,
+    statsSelectedDate: '',
+    statsDailyData: null,
+    statsDailyLoading: false,
+    statsLoadRequestId: 0,
+    statsDailyRequestId: 0,
+    statsRefreshTimerId: null,
+    activeTab: 'home',
     authUserContext: {
       userId: '',
       name: ''
@@ -336,7 +349,11 @@
     statsCalGridHeader: document.getElementById('stats-cal-grid-header'),
     statsMonthLabel: document.getElementById('stats-month-label'),
     statsPrevMonth: document.getElementById('stats-prev-month'),
-    statsNextMonth: document.getElementById('stats-next-month')
+    statsNextMonth: document.getElementById('stats-next-month'),
+    statsDayDetailCard: document.getElementById('stats-day-detail-card'),
+    statsDayDetailTitle: document.getElementById('stats-day-detail-title'),
+    statsDayDetailSummary: document.getElementById('stats-day-detail-summary'),
+    statsDayDetailItems: document.getElementById('stats-day-detail-items')
   };
 
   function setText(element, value) {
@@ -412,6 +429,7 @@
       return;
     }
     var isStatsTab = tabName === 'stats';
+    state.activeTab = isStatsTab ? 'stats' : 'home';
     elements.tabHome.classList.toggle('tab-btn--active', !isStatsTab);
     elements.tabStats.classList.toggle('tab-btn--active', isStatsTab);
     var progressCard = document.querySelector('.progress-card');
@@ -423,8 +441,11 @@
     if (isStatsTab) {
       updateMonthLabel();
       renderCalendar(state.statsYear, state.statsMonth, state.statsData ? state.statsData.calendar : []);
+      renderStatsDayDetails();
       if (!state.statsData) {
         loadStats();
+      } else if (state.statsSelectedDate) {
+        loadDailyStats(state.statsSelectedDate);
       }
     }
   }
@@ -454,6 +475,9 @@
         state.statsYear -= 1;
       }
       state.statsData = null;
+      state.statsSelectedDate = '';
+      state.statsDailyData = null;
+      state.statsDailyLoading = false;
       loadStats();
     });
     elements.statsNextMonth.addEventListener('click', function () {
@@ -463,7 +487,51 @@
         state.statsYear += 1;
       }
       state.statsData = null;
+      state.statsSelectedDate = '';
+      state.statsDailyData = null;
+      state.statsDailyLoading = false;
       loadStats();
+    });
+  }
+
+  function bindStatsCalendarSelection() {
+    if (!elements.statsCalendar || elements.statsCalendar.__boundStatsCalendarSelection) {
+      return;
+    }
+    elements.statsCalendar.__boundStatsCalendarSelection = true;
+
+    function resolveDateTarget(eventTarget) {
+      if (!eventTarget || typeof eventTarget.closest !== 'function') {
+        return '';
+      }
+      var dateElement = eventTarget.closest('.stats-cal-day[data-date]');
+      if (!dateElement || !elements.statsCalendar.contains(dateElement)) {
+        return '';
+      }
+      return String(dateElement.dataset.date || '');
+    }
+
+    function openStatsDateDetails(date) {
+      if (!date) {
+        return;
+      }
+      state.statsSelectedDate = date;
+      loadDailyStats(date);
+    }
+
+    elements.statsCalendar.addEventListener('click', function (event) {
+      openStatsDateDetails(resolveDateTarget(event.target));
+    });
+    elements.statsCalendar.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') {
+        return;
+      }
+      var date = resolveDateTarget(event.target);
+      if (!date) {
+        return;
+      }
+      event.preventDefault();
+      openStatsDateDetails(date);
     });
   }
 
@@ -534,7 +602,12 @@
       var dd = day < 10 ? '0' + day : String(day);
       var dateStr = year + '-' + mm + '-' + dd;
       var item = calMap[dateStr];
-      var dayCell = document.createElement('div');
+      var dayCell = item ? document.createElement('button') : document.createElement('div');
+      if (item) {
+        dayCell.type = 'button';
+        dayCell.dataset.date = dateStr;
+        dayCell.setAttribute('aria-label', dateStr + ' ' + String(item.checked || 0) + '/' + String(item.total || 0) + '件完了');
+      }
       dayCell.textContent = String(day);
       var classes = ['stats-cal-day'];
       if (item) {
@@ -547,8 +620,162 @@
       if (dateStr === todayStr) {
         classes.push('stats-cal-day--today');
       }
+      if (state.statsSelectedDate === dateStr) {
+        classes.push('stats-cal-day--selected');
+      }
       dayCell.className = classes.join(' ');
       elements.statsCalendar.appendChild(dayCell);
+    }
+  }
+
+  function renderStatsDayDetails() {
+    if (!elements.statsDayDetailCard) {
+      return;
+    }
+    elements.statsDayDetailCard.hidden = false;
+    clearList(elements.statsDayDetailItems);
+
+    if (!state.statsSelectedDate) {
+      setText(elements.statsDayDetailTitle, '日別の詳細');
+      setText(elements.statsDayDetailSummary, 'カレンダーの日付を選択すると、当日の達成状況が表示されます。');
+      return;
+    }
+
+    setText(elements.statsDayDetailTitle, state.statsSelectedDate + ' のタスク');
+    if (state.statsDailyLoading) {
+      setText(elements.statsDayDetailSummary, '読み込み中です...');
+      return;
+    }
+    if (!state.statsDailyData) {
+      setText(elements.statsDayDetailSummary, '日次データを取得できませんでした。');
+      return;
+    }
+    if (state.statsDailyData.errorMessage) {
+      setText(elements.statsDayDetailSummary, state.statsDailyData.errorMessage);
+      return;
+    }
+
+    setText(
+      elements.statsDayDetailSummary,
+      '達成 ' + state.statsDailyData.checked + ' / ' + state.statsDailyData.total + ' 件'
+    );
+
+    var items = Array.isArray(state.statsDailyData.items) ? state.statsDailyData.items : [];
+    if (items.length === 0) {
+      elements.statsDayDetailItems.appendChild(createMessageListItem('この日のタスクはありません。', 'empty-item'));
+      return;
+    }
+
+    items.forEach(function (item) {
+      var listItem = document.createElement('li');
+      listItem.className = 'stats-day-item';
+      listItem.dataset.status = item.status === 'checked' ? 'checked' : 'unchecked';
+
+      var title = document.createElement('div');
+      title.className = 'stats-day-item-title';
+      title.textContent = item.title;
+      listItem.appendChild(title);
+
+      var meta = document.createElement('div');
+      meta.className = 'stats-day-item-meta';
+      if (item.status === 'checked') {
+        var checkedBy = item.checkedBy || 'LINEユーザー';
+        var checkedAt = formatCheckedAtJst(item.checkedAt);
+        meta.textContent = checkedAt ? '完了: ' + checkedBy + ' ・ ' + checkedAt : '完了: ' + checkedBy;
+      } else {
+        meta.textContent = '未完了';
+      }
+      listItem.appendChild(meta);
+      elements.statsDayDetailItems.appendChild(listItem);
+    });
+  }
+
+  function shouldLoadStatsForChecklistMonth() {
+    if (!state.checklist || !state.checklist.targetDate) {
+      return false;
+    }
+    var match = String(state.checklist.targetDate).match(/^(\d{4})-(\d{2})-/);
+    if (!match) {
+      return false;
+    }
+    return Number(match[1]) === state.statsYear && Number(match[2]) === state.statsMonth;
+  }
+
+  function findCalendarEntryByDate(date) {
+    if (!state.statsData || !Array.isArray(state.statsData.calendar)) {
+      return null;
+    }
+    for (var index = 0; index < state.statsData.calendar.length; index += 1) {
+      if (state.statsData.calendar[index].date === date) {
+        return state.statsData.calendar[index];
+      }
+    }
+    return null;
+  }
+
+  function clearStatsRefreshTimer() {
+    if (!state.statsRefreshTimerId) {
+      return;
+    }
+    global.clearTimeout(state.statsRefreshTimerId);
+    state.statsRefreshTimerId = null;
+  }
+
+  function scheduleStatsReload() {
+    if (state.activeTab !== 'stats' || !state.api || !state.idToken) {
+      return;
+    }
+    clearStatsRefreshTimer();
+    state.statsRefreshTimerId = global.setTimeout(function () {
+      state.statsRefreshTimerId = null;
+      loadStats();
+    }, STATS_REFRESH_DEBOUNCE_MS);
+  }
+
+  function applyStatsDeltaForItemChange(previousItem, updatedItem) {
+    if (!state.statsData || !shouldLoadStatsForChecklistMonth() || !state.checklist) {
+      return false;
+    }
+    var targetDate = String(state.checklist.targetDate || '');
+    var calendarEntry = findCalendarEntryByDate(targetDate);
+    if (!calendarEntry || typeof calendarEntry.total !== 'number' || typeof calendarEntry.checked !== 'number') {
+      return false;
+    }
+
+    var previousChecked = previousItem && previousItem.status === 'checked' ? 1 : 0;
+    var nextChecked = updatedItem && updatedItem.status === 'checked' ? 1 : 0;
+    var checkedDelta = nextChecked - previousChecked;
+    var previousAchieved = calendarEntry.total > 0 && calendarEntry.checked === calendarEntry.total;
+    calendarEntry.checked = Math.max(0, Math.min(calendarEntry.total, calendarEntry.checked + checkedDelta));
+    var nextAchieved = calendarEntry.total > 0 && calendarEntry.checked === calendarEntry.total;
+    if (!previousAchieved && nextAchieved) {
+      state.statsData.achievedDays += 1;
+    } else if (previousAchieved && !nextAchieved) {
+      state.statsData.achievedDays = Math.max(0, state.statsData.achievedDays - 1);
+    }
+
+    var currentUserId = state.checklist.currentUser ? String(state.checklist.currentUser.userId || '') : '';
+    var previousMine = previousItem && previousItem.status === 'checked' && String(previousItem.checkedByUserId || '') === currentUserId ? 1 : 0;
+    var nextMine = updatedItem && updatedItem.status === 'checked' && String(updatedItem.checkedByUserId || '') === currentUserId ? 1 : 0;
+    state.statsData.myCheckedItems = Math.max(0, Number(state.statsData.myCheckedItems || 0) + (nextMine - previousMine));
+    return true;
+  }
+
+  function onChecklistMutation(previousItem, updatedItem) {
+    var statsUpdatedLocally = applyStatsDeltaForItemChange(previousItem, updatedItem);
+    if (!statsUpdatedLocally) {
+      state.statsData = null;
+    }
+    if (state.activeTab === 'stats') {
+      if (state.statsSelectedDate && state.checklist && state.statsSelectedDate === state.checklist.targetDate) {
+        loadDailyStats(state.statsSelectedDate);
+      } else {
+        renderStatsDayDetails();
+      }
+      if (statsUpdatedLocally) {
+        renderStats();
+      }
+      scheduleStatsReload();
     }
   }
 
@@ -573,18 +800,73 @@
 
     updateMonthLabel();
     renderCalendar(data.year, data.month, data.calendar);
+    renderStatsDayDetails();
+  }
+
+  async function loadDailyStats(date) {
+    if (!state.api || !state.idToken || !date) {
+      return;
+    }
+    var requestId = state.statsDailyRequestId + 1;
+    state.statsDailyRequestId = requestId;
+    state.statsSelectedDate = date;
+    state.statsDailyLoading = true;
+    state.statsDailyData = null;
+    renderStatsDayDetails();
+    try {
+      var data = await state.api.getDailyStats(state.idToken, date);
+      if (state.statsDailyRequestId !== requestId) {
+        return;
+      }
+      state.statsDailyData = data;
+    } catch (error) {
+      if (state.statsDailyRequestId !== requestId) {
+        return;
+      }
+      state.statsDailyData = {
+        errorMessage: buildApiErrorMessage(error, '日次統計の取得に失敗しました'),
+        date: date,
+        total: 0,
+        checked: 0,
+        items: []
+      };
+    } finally {
+      if (state.statsDailyRequestId === requestId) {
+        state.statsDailyLoading = false;
+        renderStatsDayDetails();
+      }
+    }
   }
 
   async function loadStats() {
     if (!state.api || !state.idToken) {
       return;
     }
+    var requestId = state.statsLoadRequestId + 1;
+    state.statsLoadRequestId = requestId;
     updateMonthLabel();
     renderCalendar(state.statsYear, state.statsMonth, []);
+    renderStatsDayDetails();
     try {
       var data = await state.api.getMonthlyStats(state.idToken, state.statsYear, state.statsMonth);
+      if (state.statsLoadRequestId !== requestId) {
+        return;
+      }
       state.statsData = data;
       renderStats();
+      if (state.statsSelectedDate) {
+        var selectedDateExists = (data.calendar || []).some(function (entry) {
+          return entry.date === state.statsSelectedDate;
+        });
+        if (selectedDateExists) {
+          loadDailyStats(state.statsSelectedDate);
+        } else {
+          state.statsSelectedDate = '';
+          state.statsDailyData = null;
+          state.statsDailyLoading = false;
+          renderStatsDayDetails();
+        }
+      }
     } catch (error) {
       setError(buildApiErrorMessage(error, '統計データの取得に失敗しました'));
     }
@@ -777,6 +1059,7 @@
     if (!target) {
       return;
     }
+    var previousItem = cloneChecklistItem(target);
     target.status = updatedItem.status;
     target.checkedBy = updatedItem.checkedBy;
     target.checkedByUserId = updatedItem.checkedByUserId;
@@ -786,6 +1069,7 @@
     renderChecklist();
     renderOverview();
     renderIncomplete();
+    onChecklistMutation(previousItem, cloneChecklistItem(target));
   }
 
   function buildOptimisticCheckedItem(item) {
@@ -1499,6 +1783,7 @@
     bindHamburgerMenu();
     bindTabNavigation();
     bindStatsNavigation();
+    bindStatsCalendarSelection();
     setActiveTab('home');
     setMenuOpen(false);
 
@@ -1517,6 +1802,7 @@
     global.addEventListener('beforeunload', function () {
       stopRealtimeSync();
       stopConsistencyRefresh();
+      clearStatsRefreshTimer();
     });
 
     boot().catch(function (error) {

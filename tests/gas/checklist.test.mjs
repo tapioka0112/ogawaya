@@ -471,3 +471,54 @@ test('GET /api/stats/monthly は該当月 run なしなら空集計を返す', a
   assert.equal(response.body.myCheckedItems, 0);
   assert.equal(JSON.stringify(response.body.calendar), JSON.stringify([]));
 });
+
+test('GET /api/stats/daily は指定日のタスク詳細を返す', async () => {
+  const app = await createMonthlyStatsApp();
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/stats/daily',
+    query: { idToken: 'valid-pt', date: '2026-04-02' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.date, '2026-04-02');
+  assert.equal(response.body.runCount, 1);
+  assert.equal(response.body.total, 2);
+  assert.equal(response.body.checked, 1);
+  assert.equal(response.body.achieved, false);
+  assert.equal(response.body.items.length, 2);
+  assert.equal(response.body.items[0].title, 'C-1');
+  assert.equal(response.body.items[0].checkedBy, '田中LINE');
+  assert.equal(response.body.items[1].title, 'C-2');
+  assert.equal(response.body.items[1].checkedBy, null);
+});
+
+test('GET /api/stats/daily は不正な date を 400 で拒否する', async () => {
+  const app = await createMonthlyStatsApp();
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/stats/daily',
+    query: { idToken: 'valid-pt', date: '2026/04/02' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.code, 'invalid_request');
+});
+
+test('GET /api/stats/daily は未認証で 401 を返す', async () => {
+  const app = await createMonthlyStatsApp();
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/stats/daily',
+    query: { date: '2026-04-02' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(response.body.code, 'unauthorized');
+});

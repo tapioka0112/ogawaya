@@ -15,6 +15,8 @@ test('GitHub Pages 用 LIFF 画面は必要スクリプトと要素を持つ', a
   assert.match(html, /id="tab-home"/);
   assert.match(html, /id="tab-stats"/);
   assert.match(html, /id="stats-content"/);
+  assert.match(html, /id="stats-day-detail-card"/);
+  assert.match(html, /id="stats-day-detail-items"/);
 });
 
 test('GitHub Pages の config.json は必須キーを持つ', async () => {
@@ -118,7 +120,8 @@ test('GitHub Pages のタブUIはホームと統計を切り替えられる', as
   assert.match(appJs, /elements\.statsContent\.hidden = !isStatsTab;/);
   assert.match(appJs, /elements\.tabHome\.addEventListener\('click'/);
   assert.match(appJs, /elements\.tabStats\.addEventListener\('click'/);
-  assert.match(appJs, /if\s*\(isStatsTab\)\s*\{\s*updateMonthLabel\(\);\s*renderCalendar\(state\.statsYear,\s*state\.statsMonth,\s*state\.statsData \? state\.statsData\.calendar : \[\]\);\s*if\s*\(!state\.statsData\)\s*\{\s*loadStats\(\);/);
+  assert.match(appJs, /if\s*\(isStatsTab\)\s*\{\s*updateMonthLabel\(\);\s*renderCalendar\(state\.statsYear,\s*state\.statsMonth,\s*state\.statsData \? state\.statsData\.calendar : \[\]\);\s*renderStatsDayDetails\(\);/);
+  assert.match(appJs, /bindStatsCalendarSelection\(\);/);
   assert.match(css, /#stats-content\s*\{\s*display:\s*none;/);
   assert.match(css, /#stats-content:not\(\[hidden\]\)\s*\{\s*display:\s*flex;/);
 });
