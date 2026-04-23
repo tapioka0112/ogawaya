@@ -95,10 +95,12 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 12. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
 
 ## リアルタイム同期（Firestore）
-- 正本データは従来どおり GAS + Spreadsheet。Firestore は画面の同期イベント配信専用で使う。
+- 正本データは従来どおり GAS + Spreadsheet。Firestore は画面の同期イベントと表示キャッシュ専用で使う。
 - `pages/config.json` の `enableRealtimeSync=true` かつ `firebase` が有効なときだけリアルタイム同期が動作する。
 - イベント配信先は `stores/{storeId}/runs/{targetDate}/events`。
+- 初期表示用スナップショットは `stores/{storeId}/runs/{targetDate}/snapshots/today` に保存する。
 - 画面側は Firestore 購読に加えて 30 秒周期の整合リフレッシュを実施する。
+- スプレッドシートを直接編集した内容は API 整合リフレッシュ時に反映され、最新状態でスナップショットも上書きされる。
 - Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。
 
 詳細な初期データ投入と運用手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照する。

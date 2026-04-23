@@ -8,6 +8,12 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /stores/{storeId}/runs/{targetDate}/snapshots/{snapshotId} {
+      allow read: if true;
+      allow create, update: if isValidSnapshot(storeId, targetDate, snapshotId);
+      allow delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
@@ -52,5 +58,51 @@ service cloud.firestore {
       && request.resource.data.checkedByUserId.size() <= 128
       && request.resource.data.checkedAt.size() <= 40
       && request.resource.data.sourceUserId.size() <= 128;
+  }
+
+  function isValidSnapshot(storeId, targetDate, snapshotId) {
+    let requiredKeys = [
+      'runId',
+      'templateId',
+      'storeName',
+      'targetDate',
+      'status',
+      'currentUser',
+      'progress',
+      'items',
+      'updatedAt'
+    ];
+
+    return snapshotId == 'today'
+      && request.resource.data.keys().hasAll(requiredKeys)
+      && request.resource.data.keys().hasOnly(requiredKeys)
+      && request.resource.data.runId is string
+      && request.resource.data.templateId is string
+      && request.resource.data.storeName is string
+      && request.resource.data.targetDate is string
+      && request.resource.data.status is string
+      && request.resource.data.currentUser is map
+      && request.resource.data.currentUser.userId is string
+      && request.resource.data.currentUser.name is string
+      && request.resource.data.currentUser.role is string
+      && request.resource.data.currentUser.store is map
+      && request.resource.data.currentUser.store.id is string
+      && request.resource.data.currentUser.store.name is string
+      && request.resource.data.currentUser.store.id == storeId
+      && request.resource.data.progress is map
+      && request.resource.data.progress.checked is number
+      && request.resource.data.progress.total is number
+      && request.resource.data.items is list
+      && request.resource.data.items.size() <= 400
+      && request.resource.data.updatedAt is timestamp
+      && request.resource.data.targetDate == targetDate
+      && request.resource.data.storeName.size() <= 100
+      && request.resource.data.status in ['open', 'closed']
+      && request.resource.data.currentUser.store.id.matches('^[A-Za-z0-9_-]{1,64}$')
+      && request.resource.data.targetDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+      && request.resource.data.runId.size() > 0
+      && request.resource.data.runId.size() <= 128
+      && request.resource.data.templateId.size() > 0
+      && request.resource.data.templateId.size() <= 128;
   }
 }

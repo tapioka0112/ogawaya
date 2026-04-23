@@ -81,7 +81,7 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 - 更新系APIは `idToken` 必須。LIFF認証が通らない場合はチェック更新できない。
 - `/api/link` は廃止済み（`410`）。LINE 連携フォームは使用しない。
 - 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` にする。
-- Firestore は同期イベント専用で、正本データは従来どおり Spreadsheet を使用する。
+- Firestore は同期イベント + 初期表示スナップショット専用で、正本データは従来どおり Spreadsheet を使用する。
 
 ## 5.5 Firestore Rules（リアルタイム同期を使う場合のみ）
 
@@ -92,8 +92,10 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 このルールは以下の挙動になる。
 
 - 許可: `stores/{storeId}/runs/{targetDate}/events/*` の `read` と `create`
+- 許可: `stores/{storeId}/runs/{targetDate}/snapshots/today` の `read` と `create/update`
 - 禁止: 上記以外の全パス（`read/write`）
 - 禁止: `events` の `update/delete`
+- 禁止: `snapshots` の `delete`
 
 ## 6. Trigger
 

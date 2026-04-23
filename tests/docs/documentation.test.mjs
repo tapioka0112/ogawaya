@@ -24,6 +24,8 @@ test('README に単一店舗前提・匿名運用・日次時刻・LINE表示名
   assert.match(readme, /0:00/);
   assert.match(readme, /Firestore/);
   assert.match(readme, /enableRealtimeSync/);
+  assert.match(readme, /snapshots\/today/);
+  assert.match(readme, /Spreadsheet/);
 });
 
 test('import 用アセットに CSV と Script Properties テンプレートが揃っている', async () => {
@@ -77,6 +79,9 @@ test('Firestore 同期用 rules の実体と適用手順が存在する', async 
   assert.match(bootstrap, /Firestore Rules/);
   assert.match(bootstrap, /\[docs\/operations\/firestore\.rules\]\(\.\/firestore\.rules\)/);
   assert.match(firestoreRules, /match \/stores\/\{storeId\}\/runs\/\{targetDate\}\/events\/\{eventId\}/);
+  assert.match(firestoreRules, /match \/stores\/\{storeId\}\/runs\/\{targetDate\}\/snapshots\/\{snapshotId\}/);
+  assert.match(bootstrap, /snapshots\/today/);
+  assert.match(readme, /正本データは従来どおり GAS \+ Spreadsheet/);
   assert.match(firestoreRules, /allow update, delete: if false/);
   assert.match(firestoreRules, /match \/\{document=\*\*\}/);
 });
