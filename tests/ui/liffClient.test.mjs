@@ -149,7 +149,9 @@ async function loadClientModule() {
   const script = html.match(/<script>([\s\S]+)<\/script>/)[1];
   const context = {
     globalThis: {},
-    fetch: async () => ({ ok: true, json: async () => ({}) })
+    fetch: async () => ({ ok: true, json: async () => ({}) }),
+    setTimeout,
+    clearTimeout
   };
   context.globalThis = context;
   vm.createContext(context);
@@ -391,6 +393,31 @@ test('匿名アクセス有効で liff.init が失敗しても匿名へフォー
 
   assert.equal(result.idToken, '');
   assert.equal(result.context.isAnonymous, true);
+});
+
+test('匿名アクセス有効で liff.init がハングしても匿名へフォールバックする', async () => {
+  const { client, context } = await loadClientModule();
+  context.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = true;
+  context.OGAWAYA_TRY_LIFF_AUTH_IN_ANONYMOUS = true;
+  context.OGAWAYA_LIFF_ID = '2009859108-sJ31BCFx';
+  context.OGAWAYA_LIFF_INIT_TIMEOUT_MS = 10;
+  context.liff = {
+    init() {
+      return new Promise(() => {});
+    },
+    getIDToken() {
+      return 'token-from-liff';
+    }
+  };
+  const auth = client.createAuth();
+  const startedAt = Date.now();
+
+  const result = await auth.initialize();
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(result.idToken, '');
+  assert.equal(result.context.isAnonymous, true);
+  assert.ok(elapsedMs < 500);
 });
 
 test('LIFF 初期化失敗時はユーザー向けエラーを表示する', async () => {

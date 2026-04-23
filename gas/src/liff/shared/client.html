@@ -242,6 +242,56 @@
         };
       }
 
+      function getLiffInitTimeoutMs() {
+        var configured = Number(global.OGAWAYA_LIFF_INIT_TIMEOUT_MS);
+        if (configured > 0) {
+          return configured;
+        }
+        return 3000;
+      }
+
+      function initLiffWithTimeout(liffId) {
+        var initPromise = global.liff.init({
+          liffId: liffId,
+          withLoginOnExternalBrowser: true
+        });
+        if (!initPromise || typeof initPromise.then !== 'function') {
+          return Promise.resolve(initPromise);
+        }
+        if (typeof global.setTimeout !== 'function' || typeof global.clearTimeout !== 'function') {
+          return initPromise;
+        }
+        var timeoutMs = getLiffInitTimeoutMs();
+        return new Promise(function (resolve, reject) {
+          var settled = false;
+          var timer = global.setTimeout(function () {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            var timeoutError = new Error('LIFF SDK 初期化がタイムアウトしました');
+            timeoutError.code = 'liff_init_timeout';
+            reject(timeoutError);
+          }, timeoutMs);
+
+          initPromise.then(function (value) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            global.clearTimeout(timer);
+            resolve(value);
+          }).catch(function (error) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            global.clearTimeout(timer);
+            reject(error);
+          });
+        });
+      }
+
       return {
         initialize: async function () {
           var normalizedLiffId = getNormalizedLiffId();
@@ -263,10 +313,7 @@
               return buildAnonymousContext();
             }
             try {
-              await global.liff.init({
-                liffId: normalizedLiffId,
-                withLoginOnExternalBrowser: true
-              });
+              await initLiffWithTimeout(normalizedLiffId);
             } catch (error) {
               return buildAnonymousContext();
             }
@@ -287,10 +334,7 @@
             throw new Error('LIFF ID が未設定です');
           }
 
-          await global.liff.init({
-            liffId: normalizedLiffId,
-            withLoginOnExternalBrowser: true
-          });
+          await initLiffWithTimeout(normalizedLiffId);
           var postContext = buildRuntimeContext();
           if (typeof global.liff.isLoggedIn === 'function' && !global.liff.isLoggedIn()) {
             if (typeof global.liff.login === 'function') {
