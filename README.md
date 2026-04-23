@@ -99,6 +99,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - `pages/config.json` の `enableRealtimeSync=true` かつ `firebase` が有効なときだけリアルタイム同期が動作する。
 - イベント配信先は `stores/{storeId}/runs/{targetDate}/events`。
 - 画面側は Firestore 購読に加えて 30 秒周期の整合リフレッシュを実施する。
+- Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。
 
 詳細な初期データ投入と運用手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照する。
 

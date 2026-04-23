@@ -83,6 +83,18 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 - 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` にする。
 - Firestore は同期イベント専用で、正本データは従来どおり Spreadsheet を使用する。
 
+## 5.5 Firestore Rules（リアルタイム同期を使う場合のみ）
+
+1. Firebase Console で `Firestore Database > ルール` を開く。
+2. [docs/operations/firestore.rules](./firestore.rules) の内容をそのまま貼る。
+3. 公開ボタンで反映する。
+
+このルールは以下の挙動になる。
+
+- 許可: `stores/{storeId}/runs/{targetDate}/events/*` の `read` と `create`
+- 禁止: 上記以外の全パス（`read/write`）
+- 禁止: `events` の `update/delete`
+
 ## 6. Trigger
 
 以下の 2 本を作成する。

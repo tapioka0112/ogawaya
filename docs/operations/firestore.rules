@@ -1,0 +1,56 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /stores/{storeId}/runs/{targetDate}/events/{eventId} {
+      allow read: if true;
+      allow create: if isValidEvent(storeId, targetDate);
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+
+  function isValidEvent(storeId, targetDate) {
+    let requiredKeys = [
+      'runId',
+      'targetDate',
+      'storeId',
+      'itemId',
+      'status',
+      'checkedBy',
+      'checkedByUserId',
+      'checkedAt',
+      'sourceUserId',
+      'emittedAt'
+    ];
+
+    return request.resource.data.keys().hasAll(requiredKeys)
+      && request.resource.data.keys().hasOnly(requiredKeys)
+      && request.resource.data.storeId is string
+      && request.resource.data.targetDate is string
+      && request.resource.data.runId is string
+      && request.resource.data.itemId is string
+      && request.resource.data.status is string
+      && request.resource.data.checkedBy is string
+      && request.resource.data.checkedByUserId is string
+      && request.resource.data.checkedAt is string
+      && request.resource.data.sourceUserId is string
+      && request.resource.data.emittedAt is timestamp
+      && request.resource.data.storeId == storeId
+      && request.resource.data.targetDate == targetDate
+      && request.resource.data.status in ['checked', 'unchecked']
+      && request.resource.data.storeId.matches('^[A-Za-z0-9_-]{1,64}$')
+      && request.resource.data.targetDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+      && request.resource.data.runId.size() > 0
+      && request.resource.data.runId.size() <= 128
+      && request.resource.data.itemId.size() > 0
+      && request.resource.data.itemId.size() <= 128
+      && request.resource.data.checkedBy.size() <= 100
+      && request.resource.data.checkedByUserId.size() <= 128
+      && request.resource.data.checkedAt.size() <= 40
+      && request.resource.data.sourceUserId.size() <= 128;
+  }
+}

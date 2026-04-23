@@ -67,3 +67,16 @@ test('import 手順は一括初期化関数を案内し、CSV import を fallbac
   assert.match(bootstrap, /firebase\.apiKey/);
   assert.match(bootstrap, /enableRealtimeSync/);
 });
+
+test('Firestore 同期用 rules の実体と適用手順が存在する', async () => {
+  const readme = await readFile('README.md', 'utf8');
+  const bootstrap = await readFile('docs/operations/bootstrap.md', 'utf8');
+  const firestoreRules = await readFile('docs/operations/firestore.rules', 'utf8');
+
+  assert.match(readme, /docs\/operations\/firestore\.rules/);
+  assert.match(bootstrap, /Firestore Rules/);
+  assert.match(bootstrap, /\[docs\/operations\/firestore\.rules\]\(\.\/firestore\.rules\)/);
+  assert.match(firestoreRules, /match \/stores\/\{storeId\}\/runs\/\{targetDate\}\/events\/\{eventId\}/);
+  assert.match(firestoreRules, /allow update, delete: if false/);
+  assert.match(firestoreRules, /match \/\{document=\*\*\}/);
+});
