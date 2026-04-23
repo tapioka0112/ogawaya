@@ -121,6 +121,7 @@ test('daily closing は前日分を対象に未完了通知し、未完了なし
       sort_order: '1',
       status: 'unchecked',
       checked_by: '',
+      checked_by_name: '',
       checked_at: '',
       updated_at: '2026-04-20T01:30:00Z'
     }
@@ -140,6 +141,7 @@ test('daily closing は前日分を対象に未完了通知し、未完了なし
       sort_order: '1',
       status: 'checked',
       checked_by: 'user-pt-001',
+      checked_by_name: '田中LINE',
       checked_at: '2026-04-20T02:00:00Z',
       updated_at: '2026-04-20T02:00:00Z'
     }
@@ -150,7 +152,7 @@ test('daily closing は前日分を対象に未完了通知し、未完了なし
   assert.equal(secondClosing.closedRuns[0].closed_at, closing.closedRuns[0].closed_at);
 });
 
-test('締切後チェックは is_after_close=true で履歴に残る', async () => {
+test('締切後でもチェック更新は成功し、操作履歴ログは作成しない', async () => {
   const app = await createSchedulerApp({
     pushMessage() {
       return { status: 'sent' };
@@ -176,6 +178,7 @@ test('締切後チェックは is_after_close=true で履歴に残る', async ()
       sort_order: '1',
       status: 'unchecked',
       checked_by: '',
+      checked_by_name: '',
       checked_at: '',
       updated_at: '2026-04-20T01:30:00Z'
     }
@@ -200,6 +203,8 @@ test('締切後チェックは is_after_close=true で履歴に残る', async ()
     }
   });
 
-  const logs = app.repository.listTable('checklist_item_logs');
-  assert.equal(logs[0].is_after_close, 'true');
+  const runItem = app.repository.findRunItemById('run-item-previous');
+  assert.equal(runItem.status, 'checked');
+  assert.equal(runItem.checked_by_name, '田中LINE');
+  assert.equal(app.repository.listTable('checklist_item_logs').length, 0);
 });

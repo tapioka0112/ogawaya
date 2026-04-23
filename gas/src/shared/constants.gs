@@ -25,7 +25,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   ns.MENU_ITEMS = [
     '今日のチェックリスト',
     '未完了一覧',
-    '履歴を見る',
     'ヘルプ'
   ];
   ns.REQUIRED_OAUTH_SCOPES = [
@@ -76,6 +75,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       'sort_order',
       'status',
       'checked_by',
+      'checked_by_name',
       'checked_at',
       'updated_at'
     ],
@@ -143,7 +143,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   };
 
   ns.parseBoolean = function (value) {
-    return value === true || value === 'true';
+    if (value === true) {
+      return true;
+    }
+    if (typeof value === 'string') {
+      return value.toLowerCase() === 'true';
+    }
+    return false;
   };
 
   ns.requireString = function (value, fieldName) {
@@ -204,6 +210,59 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       code: error.code || 'internal_error',
       message: error.message
     });
+  };
+
+  ns.logEvent = function (level, eventName, details) {
+    var payload = {
+      level: level,
+      event: eventName,
+      at: ns.toIsoString(new Date()),
+      details: details || {}
+    };
+    var message = JSON.stringify(payload);
+    console.log(message);
+    if (typeof Logger !== 'undefined' && Logger && typeof Logger.log === 'function') {
+      Logger.log(message);
+    }
+  };
+
+  ns.writeDebugEvent = function (source, details) {
+    var payload = {
+      source: String(source || ''),
+      at: ns.toIsoString(new Date()),
+      details: details || {}
+    };
+    ns.logEvent('info', 'debug.event', payload);
+
+    var scriptProperties = PropertiesService.getScriptProperties();
+    if (scriptProperties.getProperty('DEBUG_EVENT_SHEET_ENABLED') !== 'true') {
+      return;
+    }
+
+    try {
+      var spreadsheetId = scriptProperties.getProperty('SPREADSHEET_ID');
+      if (!spreadsheetId) {
+        return;
+      }
+      var spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+      var sheet = spreadsheet.getSheetByName('debug_events') || spreadsheet.insertSheet('debug_events');
+
+      if (sheet.getLastRow() === 0) {
+        sheet.getRange(1, 1, 1, 5).setValues([['at', 'source', 'path', 'name', 'details']]);
+      }
+
+      sheet.appendRow([
+        payload.at,
+        payload.source,
+        String((payload.details && payload.details.path) || ''),
+        String((payload.details && payload.details.name) || ''),
+        JSON.stringify(payload.details || {})
+      ]);
+    } catch (error) {
+      ns.logEvent('error', 'debug.event.persist_failed', {
+        message: error && error.message ? String(error.message) : ''
+      });
+    }
   };
 
   ns.normalizeMethod = function (method, fallbackMethod) {

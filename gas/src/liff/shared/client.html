@@ -22,16 +22,59 @@
     function createApi(baseUrl) {
       var normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
+      function canUseGoogleScriptRunner() {
+        return !!(
+          global.google &&
+          global.google.script &&
+          global.google.script.run &&
+          typeof global.google.script.run.withSuccessHandler === 'function' &&
+          typeof global.google.script.run.withFailureHandler === 'function'
+        );
+      }
+
+      function toError(value) {
+        if (value instanceof Error) {
+          return value;
+        }
+        if (value && typeof value.message === 'string') {
+          return new Error(value.message);
+        }
+        return new Error(String(value || 'API request failed'));
+      }
+
+      function ensureSuccessPayload(payload, fallbackStatusCode) {
+        var statusCode = payload && typeof payload.statusCode === 'number'
+          ? payload.statusCode
+          : Number(payload && payload.statusCode) || fallbackStatusCode || 500;
+        if (!payload || payload.ok === false || statusCode >= 400) {
+          var error = new Error((payload && payload.message) || 'API request failed');
+          error.code = (payload && payload.code) || '';
+          error.statusCode = statusCode;
+          throw error;
+        }
+        return payload;
+      }
+
+      function requestViaGoogleScriptRunner(requestPayload) {
+        return new Promise(function (resolve, reject) {
+          try {
+            global.google.script.run
+              .withSuccessHandler(function (payload) {
+                resolve(payload);
+              })
+              .withFailureHandler(function (error) {
+                reject(toError(error));
+              })
+              .handleClientApi(requestPayload);
+          } catch (error) {
+            reject(toError(error));
+          }
+        });
+      }
+
       async function request(method, path, idToken, body, query) {
         var queryParams = {};
-        var actualMethod = method;
-        var url = normalizedBaseUrl + path;
-        var options = {
-          method: method,
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        };
+        var requestBody = body || {};
 
         if (idToken) {
           queryParams.idToken = idToken;
@@ -39,28 +82,42 @@
         Object.keys(query || {}).forEach(function (key) {
           queryParams[key] = query[key];
         });
+
+        if (canUseGoogleScriptRunner()) {
+          var bridgePayload = await requestViaGoogleScriptRunner({
+            method: method,
+            path: path,
+            query: queryParams,
+            body: requestBody
+          });
+          return ensureSuccessPayload(bridgePayload, 200);
+        }
+
+        var actualMethod = method;
+        var url = normalizedBaseUrl + path;
+        var options = {
+          method: method
+        };
         if (method === 'PUT' || method === 'DELETE') {
           actualMethod = 'POST';
           queryParams._method = method;
         }
         url = appendQuery(url, queryParams);
         options.method = actualMethod;
-
         if (actualMethod !== 'GET') {
-          options.body = JSON.stringify(body || {});
+          options.body = JSON.stringify(requestBody);
         }
-
         var response = await global.fetch(url, options);
         var payload = await response.json();
-        if (!response.ok || payload.ok === false || payload.statusCode >= 400) {
-          throw new Error(payload.message || 'API request failed');
-        }
-        return payload;
+        return ensureSuccessPayload(payload, response.status);
       }
 
       return {
         getMe: function (idToken) {
           return request('GET', '/api/me', idToken);
+        },
+        linkAccount: function (idToken, body) {
+          return request('POST', '/api/link', idToken, body);
         },
         getTodayChecklist: function (idToken) {
           return request('GET', '/api/checklists/today', idToken);
@@ -73,11 +130,6 @@
         },
         uncheckItem: function (idToken, runItemId, body) {
           return request('POST', '/api/checklist-items/' + encodeURIComponent(runItemId) + '/uncheck', idToken, body);
-        },
-        getLogs: function (idToken, runId, action) {
-          return request('GET', '/api/checklists/' + encodeURIComponent(runId) + '/logs', idToken, null, {
-            action: action || ''
-          });
         },
         listTemplates: function (idToken) {
           return request('GET', '/api/admin/templates', idToken);
@@ -114,24 +166,186 @@
     }
 
     function createAuth() {
+      function extractLiffId(value) {
+        var rawValue = String(value || '').replace(/\s+/g, '');
+        if (!rawValue) {
+          return '';
+        }
+        if (/^[0-9]{10}-[A-Za-z0-9]+$/.test(rawValue)) {
+          return rawValue;
+        }
+        var extracted = rawValue.match(/(?:https?:\/\/liff\.line\.me\/|line:\/\/app\/)?([0-9]{10}-[A-Za-z0-9]+)/);
+        if (extracted && extracted[1]) {
+          return extracted[1];
+        }
+        return '';
+      }
+
+      function getNormalizedLiffId() {
+        return extractLiffId(global.OGAWAYA_LIFF_ID || '');
+      }
+
+      function buildAnonymousContext() {
+        return {
+          idToken: '',
+          context: {
+            isInClient: false,
+            isLoggedIn: false,
+            os: '',
+            lineVersion: '',
+            language: '',
+            isAnonymous: true
+          }
+        };
+      }
+
+      function buildAuthenticatedContext(idToken, runtimeContext) {
+        return {
+          idToken: idToken,
+          context: {
+            isInClient: !!(runtimeContext && runtimeContext.isInClient),
+            isLoggedIn: !!(runtimeContext && runtimeContext.isLoggedIn),
+            os: runtimeContext && runtimeContext.os ? runtimeContext.os : '',
+            lineVersion: runtimeContext && runtimeContext.lineVersion ? runtimeContext.lineVersion : '',
+            language: runtimeContext && runtimeContext.language ? runtimeContext.language : '',
+            isAnonymous: false
+          }
+        };
+      }
+
+      function buildRuntimeContext() {
+        var liffRef = global.liff;
+        var inClient = typeof liffRef.isInClient === 'function'
+          ? !!liffRef.isInClient()
+          : false;
+        var loggedIn = typeof liffRef.isLoggedIn === 'function'
+          ? !!liffRef.isLoggedIn()
+          : false;
+        var os = typeof liffRef.getOS === 'function'
+          ? String(liffRef.getOS() || '')
+          : '';
+        var lineVersion = typeof liffRef.getLineVersion === 'function'
+          ? String(liffRef.getLineVersion() || '')
+          : '';
+        var language = typeof liffRef.getLanguage === 'function'
+          ? String(liffRef.getLanguage() || '')
+          : '';
+        return {
+          isInClient: inClient,
+          isLoggedIn: loggedIn,
+          os: os,
+          lineVersion: lineVersion,
+          language: language
+        };
+      }
+
+      function getLiffInitTimeoutMs() {
+        var configured = Number(global.OGAWAYA_LIFF_INIT_TIMEOUT_MS);
+        if (configured > 0) {
+          return configured;
+        }
+        return 3000;
+      }
+
+      function initLiffWithTimeout(liffId) {
+        var initPromise = global.liff.init({
+          liffId: liffId,
+          withLoginOnExternalBrowser: true
+        });
+        if (!initPromise || typeof initPromise.then !== 'function') {
+          return Promise.resolve(initPromise);
+        }
+        if (typeof global.setTimeout !== 'function' || typeof global.clearTimeout !== 'function') {
+          return initPromise;
+        }
+        var timeoutMs = getLiffInitTimeoutMs();
+        return new Promise(function (resolve, reject) {
+          var settled = false;
+          var timer = global.setTimeout(function () {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            var timeoutError = new Error('LIFF SDK 初期化がタイムアウトしました');
+            timeoutError.code = 'liff_init_timeout';
+            reject(timeoutError);
+          }, timeoutMs);
+
+          initPromise.then(function (value) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            global.clearTimeout(timer);
+            resolve(value);
+          }).catch(function (error) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            global.clearTimeout(timer);
+            reject(error);
+          });
+        });
+      }
+
       return {
         initialize: async function () {
+          var normalizedLiffId = getNormalizedLiffId();
           if (global.__OGAWAYA_MOCK__ && global.__OGAWAYA_MOCK__.idToken) {
-            return { idToken: global.__OGAWAYA_MOCK__.idToken };
+            return buildAuthenticatedContext(global.__OGAWAYA_MOCK__.idToken, {
+              isInClient: true,
+              isLoggedIn: true,
+              os: '',
+              lineVersion: '',
+              language: ''
+            });
           }
+
+          if (global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS === true) {
+            if (global.OGAWAYA_TRY_LIFF_AUTH_IN_ANONYMOUS !== true) {
+              return buildAnonymousContext();
+            }
+            if (!global.liff || !normalizedLiffId || typeof global.liff.init !== 'function') {
+              return buildAnonymousContext();
+            }
+            try {
+              await initLiffWithTimeout(normalizedLiffId);
+            } catch (error) {
+              return buildAnonymousContext();
+            }
+            var anonymousPostContext = buildRuntimeContext();
+            var anonymousIdToken = typeof global.liff.getIDToken === 'function'
+              ? global.liff.getIDToken()
+              : '';
+            if (!anonymousIdToken) {
+              return buildAnonymousContext();
+            }
+            return buildAuthenticatedContext(anonymousIdToken, anonymousPostContext);
+          }
+
           if (!global.liff) {
             throw new Error('LIFF SDK が読み込まれていません');
           }
-          if (!global.OGAWAYA_LIFF_ID) {
+          if (!normalizedLiffId) {
             throw new Error('LIFF ID が未設定です');
           }
-          await global.liff.init({ liffId: global.OGAWAYA_LIFF_ID });
+
+          await initLiffWithTimeout(normalizedLiffId);
+          var postContext = buildRuntimeContext();
+          if (typeof global.liff.isLoggedIn === 'function' && !global.liff.isLoggedIn()) {
+            if (typeof global.liff.login === 'function') {
+              global.liff.login();
+            }
+            throw new Error('LINE ログイン画面へ遷移しました。ログイン後に再度開いてください。');
+          }
           var idToken = global.liff.getIDToken();
           if (!idToken) {
             throw new Error('LIFF 認証コンテキストを取得できません');
           }
-          return { idToken: idToken };
-        }
+          return buildAuthenticatedContext(idToken, postContext);
+        },
+        getNormalizedLiffIdForDebug: getNormalizedLiffId
       };
     }
 
@@ -141,31 +355,32 @@
         me: null,
         checklist: null,
         incomplete: null,
-        logs: [],
         templates: [],
         selectedTemplateId: '',
         selectedTemplateItemId: ''
       };
+      var pendingItemActions = {};
       var documentRef = options.document;
       var auth = options.auth;
       var api = options.api;
       var mode = options.mode;
+      var appBaseUrl = normalizeBaseUrl(options.appBaseUrl || global.OGAWAYA_APP_BASE_URL || '');
       var elements = {
         errorBox: documentRef.getElementById('error-message'),
         statusBox: documentRef.getElementById('status-message'),
-        roleBadge: documentRef.getElementById('role-badge'),
         storeName: documentRef.getElementById('store-name'),
         targetDate: documentRef.getElementById('target-date'),
         progressSummary: documentRef.getElementById('progress-summary'),
         checklistItems: documentRef.getElementById('checklist-items'),
+        mainContent: documentRef.getElementById('main-content'),
+        linkPanel: documentRef.getElementById('link-panel'),
+        linkEmployeeCodeInput: documentRef.getElementById('link-employee-code-input'),
+        linkPasscodeInput: documentRef.getElementById('link-passcode-input'),
+        linkAccountButton: documentRef.getElementById('link-account-button'),
         refreshButton: documentRef.getElementById('refresh-button'),
-        adminPanel: documentRef.getElementById('admin-panel'),
         screenMode: documentRef.getElementById('screen-mode'),
         incompleteSummary: documentRef.getElementById('incomplete-summary'),
         incompleteItems: documentRef.getElementById('incomplete-items'),
-        loadLogsButton: documentRef.getElementById('load-logs-button'),
-        logActionFilter: documentRef.getElementById('log-action-filter'),
-        logsList: documentRef.getElementById('logs-list'),
         notifyButton: documentRef.getElementById('notify-button'),
         templateSelect: documentRef.getElementById('template-select'),
         templateNameInput: documentRef.getElementById('template-name-input'),
@@ -191,12 +406,73 @@
         return Array.isArray(value) ? value : [];
       }
 
-      function isManagerRole(role) {
-        return role === 'manager' || role === 'admin';
+      function canManageTemplates() {
+        return false;
       }
 
-      function canManageTemplates() {
-        return !!(state.me && isManagerRole(state.me.role) && mode === 'admin');
+      function isUnlinkedUserError(error) {
+        return !!(error && String(error.message || '').indexOf('LINE 連携済みユーザーではありません') !== -1);
+      }
+
+      function emitClientEvent(name, details) {
+        var payload = {
+          name: String(name || ''),
+          mode: mode,
+          details: details || {}
+        };
+
+        function sendViaHttp() {
+          if (!appBaseUrl || !global.fetch) {
+            return false;
+          }
+          var query = {
+            name: payload.name,
+            mode: payload.mode,
+            message: payload.details && payload.details.message ? String(payload.details.message) : '',
+            code: payload.details && payload.details.code ? String(payload.details.code) : '',
+            statusCode: payload.details && payload.details.statusCode ? String(payload.details.statusCode) : ''
+          };
+          var url = appendQuery(appBaseUrl + '/api/client-events', query);
+          global.fetch(url, {
+            method: 'GET',
+            mode: 'no-cors',
+            keepalive: true
+          }).catch(function () {});
+          return true;
+        }
+
+        // google.script.run のキュー詰まりを避けるため、まず HTTP で送る。
+        sendViaHttp();
+        if (!global.google || !global.google.script || !global.google.script.run) {
+          return;
+        }
+        try {
+          global.google.script.run
+            .withFailureHandler(function () {
+              sendViaHttp();
+            })
+            .logClientEvent(payload);
+        } catch (error) {
+          // クライアントログ送信は本処理を阻害しない
+          sendViaHttp();
+        }
+      }
+
+      function isUnauthorizedError(error) {
+        if (!error) {
+          return false;
+        }
+        return error.statusCode === 401 || error.code === 'unauthorized';
+      }
+
+      function setLinkMode(enabled) {
+        var hasLinkPanel = !!elements.linkPanel;
+        if (elements.linkPanel) {
+          elements.linkPanel.hidden = !enabled;
+        }
+        if (elements.mainContent) {
+          elements.mainContent.hidden = hasLinkPanel && !!enabled;
+        }
       }
 
       function setBoxMessage(element, message) {
@@ -237,6 +513,12 @@
         setStatus('');
       }
 
+      function clearOverview() {
+        setText(elements.storeName, '-');
+        setText(elements.targetDate, '-');
+        setText(elements.progressSummary, '-');
+      }
+
       function createMessageListItem(text, className) {
         var item = documentRef.createElement('li');
         item.className = className;
@@ -255,11 +537,14 @@
         return button;
       }
 
-      function renderRole(role) {
-        setText(elements.roleBadge, role || '-');
-        if (elements.adminPanel) {
-          elements.adminPanel.hidden = !isManagerRole(role);
+      function renderRole() {}
+
+      function applyCurrentUser(currentUser) {
+        if (!currentUser) {
+          return;
         }
+        state.me = currentUser;
+        renderRole(state.me.role);
       }
 
       function renderOverview(checklist) {
@@ -271,26 +556,194 @@
         }
       }
 
+      function rerenderRoleDependentSections() {
+        if (state.checklist) {
+          renderOverview(state.checklist);
+          renderChecklist(state.checklist);
+        }
+        if (state.incomplete) {
+          renderIncomplete(state.incomplete);
+        }
+      }
+
       function canUncheck(item) {
-        if (!state.me || item.status !== 'checked') {
+        if (item.status !== 'checked') {
           return false;
         }
-        if (state.me.role !== 'part_time') {
+        return true;
+      }
+
+      function findChecklistItemById(runItemId) {
+        if (!state.checklist || !Array.isArray(state.checklist.items)) {
+          return null;
+        }
+        return state.checklist.items.find(function (item) {
+          return item.id === runItemId;
+        }) || null;
+      }
+
+      function recomputeProgress() {
+        if (!state.checklist || !Array.isArray(state.checklist.items)) {
+          return;
+        }
+        var checkedCount = state.checklist.items.filter(function (item) {
+          return item.status === 'checked';
+        }).length;
+        state.checklist.progress = {
+          total: state.checklist.items.length,
+          checked: checkedCount
+        };
+      }
+
+      function upsertIncompleteItemFromChecklistItem(item) {
+        if (!state.incomplete) {
+          return;
+        }
+        var incompleteItems = normalizeArray(state.incomplete.items).filter(function (incompleteItem) {
+          return incompleteItem.id !== item.id;
+        });
+        if (item.status === 'unchecked') {
+          incompleteItems.push({
+            id: item.id,
+            title: item.title
+          });
+        }
+        state.incomplete.items = incompleteItems;
+      }
+
+      function applyChecklistItemUpdate(updatedItem) {
+        if (!updatedItem || !state.checklist || !Array.isArray(state.checklist.items)) {
+          return;
+        }
+        var target = findChecklistItemById(updatedItem.id);
+        if (!target) {
+          return;
+        }
+        target.status = updatedItem.status;
+        target.checkedBy = updatedItem.checkedBy;
+        target.checkedByUserId = updatedItem.checkedByUserId;
+        target.checkedAt = updatedItem.checkedAt;
+        recomputeProgress();
+        upsertIncompleteItemFromChecklistItem(target);
+        renderOverview(state.checklist);
+        renderChecklist(state.checklist);
+        if (state.incomplete) {
+          renderIncomplete(state.incomplete);
+        }
+      }
+
+      function buildOptimisticCheckedItem(item) {
+        var nowIso = new Date().toISOString();
+        return {
+          id: item.id,
+          title: item.title,
+          status: 'checked',
+          checkedBy: state.me && state.me.name ? state.me.name : '自分',
+          checkedByUserId: state.me && state.me.userId ? state.me.userId : '',
+          checkedAt: nowIso
+        };
+      }
+
+      function buildOptimisticUncheckedItem(item) {
+        return {
+          id: item.id,
+          title: item.title,
+          status: 'unchecked',
+          checkedBy: null,
+          checkedByUserId: null,
+          checkedAt: null
+        };
+      }
+
+      function loadAncillaryInBackground() {
+        if (!state.checklist || !state.checklist.runId) {
+          return;
+        }
+        if (canManageTemplates()) {
+          loadTemplates().catch(function (error) {
+            setError(error && error.message ? String(error.message) : 'テンプレートの取得に失敗しました');
+          });
+        }
+      }
+
+      function withPendingItemAction(runItemId, action) {
+        if (pendingItemActions[runItemId]) {
+          return;
+        }
+        pendingItemActions[runItemId] = true;
+        renderChecklist(state.checklist || { items: [] });
+        action().finally(function () {
+          delete pendingItemActions[runItemId];
+          renderChecklist(state.checklist || { items: [] });
+        });
+      }
+
+      function ensureWritableSession() {
+        if (state.idToken) {
           return true;
         }
-        return item.checkedByUserId === state.me.userId;
+        setError('LINE認証が完了していないため更新できません。LINEから開き直してください。');
+        return false;
       }
 
-      async function handleCheck(runItemId) {
-        await api.checkItem(state.idToken, runItemId, { comment: '' });
-        await refresh();
+      function handleCheck(runItemId) {
+        if (!ensureWritableSession()) {
+          return;
+        }
+        var currentItem = findChecklistItemById(runItemId);
+        if (!currentItem || currentItem.status === 'checked') {
+          return;
+        }
+        var rollbackItem = {
+          id: currentItem.id,
+          title: currentItem.title,
+          status: currentItem.status,
+          checkedBy: currentItem.checkedBy,
+          checkedByUserId: currentItem.checkedByUserId,
+          checkedAt: currentItem.checkedAt
+        };
+        applyChecklistItemUpdate(buildOptimisticCheckedItem(currentItem));
         setStatus('チェックを更新しました');
+        withPendingItemAction(runItemId, function () {
+          return api.checkItem(state.idToken, runItemId, { comment: '' }).then(function (response) {
+            if (response && response.item) {
+              applyChecklistItemUpdate(response.item);
+            }
+          }).catch(function (error) {
+            applyChecklistItemUpdate(rollbackItem);
+            setError(error && error.message ? String(error.message) : 'チェック更新に失敗しました');
+          });
+        });
       }
 
-      async function handleUncheck(runItemId) {
-        await api.uncheckItem(state.idToken, runItemId, { reason: '' });
-        await refresh();
+      function handleUncheck(runItemId) {
+        if (!ensureWritableSession()) {
+          return;
+        }
+        var currentItem = findChecklistItemById(runItemId);
+        if (!currentItem || currentItem.status === 'unchecked') {
+          return;
+        }
+        var rollbackItem = {
+          id: currentItem.id,
+          title: currentItem.title,
+          status: currentItem.status,
+          checkedBy: currentItem.checkedBy,
+          checkedByUserId: currentItem.checkedByUserId,
+          checkedAt: currentItem.checkedAt
+        };
+        applyChecklistItemUpdate(buildOptimisticUncheckedItem(currentItem));
         setStatus('チェックを取り消しました');
+        withPendingItemAction(runItemId, function () {
+          return api.uncheckItem(state.idToken, runItemId, { reason: '' }).then(function (response) {
+            if (response && response.item) {
+              applyChecklistItemUpdate(response.item);
+            }
+          }).catch(function (error) {
+            applyChecklistItemUpdate(rollbackItem);
+            setError(error && error.message ? String(error.message) : 'チェック取消に失敗しました');
+          });
+        });
       }
 
       function renderChecklist(checklist) {
@@ -319,18 +772,22 @@
           var actions = documentRef.createElement('div');
           actions.className = 'button-row item-actions';
           if (item.status === 'unchecked' && api.checkItem) {
-            actions.appendChild(createActionButton('チェックする', 'check', item.id, function () {
-              return runAction(function () {
-                return handleCheck(item.id);
-              });
-            }));
+            var checkButton = createActionButton('チェックする', 'check', item.id, function () {
+              clearError();
+              clearStatus();
+              handleCheck(item.id);
+            });
+            checkButton.disabled = !!pendingItemActions[item.id] || !state.idToken;
+            actions.appendChild(checkButton);
           }
           if (canUncheck(item) && api.uncheckItem) {
-            actions.appendChild(createActionButton('取消', 'uncheck', item.id, function () {
-              return runAction(function () {
-                return handleUncheck(item.id);
-              });
-            }, 'action-button ghost-button'));
+            var uncheckButton = createActionButton('取消', 'uncheck', item.id, function () {
+              clearError();
+              clearStatus();
+              handleUncheck(item.id);
+            }, 'action-button ghost-button');
+            uncheckButton.disabled = !!pendingItemActions[item.id] || !state.idToken;
+            actions.appendChild(uncheckButton);
           }
 
           body.appendChild(title);
@@ -361,21 +818,6 @@
         }
         if (elements.notifyButton) {
           elements.notifyButton.disabled = !canManageTemplates() || normalizeArray(incomplete.items).length === 0;
-        }
-      }
-
-      function renderLogs(logs) {
-        state.logs = normalizeArray(logs);
-        clearList(elements.logsList);
-        state.logs.forEach(function (log) {
-          var suffix = log.isAfterClose ? ' / 締切後' : '';
-          elements.logsList.appendChild(createMessageListItem(
-            log.action + ' / ' + log.createdAt + suffix,
-            'plain-item'
-          ));
-        });
-        if (elements.logsList && elements.logsList.children.length === 0) {
-          elements.logsList.appendChild(createMessageListItem('履歴はありません。', 'empty-item'));
         }
       }
 
@@ -536,16 +978,45 @@
         return value;
       }
 
-      async function loadLogs() {
-        if (!api.getLogs || !state.checklist || !state.checklist.runId) {
-          return;
+      async function loadCurrentUser() {
+        applyCurrentUser(await api.getMe(state.idToken));
+      }
+
+      async function linkAccount() {
+        emitClientEvent('link.start', {
+          hasEmployeeCode: !!String((elements.linkEmployeeCodeInput && elements.linkEmployeeCodeInput.value) || '').trim()
+        });
+        await api.linkAccount(state.idToken, {
+          employeeCode: requireStringValue(elements.linkEmployeeCodeInput, '社員コード'),
+          passcode: requireStringValue(elements.linkPasscodeInput, 'パスコード')
+        });
+        if (elements.linkEmployeeCodeInput) {
+          elements.linkEmployeeCodeInput.value = '';
         }
-        var logResponse = await api.getLogs(
-          state.idToken,
-          state.checklist.runId,
-          elements.logActionFilter ? elements.logActionFilter.value : ''
-        );
-        renderLogs(logResponse.logs);
+        if (elements.linkPasscodeInput) {
+          elements.linkPasscodeInput.value = '';
+        }
+        setLinkMode(false);
+        await refresh();
+        if (!state.me) {
+          await loadCurrentUser();
+          rerenderRoleDependentSections();
+        }
+        emitClientEvent('link.success', {
+          userId: state.me && state.me.userId ? String(state.me.userId) : ''
+        });
+        setStatus('LINE 連携が完了しました');
+      }
+
+      function renderUnlinkedState() {
+        state.me = null;
+        clearOverview();
+        clearList(elements.checklistItems);
+        clearList(elements.incompleteItems);
+        setLinkMode(true);
+        emitClientEvent('unlinked.rendered', {});
+        clearError();
+        setStatus('LINE から再度開いてください。');
       }
 
       async function loadTemplates() {
@@ -557,20 +1028,45 @@
         renderTemplates();
       }
 
-      async function refresh() {
+      function buildIncompleteFromChecklist(checklist) {
+        var uncheckedItems = normalizeArray(checklist && checklist.items).filter(function (item) {
+          return item.status === 'unchecked';
+        }).map(function (item) {
+          return {
+            id: item.id,
+            title: item.title
+          };
+        });
+        return {
+          runId: checklist && checklist.runId ? checklist.runId : '',
+          targetDate: checklist && checklist.targetDate ? checklist.targetDate : '',
+          items: uncheckedItems
+        };
+      }
+
+      async function refresh(options) {
+        var refreshOptions = options || {};
+        var includeAncillary = refreshOptions.includeAncillary !== false;
         clearError();
+
         var checklist = await api.getTodayChecklist(state.idToken);
+        if (checklist && checklist.currentUser) {
+          applyCurrentUser(checklist.currentUser);
+        }
         renderOverview(checklist);
         renderChecklist(checklist);
+        renderIncomplete(buildIncompleteFromChecklist(checklist));
 
-        if (api.getTodayIncomplete) {
-          var incomplete = await api.getTodayIncomplete(state.idToken);
-          renderIncomplete(incomplete);
+        var templatesTask = null;
+        if (includeAncillary) {
+          if (canManageTemplates()) {
+            templatesTask = loadTemplates();
+          }
         }
-        if (canManageTemplates()) {
-          await loadTemplates();
+
+        if (templatesTask) {
+          await templatesTask;
         }
-        await loadLogs();
       }
 
       async function createTemplate() {
@@ -689,14 +1185,14 @@
       }
 
       function bindEvents() {
+        bindButton(elements.linkAccountButton, function () {
+          return runAction(function () {
+            return linkAccount();
+          });
+        });
         bindButton(elements.refreshButton, function () {
           return runAction(function () {
             return refresh();
-          });
-        });
-        bindButton(elements.loadLogsButton, function () {
-          return runAction(function () {
-            return loadLogs();
           });
         });
         bindButton(elements.notifyButton, function () {
@@ -739,18 +1235,117 @@
         });
       }
 
+      function withTimeout(promise, timeoutMs, message) {
+        if (typeof global.setTimeout !== 'function' || typeof global.clearTimeout !== 'function') {
+          return promise;
+        }
+        return new Promise(function (resolve, reject) {
+          var settled = false;
+          var timer = global.setTimeout(function () {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            reject(new Error(message));
+          }, timeoutMs);
+
+          promise.then(function (value) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            global.clearTimeout(timer);
+            resolve(value);
+          }).catch(function (error) {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            global.clearTimeout(timer);
+            reject(error);
+          });
+        });
+      }
+
       async function init() {
         bindEvents();
-        setText(elements.screenMode, mode === 'admin' ? '管理者 LIFF' : '従業員 LIFF');
+        var initStartedAt = typeof Date === 'function' && typeof Date.now === 'function' ? Date.now() : 0;
+        setText(elements.screenMode, 'チェック LIFF');
+        setLinkMode(false);
+        emitClientEvent('init.start', {});
+        var topHref = '';
+        try {
+          if (global.top && global.top.location && global.top.location.href) {
+            topHref = String(global.top.location.href);
+          }
+        } catch (error) {
+          topHref = 'blocked';
+        }
+        emitClientEvent('init.context', {
+          href: global.location && global.location.href ? String(global.location.href) : '',
+          referrer: documentRef && documentRef.referrer ? String(documentRef.referrer) : '',
+          topHref: topHref,
+          isFramed: global.top !== global.self,
+          userAgent: global.navigator && global.navigator.userAgent ? String(global.navigator.userAgent) : ''
+        });
         try {
           clearError();
           clearStatus();
-          var authResult = await auth.initialize();
+          var rawLiffId = global.OGAWAYA_LIFF_ID ? String(global.OGAWAYA_LIFF_ID) : '';
+          var normalizedLiffId = auth.getNormalizedLiffIdForDebug ? auth.getNormalizedLiffIdForDebug() : '';
+          emitClientEvent('init.auth.config', {
+            liffId: rawLiffId,
+            liffIdLength: rawLiffId.length,
+            normalizedLiffId: normalizedLiffId,
+            normalizedLiffIdLength: normalizedLiffId.length,
+            isLiffIdValid: !!normalizedLiffId,
+            allowAnonymousAccess: global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS === true,
+            hasLiffObject: !!global.liff,
+            hasLiffInit: !!(global.liff && typeof global.liff.init === 'function'),
+            href: global.location && global.location.href ? String(global.location.href) : ''
+          });
+          emitClientEvent('init.auth.start', {});
+          var authResult = await withTimeout(
+            auth.initialize(),
+            10000,
+            'LIFF 認証の初期化がタイムアウトしました。LINE から再度開いてください。'
+          );
           state.idToken = authResult.idToken;
-          state.me = await api.getMe(state.idToken);
-          renderRole(state.me.role);
-          await refresh();
+          emitClientEvent('init.auth.ok', {
+            idTokenLength: state.idToken ? String(state.idToken).length : 0,
+            isInClient: !!(authResult.context && authResult.context.isInClient),
+            isLoggedIn: !!(authResult.context && authResult.context.isLoggedIn),
+            isAnonymous: !!(authResult.context && authResult.context.isAnonymous),
+            os: authResult.context && authResult.context.os ? String(authResult.context.os) : '',
+            lineVersion: authResult.context && authResult.context.lineVersion ? String(authResult.context.lineVersion) : '',
+            language: authResult.context && authResult.context.language ? String(authResult.context.language) : ''
+          });
+          await refresh({
+            includeAncillary: false
+          });
+          if (!state.me) {
+            await loadCurrentUser();
+            rerenderRoleDependentSections();
+          }
+          loadAncillaryInBackground();
+          emitClientEvent('init.ready', {
+            role: state.me && state.me.role ? String(state.me.role) : '',
+            elapsedMs: initStartedAt ? Date.now() - initStartedAt : 0
+          });
         } catch (error) {
+          emitClientEvent('init.error', {
+            message: error && error.message ? String(error.message) : '',
+            code: error && error.code ? String(error.code) : '',
+            statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
+            elapsedMs: initStartedAt ? Date.now() - initStartedAt : 0
+          });
+          if (isUnlinkedUserError(error) || isUnauthorizedError(error)) {
+            renderUnlinkedState();
+            if (!isUnlinkedUserError(error)) {
+              setError(error.message || '認証状態を確認できません');
+            }
+            return;
+          }
           setError(error.message || 'LIFF の初期化に失敗しました');
         }
       }

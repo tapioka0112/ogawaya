@@ -9,33 +9,38 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
   - 毎日10:30: 当日分チェックリスト作成と開始通知
   - 毎日0:00: 前日分未完了通知と締切処理
 - 0:00未完了通知の送信対象は、対象店舗の従業員・管理者。
-- 締切後も前日分チェックは可能。履歴で締切後操作を識別する。
+- 締切後も前日分チェックは可能。
 - 初期版は `1ユーザー = 1店舗` 前提で運用する。複数店舗の横断閲覧は対象外。
-- ロールは `part_time / manager / admin`。業務上は `part_time=アルバイト`、`manager=店長・部署責任者`、`admin=本部担当者` として扱う。
-- LINEメニューは全ロール共通で `今日のチェックリスト / 未完了一覧 / 履歴を見る / ヘルプ` を表示する。
-- `/api/link` は `employeeCode + passcode` を受け取り、`lineUserId` はLIFF認証コンテキストからサーバー側で取得する。
-- `/api/link` のリクエストボディは `employeeCode` と `passcode` の2項目のみを受け付ける。
+- LINEメニューは共通で `今日のチェックリスト / 未完了一覧 / ヘルプ` を表示する。
+- チェック実行者は `checked_by_name` に LINE の表示名で保存する。
 - 性能目標は `today` 取得2秒以内、チェック操作1秒以内。
 
 ## 実装上の補足
 - GAS Web App の `doPost(e)` は公式ドキュメント上ヘッダーを受け取らないため、LIFF の `idToken` はクエリパラメータ `idToken` として受け取り、サーバー側で LINE の verify API に送って `sub` を取得する。
-- 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` とする。
+- 現行運用は `LIFF( GitHub Pages ) + GAS API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` とする。
 - Webhook を将来使う場合のみ、`X-Line-Signature` を `signature` クエリとして渡せる受信経路を別途用意する。
-- `users` シートには `/api/link` 用の `passcode` 列を持たせる。
 - GAS Web App は `GET` / `POST` だけを直接受けるため、`PUT` / `DELETE` は `_method` クエリでメソッドオーバーライドして扱う。
+- `ALLOW_ANONYMOUS_ACCESS=true` は閲覧のフォールバック用途として残している。更新系APIは `idToken` 必須。
+- MVP で `ALLOW_ANONYMOUS_ACCESS=true` の場合、当日チェックリストが未作成なら初回アクセス時に自動生成する。
+- `DEBUG_EVENT_SHEET_ENABLED=false` のときは `debug_events` への追記を止め、実行速度を優先する（Cloud Logs は継続）。
+- `SPREADSHEET_STATE_CACHE_ENABLED=true`（既定）で Spreadsheet state を ScriptCache に保持し、連続アクセス時の読み込みを短縮する。
+- `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（既定 `300`）で state cache の保持秒数を調整できる。
+- `SPREADSHEET_STATE_CACHE_CHUNK_SIZE`（既定 `90000`）で cache 分割サイズを調整できる。
+- API 実行ログ `api.request.success` / `api.request.failed` には `durationMs` が出るため、遅延の実測比較に使える。
 
 ## 目的
 - 店舗別の日次チェックリストをLINE上で共有する。
-- チェック・取消・履歴を時系列で記録する。
+- チェック・取消をその場で更新できるようにする。
 - 10:30開始通知と0:00未完了通知を自動実行する。
-- 管理者向け操作（テンプレート管理、項目CRUD、手動通知）を提供する。
+- テンプレート編集は Spreadsheet 側の直接編集で運用する。
 
 ## 構成
 - API/バックエンド: GAS (`gas/src/handlers`)
 - ビジネスロジック: GAS (`gas/src/services`)
 - 日次バッチ: GAS Trigger (`gas/src/scheduler`)
 - データストア: Spreadsheet (`gas/src/storage`)
-- LIFF: GAS Web App (`gas/src/liff/user`, `gas/src/liff/admin`)
+- LIFF フロント: GitHub Pages (`pages/`)
+- LIFF 用テンプレート(互換保持): GAS (`gas/src/liff/user`)
 - 共通設定: `gas/appsscript.json`, `gas/.clasp.json`
 - テスト: Node 標準テストランナー (`tests/`)
 - CI: GitHub Actions (`.github/workflows/test.yml`)
@@ -45,7 +50,6 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
   - [gas/src/](/home/sota411/Documents/project/ogawaya/gas/src)
   - [gas/src/handlers/](/home/sota411/Documents/project/ogawaya/gas/src/handlers)
   - [gas/src/liff/user/](/home/sota411/Documents/project/ogawaya/gas/src/liff/user)
-  - [gas/src/liff/admin/](/home/sota411/Documents/project/ogawaya/gas/src/liff/admin)
   - [gas/src/services/](/home/sota411/Documents/project/ogawaya/gas/src/services)
   - [gas/src/scheduler/](/home/sota411/Documents/project/ogawaya/gas/src/scheduler)
   - [gas/src/storage/](/home/sota411/Documents/project/ogawaya/gas/src/storage)
@@ -71,19 +75,23 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - 実行コマンドは `npm test`。
 - 主な対象:
   - `tests/gas`: デプロイ前チェック、Spreadsheet 制約、API、Webhook、Scheduler、性能
-  - `tests/ui`: LIFF 共通初期化、ロール分岐、更新ボタン
+  - `tests/ui`: LIFF 共通初期化、更新ボタン
   - `tests/docs`: 仕様文書の必須記載
 
 ## デプロイ準備
 1. [gas/.clasp.json](/home/sota411/Documents/project/ogawaya/gas/.clasp.json) の `scriptId` を設定する。
 2. [gas/appsscript.json](/home/sota411/Documents/project/ogawaya/gas/appsscript.json) の必要権限（External Request / Spreadsheet）を設定する。
-3. `gas/src` 配下の `.gs` / `.html` を実装する。
-4. `clasp push` で反映する。
-5. Trigger を2本作成する。
+3. `gas/src` 配下の `.gs` を実装する。
+4. `pages/config.json` に `gasApiBaseUrl` と `liffId` を設定する。
+5. Script Properties に `ALLOW_ANONYMOUS_ACCESS` を設定する（`true` は閲覧のみフォールバック）。
+6. `clasp push` で GAS を反映する。
+7. GitHub Pages を有効化し、`Deploy LIFF Pages` ワークフローで `pages/` を公開する。
+8. Trigger を2本作成する。
    - 10:30: `runDailyStart`
    - 0:00: `runDailyClosing`
-6. LIFF URLをLINEリッチメニューに紐づける。
-7. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
+9. LINE Developers の LIFF Endpoint URL を `https://<user>.github.io/<repo>/` に設定する。
+10. LIFF URL（`https://liff.line.me/<LIFF_ID>`）をLINEリッチメニューに紐づける。
+11. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
 
 詳細な初期データ投入と運用手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照する。
 

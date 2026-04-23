@@ -67,7 +67,7 @@ test('メニュー選択イベントで LIFF 誘導 URL を返す', async () => 
   assert.match(response.body.reply.messages[1].template.actions[0].uri, /mode=user/);
 });
 
-test('全ロール共通の 4 メニューを返す', async () => {
+test('共通の 3 メニューを返す', async () => {
   const app = await createWebhookApp();
   const payload = JSON.stringify({
     events: [
@@ -89,7 +89,6 @@ test('全ロール共通の 4 メニューを返す', async () => {
   assert.equal(response.body.menuItems.join(','), [
     '今日のチェックリスト',
     '未完了一覧',
-    '履歴を見る',
     'ヘルプ'
   ].join(','));
 });

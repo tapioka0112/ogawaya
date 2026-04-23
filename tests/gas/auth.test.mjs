@@ -32,41 +32,22 @@ function createVerifyResponse(statusCode, payload) {
   };
 }
 
-test('LIFF 認証コンテキストがないとリンクに失敗する', async () => {
-  const app = await createAuthApp();
-
-  const response = app.handleApiRequest({
-    method: 'POST',
-    path: '/api/link',
-    query: {},
-    body: {
-      employeeCode: 'PT001',
-      passcode: '111111'
+function createScriptCache() {
+  const entries = new Map();
+  return {
+    get(key) {
+      return entries.has(key) ? entries.get(key) : null;
+    },
+    put(key, value) {
+      entries.set(key, String(value));
+    },
+    remove(key) {
+      entries.delete(key);
     }
-  });
+  };
+}
 
-  assert.equal(response.statusCode, 401);
-});
-
-test('employeeCode + passcode でリンク成功する', async () => {
-  const app = await createAuthApp();
-
-  const response = app.handleApiRequest({
-    method: 'POST',
-    path: '/api/link',
-    query: { idToken: 'valid-pt' },
-    body: {
-      employeeCode: 'PT001',
-      passcode: '111111'
-    }
-  });
-
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.user.role, 'part_time');
-  assert.equal(response.body.user.store.name, '青山店');
-});
-
-test('lineUserId をリクエストボディに含めると拒否する', async () => {
+test('/api/link は廃止され 410 を返す', async () => {
   const app = await createAuthApp();
 
   const response = app.handleApiRequest({
@@ -75,52 +56,16 @@ test('lineUserId をリクエストボディに含めると拒否する', async 
     query: { idToken: 'valid-pt' },
     body: {
       employeeCode: 'PT001',
-      passcode: '111111',
-      lineUserId: 'tampered'
+      passcode: '111111'
     }
   });
 
-  assert.equal(response.statusCode, 400);
+  assert.equal(response.statusCode, 410);
+  assert.equal(response.body.code, 'gone');
 });
 
-test('重複リンク時は衝突を返す', async () => {
+test('GET /api/me は LIFF 表示名ベースの現在ユーザーを返す', async () => {
   const app = await createAuthApp();
-
-  app.handleApiRequest({
-    method: 'POST',
-    path: '/api/link',
-    query: { idToken: 'valid-pt' },
-    body: {
-      employeeCode: 'PT001',
-      passcode: '111111'
-    }
-  });
-
-  const response = app.handleApiRequest({
-    method: 'POST',
-    path: '/api/link',
-    query: { idToken: 'valid-mg' },
-    body: {
-      employeeCode: 'PT001',
-      passcode: '111111'
-    }
-  });
-
-  assert.equal(response.statusCode, 409);
-});
-
-test('GET /api/me は role と store を返す', async () => {
-  const app = await createAuthApp();
-
-  app.handleApiRequest({
-    method: 'POST',
-    path: '/api/link',
-    query: { idToken: 'valid-pt' },
-    body: {
-      employeeCode: 'PT001',
-      passcode: '111111'
-    }
-  });
 
   const response = app.handleApiRequest({
     method: 'GET',
@@ -130,8 +75,34 @@ test('GET /api/me は role と store を返す', async () => {
   });
 
   assert.equal(response.statusCode, 200);
-  assert.equal(response.body.role, 'part_time');
+  assert.equal(response.body.userId, 'line-user-001');
+  assert.equal(response.body.name, '田中LINE');
+  assert.equal(response.body.role, '');
   assert.equal(response.body.store.name, '青山店');
+});
+
+test('ALLOW_ANONYMOUS_ACCESS=true かつ idToken なしなら匿名ユーザーを返す', async () => {
+  const runtime = await loadGasRuntime();
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset()),
+    allowAnonymousAccess: true,
+    identityClient: {
+      verifyIdToken() {
+        throw new Error('should not be called');
+      }
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: {},
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.userId, 'anonymous');
+  assert.equal(response.body.name, '匿名ユーザー');
 });
 
 test('LINE_CHANNEL_ID 未設定は 500 を返す', async () => {
@@ -141,13 +112,10 @@ test('LINE_CHANNEL_ID 未設定は 500 を返す', async () => {
   });
 
   const response = app.handleApiRequest({
-    method: 'POST',
-    path: '/api/link',
+    method: 'GET',
+    path: '/api/me',
     query: { idToken: 'valid-pt' },
-    body: {
-      employeeCode: 'PT001',
-      passcode: '111111'
-    }
+    body: {}
   });
 
   assert.equal(response.statusCode, 500);
@@ -170,13 +138,10 @@ test('LIFF verify が 401 を返した場合は 401 を維持する', async () =
   });
 
   const response = app.handleApiRequest({
-    method: 'POST',
-    path: '/api/link',
+    method: 'GET',
+    path: '/api/me',
     query: { idToken: 'broken-token' },
-    body: {
-      employeeCode: 'PT001',
-      passcode: '111111'
-    }
+    body: {}
   });
 
   assert.equal(response.statusCode, 401);
@@ -199,15 +164,52 @@ test('LIFF verify 応答に sub が無い場合は 500 を返す', async () => {
   });
 
   const response = app.handleApiRequest({
-    method: 'POST',
-    path: '/api/link',
+    method: 'GET',
+    path: '/api/me',
     query: { idToken: 'broken-token' },
-    body: {
-      employeeCode: 'PT001',
-      passcode: '111111'
-    }
+    body: {}
   });
 
   assert.equal(response.statusCode, 500);
   assert.equal(response.body.code, 'internal_error');
+});
+
+test('同じ idToken の連続 API は verify 結果を ScriptCache から再利用する', async () => {
+  let fetchCount = 0;
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      LINE_CHANNEL_ID: 'channel-001'
+    },
+    cacheFactory() {
+      return createScriptCache();
+    },
+    fetch() {
+      fetchCount += 1;
+      return createVerifyResponse(200, {
+        sub: 'line-user-001',
+        name: '田中LINE',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      });
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const firstResponse = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: { idToken: 'valid-pt' },
+    body: {}
+  });
+  assert.equal(firstResponse.statusCode, 200);
+
+  const secondResponse = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: { idToken: 'valid-pt' },
+    body: {}
+  });
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(fetchCount, 1);
 });

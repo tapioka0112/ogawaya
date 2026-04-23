@@ -1,6 +1,19 @@
 var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
 (function (ns) {
+  var cachedScriptAppUrl = null;
+
+  function resolveAppBaseUrl(explicitUrl) {
+    if (explicitUrl) {
+      return explicitUrl;
+    }
+    if (cachedScriptAppUrl) {
+      return cachedScriptAppUrl;
+    }
+    cachedScriptAppUrl = ScriptApp.getService().getUrl();
+    return cachedScriptAppUrl;
+  }
+
   function createLineClient(channelAccessToken) {
     return {
       pushMessage: function (lineUserId, message) {
@@ -31,6 +44,24 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var method = request.method;
     var path = request.path;
 
+    if ((method === 'POST' || method === 'GET') && path === '/api/client-events') {
+      var source = method === 'POST' ? (request.body || {}) : (request.query || {});
+      ns.writeDebugEvent('api.client-events', {
+        path: path,
+        name: source.name || ''
+      });
+      ns.logEvent('info', 'client.event.http', {
+        name: source.name || '',
+        mode: source.mode || '',
+        details: source.details || {
+          message: source.message || '',
+          code: source.code || '',
+          statusCode: source.statusCode || ''
+        }
+      });
+      return ns.createJsonResponse(200, { ok: true });
+    }
+
     if (method === 'GET' && path === '/api/me') {
       return ns.createJsonResponse(200, service.getMe(request.query));
     }
@@ -52,11 +83,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var uncheckMatch = path.match(/^\/api\/checklist-items\/([^/]+)\/uncheck$/);
     if (method === 'POST' && uncheckMatch) {
       return ns.createJsonResponse(200, service.uncheckItem(request.query, uncheckMatch[1], request.body));
-    }
-
-    var logsMatch = path.match(/^\/api\/checklists\/([^/]+)\/logs$/);
-    if (method === 'GET' && logsMatch) {
-      return ns.createJsonResponse(200, service.getLogs(request.query, logsMatch[1], request.query.action));
     }
 
     if (method === 'POST' && path === '/api/admin/templates') {
@@ -99,12 +125,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   }
 
   ns.createApplication = function (options) {
+    options = options || {};
     var scriptProperties = PropertiesService.getScriptProperties();
+    var allowAnonymousAccess = typeof options.allowAnonymousAccess === 'boolean'
+      ? options.allowAnonymousAccess
+      : scriptProperties.getProperty('ALLOW_ANONYMOUS_ACCESS') === 'true';
     var repository = options.repository || ns.createSpreadsheetRepository({
       storage: options.storage,
       spreadsheetId: options.spreadsheetId || scriptProperties.getProperty('SPREADSHEET_ID')
     });
-    repository.ensureSchema();
+    if (options.ensureSchema === true) {
+      repository.ensureSchema();
+    }
 
     var clock = options.clock || ns.defaultClock();
     var notificationService = ns.createNotificationService({
@@ -112,16 +144,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       clock: clock,
       lineClient: options.lineClient || createLineClient(options.channelAccessToken || scriptProperties.getProperty('LINE_CHANNEL_ACCESS_TOKEN'))
     });
+    var appBaseUrl = resolveAppBaseUrl(options.appBaseUrl);
     var checklistService = ns.createChecklistService({
       repository: repository,
       clock: clock,
       identityClient: options.identityClient,
       notificationService: notificationService,
-      appBaseUrl: options.appBaseUrl || ScriptApp.getService().getUrl(),
-      lineChannelId: options.lineChannelId || scriptProperties.getProperty('LINE_CHANNEL_ID')
+      appBaseUrl: appBaseUrl,
+      lineChannelId: options.lineChannelId || scriptProperties.getProperty('LINE_CHANNEL_ID'),
+      allowAnonymousAccess: allowAnonymousAccess
     });
     var webhookHandler = ns.createWebhookHandler({
-      appBaseUrl: options.appBaseUrl || ScriptApp.getService().getUrl(),
+      appBaseUrl: appBaseUrl,
       channelSecret: options.channelSecret || scriptProperties.getProperty('LINE_CHANNEL_SECRET')
     });
 
@@ -132,9 +166,27 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       createWebhookSignature: webhookHandler.createWebhookSignature,
       handleWebhook: webhookHandler.handleWebhook,
       handleApiRequest: function (request) {
+        var startedAt = new Date().getTime();
         try {
-          return routeApiRequest(checklistService, request);
+          var response = routeApiRequest(checklistService, request);
+          var durationMs = new Date().getTime() - startedAt;
+          ns.logEvent('info', 'api.request.success', {
+            method: request.method,
+            path: request.path,
+            statusCode: response.statusCode,
+            durationMs: durationMs
+          });
+          return response;
         } catch (error) {
+          var failedDurationMs = new Date().getTime() - startedAt;
+          ns.logEvent('error', 'api.request.failed', {
+            method: request.method,
+            path: request.path,
+            code: error && error.code ? String(error.code) : '',
+            statusCode: error && error.statusCode ? Number(error.statusCode) : 500,
+            message: error && error.message ? String(error.message) : '',
+            durationMs: failedDurationMs
+          });
           return ns.mapErrorToResponse(error);
         }
       },
