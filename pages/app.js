@@ -194,13 +194,16 @@
   function createApi(baseUrl) {
     var normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
-    async function request(method, path, idToken, body) {
+    async function request(method, path, idToken, body, queryExtras) {
       var query = {
         path: String(path || '').replace(/^\/+/, '')
       };
       if (idToken) {
         query.idToken = idToken;
       }
+      Object.keys(queryExtras || {}).forEach(function (key) {
+        query[key] = queryExtras[key];
+      });
 
       var options = {
         method: method
@@ -233,6 +236,12 @@
     return {
       getTodayChecklist: function (idToken) {
         return request('GET', 'api/checklists/today', idToken);
+      },
+      getMonthlyStats: function (idToken, year, month) {
+        return request('GET', 'api/stats/monthly', idToken, {}, {
+          year: String(year),
+          month: String(month)
+        });
       },
       checkItem: function (idToken, runItemId) {
         return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, { comment: '' });
@@ -286,6 +295,9 @@
     syncSessionStartedAtMs: 0,
     consistencyTimerId: null,
     visibilityHandlerBound: false,
+    statsYear: new Date().getFullYear(),
+    statsMonth: new Date().getMonth() + 1,
+    statsData: null,
     authUserContext: {
       userId: '',
       name: ''
@@ -313,7 +325,18 @@
     tabHome: document.getElementById('tab-home'),
     tabStats: document.getElementById('tab-stats'),
     mainContent: document.getElementById('main-content'),
-    statsContent: document.getElementById('stats-content')
+    statsContent: document.getElementById('stats-content'),
+    statsOverallProgress: document.getElementById('stats-overall-progress'),
+    statsOverallPct: document.getElementById('stats-overall-pct'),
+    statsOverallInfo: document.getElementById('stats-overall-info'),
+    statsMineProgress: document.getElementById('stats-mine-progress'),
+    statsMinePct: document.getElementById('stats-mine-pct'),
+    statsMineInfo: document.getElementById('stats-mine-info'),
+    statsCalendar: document.getElementById('stats-calendar'),
+    statsCalGridHeader: document.getElementById('stats-cal-grid-header'),
+    statsMonthLabel: document.getElementById('stats-month-label'),
+    statsPrevMonth: document.getElementById('stats-prev-month'),
+    statsNextMonth: document.getElementById('stats-next-month')
   };
 
   function setText(element, value) {
@@ -391,8 +414,19 @@
     var isStatsTab = tabName === 'stats';
     elements.tabHome.classList.toggle('tab-btn--active', !isStatsTab);
     elements.tabStats.classList.toggle('tab-btn--active', isStatsTab);
+    var progressCard = document.querySelector('.progress-card');
+    if (progressCard) {
+      progressCard.hidden = isStatsTab;
+    }
     elements.mainContent.hidden = isStatsTab;
     elements.statsContent.hidden = !isStatsTab;
+    if (isStatsTab) {
+      updateMonthLabel();
+      renderCalendar(state.statsYear, state.statsMonth, state.statsData ? state.statsData.calendar : []);
+      if (!state.statsData) {
+        loadStats();
+      }
+    }
   }
 
   function bindTabNavigation() {
@@ -406,6 +440,154 @@
     elements.tabStats.addEventListener('click', function () {
       setActiveTab('stats');
     });
+  }
+
+  function bindStatsNavigation() {
+    if (!elements.statsPrevMonth || !elements.statsNextMonth || elements.statsPrevMonth.__boundStatsNavigation) {
+      return;
+    }
+    elements.statsPrevMonth.__boundStatsNavigation = true;
+    elements.statsPrevMonth.addEventListener('click', function () {
+      state.statsMonth -= 1;
+      if (state.statsMonth < 1) {
+        state.statsMonth = 12;
+        state.statsYear -= 1;
+      }
+      state.statsData = null;
+      loadStats();
+    });
+    elements.statsNextMonth.addEventListener('click', function () {
+      state.statsMonth += 1;
+      if (state.statsMonth > 12) {
+        state.statsMonth = 1;
+        state.statsYear += 1;
+      }
+      state.statsData = null;
+      loadStats();
+    });
+  }
+
+  function updateMonthLabel() {
+    setText(elements.statsMonthLabel, state.statsYear + '年' + state.statsMonth + '月');
+  }
+
+  function renderDonutChart(progressEl, labelEl, pct) {
+    var circumference = 201.06;
+    var safePct = Math.max(0, Math.min(100, isFinite(pct) ? Math.round(pct) : 0));
+    if (progressEl) {
+      progressEl.style.strokeDashoffset = String(circumference * (1 - safePct / 100));
+    }
+    setText(labelEl, safePct + '%');
+  }
+
+  function renderStatsInfoContent(infoElement, lines) {
+    if (!infoElement) {
+      return;
+    }
+    infoElement.innerHTML = '';
+    (lines || []).forEach(function (line) {
+      var div = document.createElement('div');
+      div.className = line.className || '';
+      div.innerHTML = line.html || '';
+      infoElement.appendChild(div);
+    });
+  }
+
+  function renderCalendar(year, month, calendarItems) {
+    if (!elements.statsCalendar) {
+      return;
+    }
+    if (elements.statsCalGridHeader) {
+      elements.statsCalGridHeader.innerHTML = '';
+      ['日', '月', '火', '水', '木', '金', '土'].forEach(function (dow) {
+        var headerCell = document.createElement('div');
+        headerCell.className = 'stats-cal-dow';
+        headerCell.textContent = dow;
+        elements.statsCalGridHeader.appendChild(headerCell);
+      });
+    }
+
+    var daysInMonth = new Date(year, month, 0).getDate();
+    var firstDow = new Date(year, month - 1, 1).getDay();
+
+    var calMap = {};
+    (calendarItems || []).forEach(function (item) {
+      if (item && item.date) {
+        calMap[item.date] = item;
+      }
+    });
+
+    var now = new Date();
+    var tz = now.getMonth() + 1;
+    var td = now.getDate();
+    var todayStr = now.getFullYear() + '-' + (tz < 10 ? '0' + tz : tz) + '-' + (td < 10 ? '0' + td : td);
+    var mm = month < 10 ? '0' + month : String(month);
+
+    elements.statsCalendar.innerHTML = '';
+    for (var blank = 0; blank < firstDow; blank += 1) {
+      var blankCell = document.createElement('div');
+      blankCell.className = 'stats-cal-day';
+      elements.statsCalendar.appendChild(blankCell);
+    }
+
+    for (var day = 1; day <= daysInMonth; day += 1) {
+      var dd = day < 10 ? '0' + day : String(day);
+      var dateStr = year + '-' + mm + '-' + dd;
+      var item = calMap[dateStr];
+      var dayCell = document.createElement('div');
+      dayCell.textContent = String(day);
+      var classes = ['stats-cal-day'];
+      if (item) {
+        if (item.achieved) {
+          classes.push('stats-cal-day--achieved');
+        } else if (item.total > 0) {
+          classes.push('stats-cal-day--partial');
+        }
+      }
+      if (dateStr === todayStr) {
+        classes.push('stats-cal-day--today');
+      }
+      dayCell.className = classes.join(' ');
+      elements.statsCalendar.appendChild(dayCell);
+    }
+  }
+
+  function renderStats() {
+    var data = state.statsData;
+    if (!data) {
+      return;
+    }
+    var overallPct = data.totalDays > 0 ? (data.achievedDays / data.totalDays) * 100 : 0;
+    renderDonutChart(elements.statsOverallProgress, elements.statsOverallPct, overallPct);
+    renderStatsInfoContent(elements.statsOverallInfo, [
+      { className: 'stats-info-main', html: String(data.achievedDays) + '<em>日達成</em>' },
+      { className: 'stats-info-sub', html: '今月は <strong>' + data.achievedDays + '/' + data.totalDays + '日</strong> でタスク達成' }
+    ]);
+
+    var minePct = data.totalItems > 0 ? (data.myCheckedItems / data.totalItems) * 100 : 0;
+    renderDonutChart(elements.statsMineProgress, elements.statsMinePct, minePct);
+    renderStatsInfoContent(elements.statsMineInfo, [
+      { className: 'stats-info-main', html: String(data.myCheckedItems) + '<em>件 / ' + data.totalItems + '件</em>' },
+      { className: 'stats-info-sub', html: '達成率 <strong>' + Math.round(minePct) + '%</strong>' }
+    ]);
+
+    updateMonthLabel();
+    renderCalendar(data.year, data.month, data.calendar);
+  }
+
+  async function loadStats() {
+    if (!state.api || !state.idToken) {
+      return;
+    }
+    updateMonthLabel();
+    renderCalendar(state.statsYear, state.statsMonth, []);
+    try {
+      var data = await state.api.getMonthlyStats(state.idToken, state.statsYear, state.statsMonth);
+      state.statsData = data;
+      renderStats();
+    } catch (error) {
+      setError(buildApiErrorMessage(error, '統計データの取得に失敗しました'));
+    }
   }
 
   function clearList(element) {
@@ -1316,6 +1498,7 @@
   function start() {
     bindHamburgerMenu();
     bindTabNavigation();
+    bindStatsNavigation();
     setActiveTab('home');
     setMenuOpen(false);
 
