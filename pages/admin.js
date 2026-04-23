@@ -194,15 +194,16 @@
       }
       query.adminToken = state.token;
     }
-    var transportMethod = method === 'GET' ? 'GET' : 'POST';
-    if (method !== 'GET' && method !== 'POST') {
+    if (method !== 'GET') {
       query._method = method;
     }
+    if (body && typeof body === 'object' && Object.keys(body).length > 0) {
+      query._payload = JSON.stringify(body);
+    }
     var url = appendQuery(state.config.gasApiBaseUrl, query);
-    var payload = body && typeof body === 'object' ? body : {};
     var response = await fetch(url, {
-      method: transportMethod,
-      body: transportMethod === 'GET' ? undefined : JSON.stringify(payload)
+      method: 'GET',
+      cache: 'no-store'
     });
     var raw = await response.text();
     var json = {};

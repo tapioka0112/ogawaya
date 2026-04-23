@@ -32,3 +32,41 @@ test('不正な JSON ボディは invalid_request として 400 を返す', asyn
     return true;
   });
 });
+
+test('GET の _method と _payload は API request として復元される', async () => {
+  const runtime = await loadGasRuntime();
+  const request = runtime.Ogawaya.extractRequest({
+    parameter: {
+      path: 'api/admin/login',
+      _method: 'POST',
+      _payload: JSON.stringify({
+        loginId: 'admin',
+        password: 'secret'
+      })
+    }
+  }, 'GET');
+
+  assert.equal(request.method, 'POST');
+  assert.equal(request.path, '/api/admin/login');
+  assert.deepEqual(request.query, {});
+  assert.deepEqual(request.body, {
+    loginId: 'admin',
+    password: 'secret'
+  });
+});
+
+test('GET の不正な _payload は invalid_request として 400 を返す', async () => {
+  const runtime = await loadGasRuntime();
+
+  assert.throws(() => {
+    runtime.Ogawaya.extractRequest({
+      parameter: {
+        _payload: '{broken'
+      }
+    }, 'GET');
+  }, (error) => {
+    assert.equal(error.code, 'invalid_request');
+    assert.equal(error.statusCode, 400);
+    return true;
+  });
+});

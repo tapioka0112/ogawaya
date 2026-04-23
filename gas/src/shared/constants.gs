@@ -308,6 +308,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         throw ns.createError('invalid_request', 'リクエストボディが不正な JSON です。', 400);
       }
     }
+    if (!(e && e.postData) && query._payload) {
+      try {
+        body = JSON.parse(query._payload);
+      } catch (error) {
+        throw ns.createError('invalid_request', '_payload が不正な JSON です。', 400);
+      }
+      delete query._payload;
+    }
     if (query._method) {
       method = query._method;
       delete query._method;

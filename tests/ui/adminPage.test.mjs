@@ -27,6 +27,7 @@ test('管理者ページの GAS API 呼び出しは CORS preflight を避ける'
   const js = await readFile('pages/admin.js', 'utf8');
 
   assert.doesNotMatch(js, /Content-Type['"]?\s*:\s*['"]application\/json/);
-  assert.match(js, /var transportMethod = method === 'GET' \? 'GET' : 'POST';/);
+  assert.match(js, /method: 'GET'/);
+  assert.match(js, /query\._payload = JSON\.stringify\(body\);/);
   assert.match(js, /query\._method = method;/);
 });
