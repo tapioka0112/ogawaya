@@ -1,6 +1,6 @@
 {
-  "gasApiBaseUrl": "https://script.google.com/macros/s/REPLACE_WITH_GAS_DEPLOYMENT_ID/exec",
-  "liffId": "2000000000-REPLACE_ME",
+  "gasApiBaseUrl": "https://script.google.com/macros/s/AKfycbwHus8fdYWaLzkL0qrj6mX2rEDBphVlqWA4IAzETnsNXmanUgD5xLiMZZooGkeLI4pbMg/exec",
+  "liffId": "2009859108-sJ31BCFx",
   "allowAnonymousAccess": false,
   "tryLiffAuthInAnonymous": false
 }
