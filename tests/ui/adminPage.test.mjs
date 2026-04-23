@@ -20,7 +20,7 @@ test('管理者ページはログイン導線と管理UIの主要要素を持つ
   assert.match(html, /id="admin-date-input"/);
   assert.match(html, /id="admin-run-items"/);
   assert.match(html, /id="calendar-grid"/);
-  assert.match(html, /<script src="\.\/admin\.js"><\/script>/);
+  assert.match(html, /<script src="\.\/admin\.js\?v=[^"]+"><\/script>/);
 });
 
 test('管理者ページの GAS API 呼び出しは CORS preflight を避ける', async () => {
