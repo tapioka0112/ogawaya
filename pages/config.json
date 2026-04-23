@@ -1,6 +1,7 @@
 {
   "gasApiBaseUrl": "https://script.google.com/macros/s/AKfycbwHus8fdYWaLzkL0qrj6mX2rEDBphVlqWA4IAzETnsNXmanUgD5xLiMZZooGkeLI4pbMg/exec",
   "liffId": "2009859108-sJ31BCFx",
+  "defaultStoreId": "store-hashimoto",
   "allowAnonymousAccess": false,
   "tryLiffAuthInAnonymous": false,
   "enableRealtimeSync": true,

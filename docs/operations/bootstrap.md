@@ -75,6 +75,7 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 - `pages/config.json` に以下を設定する。
   - `gasApiBaseUrl`: GAS WebアプリURL（`.../exec`）
   - `liffId`: LIFF ID（`1234567890-xxxxxxx`）
+  - `defaultStoreId`: 店舗ID（例: `store-hashimoto`）
   - `enableRealtimeSync`: `true`（リアルタイム同期を使う場合）
   - `consistencyRefreshSeconds`: `30`（推奨）
   - `firebase.apiKey` / `firebase.authDomain` / `firebase.projectId` / `firebase.appId`
@@ -96,6 +97,9 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 - 禁止: 上記以外の全パス（`read/write`）
 - 禁止: `events` の `update/delete`
 - 禁止: `snapshots` の `delete`
+
+補足:
+- 画面は snapshot を先に表示し、その後 API で整合するため、起動直後は短時間だけ古い状態が見えることがある。
 
 ## 6. Trigger
 

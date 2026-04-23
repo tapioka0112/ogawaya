@@ -83,16 +83,17 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 2. [gas/appsscript.json](/home/sota411/Documents/project/ogawaya/gas/appsscript.json) の必要権限（External Request / Spreadsheet）を設定する。
 3. `gas/src` 配下の `.gs` を実装する。
 4. `pages/config.json` に `gasApiBaseUrl` と `liffId` を設定する。
-5. 複数端末の即時同期を使う場合は `pages/config.json` の `firebase`（`apiKey` / `authDomain` / `projectId` / `appId`）を設定する。
-6. Script Properties に `ALLOW_ANONYMOUS_ACCESS` を設定する（`true` は閲覧のみフォールバック）。
-7. `clasp push` で GAS を反映する。
-8. GitHub Pages を有効化し、`Deploy LIFF Pages` ワークフローで `pages/` を公開する。
-9. Trigger を2本作成する。
+5. `pages/config.json` の `defaultStoreId` に運用店舗IDを設定する（初回起動時の snapshot 読み込みで使用）。
+6. 複数端末の即時同期を使う場合は `pages/config.json` の `firebase`（`apiKey` / `authDomain` / `projectId` / `appId`）を設定する。
+7. Script Properties に `ALLOW_ANONYMOUS_ACCESS` を設定する（`true` は閲覧のみフォールバック）。
+8. `clasp push` で GAS を反映する。
+9. GitHub Pages を有効化し、`Deploy LIFF Pages` ワークフローで `pages/` を公開する。
+10. Trigger を2本作成する。
    - 10:30: `runDailyStart`
    - 0:00: `runDailyClosing`
-10. LINE Developers の LIFF Endpoint URL を `https://<user>.github.io/<repo>/` に設定する。
-11. LIFF URL（`https://liff.line.me/<LIFF_ID>`）をLINEリッチメニューに紐づける。
-12. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
+11. LINE Developers の LIFF Endpoint URL を `https://<user>.github.io/<repo>/` に設定する。
+12. LIFF URL（`https://liff.line.me/<LIFF_ID>`）をLINEリッチメニューに紐づける。
+13. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
 
 ## リアルタイム同期（Firestore）
 - 正本データは従来どおり GAS + Spreadsheet。Firestore は画面の同期イベントと表示キャッシュ専用で使う。
@@ -101,6 +102,7 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - 初期表示用スナップショットは `stores/{storeId}/runs/{targetDate}/snapshots/today` に保存する。
 - 画面側は Firestore 購読に加えて 30 秒周期の整合リフレッシュを実施する。
 - スプレッドシートを直接編集した内容は API 整合リフレッシュ時に反映され、最新状態でスナップショットも上書きされる。
+- スナップショットは先に表示されるため、開いた直後の数秒間は最新反映前の状態が見えることがある。
 - Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。
 
 詳細な初期データ投入と運用手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照する。

@@ -20,6 +20,7 @@ test('GitHub Pages の config.json は必須キーを持つ', async () => {
 
   assert.equal(typeof config.gasApiBaseUrl, 'string');
   assert.equal(typeof config.liffId, 'string');
+  assert.equal(typeof config.defaultStoreId, 'string');
   assert.equal(typeof config.allowAnonymousAccess, 'boolean');
   assert.equal(typeof config.tryLiffAuthInAnonymous, 'boolean');
   assert.equal(typeof config.enableRealtimeSync, 'boolean');

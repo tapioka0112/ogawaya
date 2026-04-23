@@ -94,10 +94,12 @@
     if (!isFinite(consistencyRefreshSeconds) || consistencyRefreshSeconds < 5) {
       consistencyRefreshSeconds = 30;
     }
+    var defaultStoreId = String(payload.defaultStoreId || '').trim();
 
     return {
       gasApiBaseUrl: gasApiBaseUrl,
       liffId: liffId,
+      defaultStoreId: defaultStoreId,
       allowAnonymousAccess: payload.allowAnonymousAccess === true,
       tryLiffAuthInAnonymous: payload.tryLiffAuthInAnonymous === true,
       enableRealtimeSync: payload.enableRealtimeSync !== false,
@@ -159,20 +161,32 @@
     return decodeURIComponent(encoded);
   }
 
-  function extractLineUserIdFromIdToken(idToken) {
+  function extractUserContextFromIdToken(idToken) {
     if (typeof idToken !== 'string') {
-      return '';
+      return {
+        userId: '',
+        name: ''
+      };
     }
     var parts = idToken.split('.');
     if (parts.length < 2) {
-      return '';
+      return {
+        userId: '',
+        name: ''
+      };
     }
     try {
       var payloadText = decodeBase64Url(parts[1]);
       var payload = JSON.parse(payloadText);
-      return payload && payload.sub ? String(payload.sub) : '';
+      return {
+        userId: payload && payload.sub ? String(payload.sub) : '',
+        name: payload && payload.name ? String(payload.name) : ''
+      };
     } catch (error) {
-      return '';
+      return {
+        userId: '',
+        name: ''
+      };
     }
   }
 
@@ -271,7 +285,10 @@
     syncSessionStartedAtMs: 0,
     consistencyTimerId: null,
     visibilityHandlerBound: false,
-    authLineUserId: ''
+    authUserContext: {
+      userId: '',
+      name: ''
+    }
   };
 
   var elements = {
@@ -446,6 +463,11 @@
   function applyChecklistPayload(checklist, options) {
     var applyOptions = options || {};
     var normalizedChecklist = normalizeChecklistPayload(checklist);
+    if (applyOptions.currentUserOverride) {
+      var currentUserOverride = applyOptions.currentUserOverride;
+      normalizedChecklist.currentUser.userId = String(currentUserOverride.userId || normalizedChecklist.currentUser.userId || '');
+      normalizedChecklist.currentUser.name = String(currentUserOverride.name || normalizedChecklist.currentUser.name || '');
+    }
     state.checklist = mergeChecklistPreservingInFlight(normalizedChecklist);
     recomputeProgress();
     renderOverview();
@@ -662,11 +684,15 @@
       });
   }
 
-  async function loadChecklistFromSnapshot(lineUserId) {
+  async function loadChecklistFromSnapshot() {
     if (!initializeRealtimeClient()) {
       return null;
     }
     var storeId = readStorageValue(LAST_STORE_ID_STORAGE_KEY);
+    if (!storeId && state.config && state.config.defaultStoreId) {
+      storeId = String(state.config.defaultStoreId);
+      writeStorageValue(LAST_STORE_ID_STORAGE_KEY, storeId);
+    }
     if (!storeId) {
       return null;
     }
@@ -675,12 +701,7 @@
     if (!doc.exists) {
       return null;
     }
-    var normalized = normalizeChecklistPayload(doc.data() || {});
-    var normalizedUserId = normalized.currentUser ? String(normalized.currentUser.userId || '') : '';
-    if (!lineUserId || !normalizedUserId || normalizedUserId !== lineUserId) {
-      return null;
-    }
-    return normalized;
+    return normalizeChecklistPayload(doc.data() || {});
   }
 
   function emitRealtimeEvent(updatedItem) {
@@ -1057,12 +1078,15 @@
 
     state.api = createApi(config.gasApiBaseUrl);
     state.idToken = await initializeAuth(config.liffId);
-    state.authLineUserId = extractLineUserIdFromIdToken(state.idToken);
+    state.authUserContext = extractUserContextFromIdToken(state.idToken);
     var loadedFromSnapshot = false;
     try {
-      var snapshotChecklist = await loadChecklistFromSnapshot(state.authLineUserId);
+      var snapshotChecklist = await loadChecklistFromSnapshot();
       if (snapshotChecklist && snapshotChecklist.runId) {
-        applyChecklistPayload(snapshotChecklist, { restartSync: true });
+        applyChecklistPayload(snapshotChecklist, {
+          restartSync: true,
+          currentUserOverride: state.authUserContext
+        });
         loadedFromSnapshot = true;
       }
     } catch (snapshotError) {
