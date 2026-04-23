@@ -154,7 +154,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       status: item.status,
       checkedBy: checkedByName || null,
       checkedByUserId: checkedByUserId || null,
-      checkedAt: item.checked_at || null
+      checkedAt: item.checked_at || null,
+      updatedAt: item.updated_at || null
     };
   }
 

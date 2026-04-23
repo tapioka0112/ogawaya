@@ -110,6 +110,7 @@
 
   var LAST_STORE_ID_STORAGE_KEY = 'ogawaya:last-store-id';
   var SNAPSHOT_DOC_ID = 'today';
+  var ITEM_ACTION_DISPATCH_DEBOUNCE_MS = 120;
 
   function getTodayDateInJst() {
     var formatter = new Intl.DateTimeFormat('en-CA', {
@@ -440,7 +441,8 @@
       status: item.status,
       checkedBy: item.checkedBy,
       checkedByUserId: item.checkedByUserId,
-      checkedAt: item.checkedAt
+      checkedAt: item.checkedAt,
+      updatedAt: item.updatedAt
     };
   }
 
@@ -468,7 +470,8 @@
         status: item.status === 'checked' ? 'checked' : 'unchecked',
         checkedBy: item.checkedBy ? String(item.checkedBy) : null,
         checkedByUserId: item.checkedByUserId ? String(item.checkedByUserId) : null,
-        checkedAt: item.checkedAt ? String(item.checkedAt) : null
+        checkedAt: item.checkedAt ? String(item.checkedAt) : null,
+        updatedAt: item.updatedAt ? String(item.updatedAt) : null
       };
     }).filter(function (item) {
       return item.id !== '' && item.title !== '';
@@ -552,7 +555,8 @@
         desiredStatus: null,
         inFlight: false,
         lastSyncedAtMs: 0,
-        confirmedItem: null
+        confirmedItem: null,
+        dispatchTimerId: null
       };
     }
     return state.itemActions[runItemId];
@@ -567,6 +571,7 @@
     target.checkedBy = updatedItem.checkedBy;
     target.checkedByUserId = updatedItem.checkedByUserId;
     target.checkedAt = updatedItem.checkedAt;
+    target.updatedAt = updatedItem.updatedAt;
     recomputeProgress();
     renderChecklist();
     renderOverview();
@@ -580,7 +585,8 @@
       status: 'checked',
       checkedBy: state.checklist && state.checklist.currentUser ? state.checklist.currentUser.name : 'LINEユーザー',
       checkedByUserId: state.checklist && state.checklist.currentUser ? state.checklist.currentUser.userId : '',
-      checkedAt: new Date().toISOString()
+      checkedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
   }
 
@@ -591,7 +597,8 @@
       status: 'unchecked',
       checkedBy: null,
       checkedByUserId: null,
-      checkedAt: null
+      checkedAt: null,
+      updatedAt: new Date().toISOString()
     };
   }
 
@@ -639,6 +646,13 @@
       return value.seconds * 1000;
     }
     return 0;
+  }
+
+  function resolveItemUpdatedAtMs(item) {
+    if (!item) {
+      return 0;
+    }
+    return parseTimestampMillis(item.updatedAt);
   }
 
   function ensureSyncTargetInfo() {
@@ -721,7 +735,8 @@
           status: String(item.status || 'unchecked'),
           checkedBy: item.checkedBy ? String(item.checkedBy) : '',
           checkedByUserId: item.checkedByUserId ? String(item.checkedByUserId) : '',
-          checkedAt: item.checkedAt ? String(item.checkedAt) : ''
+          checkedAt: item.checkedAt ? String(item.checkedAt) : '',
+          updatedAt: item.updatedAt ? String(item.updatedAt) : ''
         };
       }),
       updatedAt: global.firebase.firestore.FieldValue.serverTimestamp()
@@ -784,6 +799,7 @@
       checkedBy: updatedItem.checkedBy || '',
       checkedByUserId: updatedItem.checkedByUserId || '',
       checkedAt: updatedItem.checkedAt || '',
+      updatedAt: updatedItem.updatedAt || '',
       sourceUserId: sourceUserId,
       emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -829,15 +845,27 @@
     if (emittedAtMs <= actionState.lastSyncedAtMs) {
       return;
     }
-    actionState.lastSyncedAtMs = emittedAtMs;
     var currentItem = findChecklistItemById(runItemId);
+    var incomingUpdatedAtMs = parseTimestampMillis(eventPayload.updatedAt);
+    if (incomingUpdatedAtMs <= 0) {
+      return;
+    }
+    var latestKnownUpdatedAtMs = Math.max(
+      resolveItemUpdatedAtMs(currentItem),
+      resolveItemUpdatedAtMs(actionState.confirmedItem)
+    );
+    if (incomingUpdatedAtMs <= latestKnownUpdatedAtMs) {
+      return;
+    }
+    actionState.lastSyncedAtMs = emittedAtMs;
     var syncedItem = {
       id: runItemId,
       title: currentItem ? currentItem.title : '',
       status: eventPayload.status,
       checkedBy: eventPayload.checkedBy || null,
       checkedByUserId: eventPayload.checkedByUserId || null,
-      checkedAt: eventPayload.checkedAt || null
+      checkedAt: eventPayload.checkedAt || null,
+      updatedAt: eventPayload.updatedAt || null
     };
     if (syncedItem.status === 'checked' && !syncedItem.checkedAt) {
       console.debug('[sync] ignore realtime event: missing_checked_at');
@@ -921,6 +949,11 @@
       if (actionState.inFlight) {
         return cloneChecklistItem(localItem);
       }
+      var localUpdatedAtMs = resolveItemUpdatedAtMs(localItem);
+      var serverUpdatedAtMs = resolveItemUpdatedAtMs(serverItem);
+      if (localUpdatedAtMs > 0 && serverUpdatedAtMs > 0 && localUpdatedAtMs > serverUpdatedAtMs) {
+        return cloneChecklistItem(localItem);
+      }
       if (
         actionState.confirmedItem &&
         actionState.desiredStatus &&
@@ -931,6 +964,20 @@
       return serverItem;
     });
     return nextChecklist;
+  }
+
+  function scheduleItemStatusChange(runItemId) {
+    var actionState = getItemActionState(runItemId);
+    if (actionState.inFlight) {
+      return;
+    }
+    if (actionState.dispatchTimerId) {
+      global.clearTimeout(actionState.dispatchTimerId);
+    }
+    actionState.dispatchTimerId = global.setTimeout(function () {
+      actionState.dispatchTimerId = null;
+      processItemStatusChange(runItemId);
+    }, ITEM_ACTION_DISPATCH_DEBOUNCE_MS);
   }
 
   function requestItemStatusChange(runItemId, desiredStatus) {
@@ -947,13 +994,15 @@
     }
     actionState.desiredStatus = desiredStatus;
     applyOptimisticStatus(runItemId, desiredStatus);
-    if (!actionState.inFlight) {
-      processItemStatusChange(runItemId);
-    }
+    scheduleItemStatusChange(runItemId);
   }
 
   function processItemStatusChange(runItemId) {
     var actionState = getItemActionState(runItemId);
+    if (actionState.dispatchTimerId) {
+      global.clearTimeout(actionState.dispatchTimerId);
+      actionState.dispatchTimerId = null;
+    }
     if (actionState.inFlight) {
       return;
     }
@@ -980,6 +1029,11 @@
     requestPromise.then(function (response) {
       if (!response || !response.item) {
         requestFailed = true;
+        return Promise.resolve();
+      }
+      var responseUpdatedAtMs = parseTimestampMillis(response.item.updatedAt);
+      var confirmedUpdatedAtMs = resolveItemUpdatedAtMs(actionState.confirmedItem);
+      if (responseUpdatedAtMs > 0 && confirmedUpdatedAtMs > 0 && responseUpdatedAtMs < confirmedUpdatedAtMs) {
         return Promise.resolve();
       }
       actionState.confirmedItem = cloneChecklistItem(response.item);
@@ -1107,18 +1161,14 @@
       chevron.textContent = '›';
 
       var toggleHandler = function () {
-        if (!state.idToken) {
-          clearError();
-          setError('LINE認証が完了していないため更新できません。LINEから開き直してください。');
-          return;
-        }
         clearError();
         clearStatus();
-        if (item.status === 'unchecked') {
-          requestItemStatusChange(item.id, 'checked');
+        var latestItem = findChecklistItemById(item.id);
+        if (!latestItem) {
           return;
         }
-        requestItemStatusChange(item.id, 'unchecked');
+        var nextStatus = latestItem.status === 'unchecked' ? 'checked' : 'unchecked';
+        requestItemStatusChange(item.id, nextStatus);
       };
       listItem.addEventListener('click', toggleHandler);
       listItem.addEventListener('keydown', function (event) {
