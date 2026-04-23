@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "title": "Owagaya Current Architecture",
+  "type": "engineering-diagram",
+  "source": "generated",
+  "profile": "engineering-review",
+  "theme": "tech-blue",
+  "layout": "horizontal",
+  "counts": {
+    "nodes": 7,
+    "edges": 8,
+    "modules": 0
+  },
+  "nodes": [
+    {
+      "id": "employee",
+      "label": "従業員端末\n(LINE アプリ)",
+      "type": "user",
+      "size": "large"
+    },
+    {
+      "id": "linePlatform",
+      "label": "LINE Platform\n(LIFF / Messaging API)",
+      "type": "cloud",
+      "size": "large"
+    },
+    {
+      "id": "pagesFrontend",
+      "label": "GitHub Pages\n(pages/index.html + app.js)",
+      "type": "service",
+      "size": "xl"
+    },
+    {
+      "id": "gasApi",
+      "label": "GAS Web App\n(API / Scheduler Entry)",
+      "type": "service",
+      "size": "xl"
+    },
+    {
+      "id": "spreadsheet",
+      "label": "Google Spreadsheet\n(Source of Truth)",
+      "type": "database",
+      "size": "large"
+    },
+    {
+      "id": "firestore",
+      "label": "Firestore\n(events + snapshots)",
+      "type": "database",
+      "size": "large"
+    },
+    {
+      "id": "trigger",
+      "label": "GAS Trigger\n(10:30 / 0:00)",
+      "type": "process",
+      "size": "medium"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-1",
+      "from": "employee",
+      "to": "linePlatform",
+      "type": "primary",
+      "label": "画面起動 / 通知受信"
+    },
+    {
+      "id": "edge-2",
+      "from": "linePlatform",
+      "to": "pagesFrontend",
+      "type": "primary",
+      "label": "LIFF URL を開く"
+    },
+    {
+      "id": "edge-3",
+      "from": "pagesFrontend",
+      "to": "gasApi",
+      "type": "primary",
+      "label": "GET/POST API\n(idToken 付き)"
+    },
+    {
+      "id": "edge-4",
+      "from": "gasApi",
+      "to": "spreadsheet",
+      "type": "data",
+      "label": "チェックリスト読取・更新"
+    },
+    {
+      "id": "edge-5",
+      "from": "trigger",
+      "to": "gasApi",
+      "type": "dependency",
+      "label": "runDailyStart / runDailyClosing"
+    },
+    {
+      "id": "edge-6",
+      "from": "gasApi",
+      "to": "linePlatform",
+      "type": "primary",
+      "label": "Push 通知送信"
+    },
+    {
+      "id": "edge-7",
+      "from": "pagesFrontend",
+      "to": "firestore",
+      "type": "data",
+      "label": "events/snapshots\nread + write"
+    },
+    {
+      "id": "edge-8",
+      "from": "firestore",
+      "to": "pagesFrontend",
+      "type": "data",
+      "label": "onSnapshot リアルタイム反映"
+    }
+  ],
+  "modules": []
+}

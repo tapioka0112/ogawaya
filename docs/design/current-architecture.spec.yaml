@@ -1,0 +1,88 @@
+meta:
+  profile: engineering-review
+  theme: tech-blue
+  layout: horizontal
+  routing: orthogonal
+  title: Owagaya Current Architecture
+  description: GitHub Pages + LIFF frontend, GAS API, Spreadsheet as source of truth, Firestore for realtime cache.
+nodes:
+  - id: employee
+    label: |-
+      従業員端末
+      (LINE アプリ)
+    type: user
+    size: large
+  - id: linePlatform
+    label: |-
+      LINE Platform
+      (LIFF / Messaging API)
+    type: cloud
+    size: large
+  - id: pagesFrontend
+    label: |-
+      GitHub Pages
+      (pages/index.html + app.js)
+    type: service
+    size: xl
+  - id: gasApi
+    label: |-
+      GAS Web App
+      (API / Scheduler Entry)
+    type: service
+    size: xl
+  - id: spreadsheet
+    label: |-
+      Google Spreadsheet
+      (Source of Truth)
+    type: database
+    size: large
+  - id: firestore
+    label: |-
+      Firestore
+      (events + snapshots)
+    type: database
+    size: large
+  - id: trigger
+    label: |-
+      GAS Trigger
+      (10:30 / 0:00)
+    type: process
+    size: medium
+edges:
+  - from: employee
+    to: linePlatform
+    type: primary
+    label: 画面起動 / 通知受信
+  - from: linePlatform
+    to: pagesFrontend
+    type: primary
+    label: LIFF URL を開く
+  - from: pagesFrontend
+    to: gasApi
+    type: primary
+    label: |-
+      GET/POST API
+      (idToken 付き)
+  - from: gasApi
+    to: spreadsheet
+    type: data
+    label: チェックリスト読取・更新
+  - from: trigger
+    to: gasApi
+    type: dependency
+    label: runDailyStart / runDailyClosing
+  - from: gasApi
+    to: linePlatform
+    type: primary
+    label: Push 通知送信
+  - from: pagesFrontend
+    to: firestore
+    type: data
+    label: |-
+      events/snapshots
+      read + write
+  - from: firestore
+    to: pagesFrontend
+    type: data
+    label: onSnapshot リアルタイム反映
+modules: []
