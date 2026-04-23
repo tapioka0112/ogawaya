@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>従業員画面</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero-card">
+        <span class="eyebrow" id="screen-mode">従業員 LIFF</span>
+        <h1 class="hero-title">今日の店舗状態を、<br />その場で合わせる。</h1>
+        <p class="hero-copy">チェック、取消、未完了確認を同じ導線で扱います。</p>
+        <div class="error-box" id="error-message" data-visible="false" role="alert" aria-atomic="true"></div>
+        <div class="status-box" id="status-message" data-visible="false" role="status" aria-atomic="true"></div>
+        <div class="meta-grid">
+          <div class="meta-card">
+            <div class="meta-label">Store</div>
+            <div class="meta-value" id="store-name">-</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Target Date</div>
+            <div class="meta-value" id="target-date">-</div>
+          </div>
+          <div class="meta-card">
+            <div class="meta-label">Progress</div>
+            <div class="meta-value" id="progress-summary">-</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-grid" id="main-content">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Today</div>
+              <h2 class="panel-title">当日チェックリスト</h2>
+            </div>
+            <div class="button-row">
+              <button class="action-button ghost-button" id="refresh-button" type="button">最新状態に更新</button>
+            </div>
+          </div>
+          <div class="status-strip">
+            <div class="meta-line">チェックと取消は画面更新ではなく API 再取得で整合を取ります。</div>
+          </div>
+          <ul class="checklist-list" id="checklist-items"></ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Incomplete</div>
+              <h2 class="panel-title">未完了一覧</h2>
+            </div>
+            <div class="meta-line" id="incomplete-summary">未完了 0 件</div>
+          </div>
+          <ul class="checklist-list" id="incomplete-items"></ul>
+        </section>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

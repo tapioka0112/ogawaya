@@ -154,6 +154,20 @@ test('匿名アクセス有効時は当日 run が無ければ自動生成して
   assert.equal(app.repository.listRunsByDate('2026-04-22').length, 1);
 });
 
+test('匿名アクセス有効でも更新系 API は未認証で拒否する', async () => {
+  const app = await createAnonymousChecklistApp();
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/checklist-items/run-item-001/check',
+    query: {},
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(response.body.code, 'unauthorized');
+});
+
 test('check 後に checked へ遷移し、チェック者は LINE 表示名で保存される', async () => {
   const app = await createChecklistApp();
 

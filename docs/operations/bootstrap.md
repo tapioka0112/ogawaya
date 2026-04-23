@@ -29,7 +29,7 @@
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `LIFF_ID`
-- `ALLOW_ANONYMOUS_ACCESS`（MVP は `true` 推奨）
+- `ALLOW_ANONYMOUS_ACCESS`（`true` は閲覧フォールバックのみ。更新系は `idToken` 必須）
 - `DEBUG_EVENT_SHEET_ENABLED`（通常運用は `false` 推奨、調査時のみ `true`）
 - `SPREADSHEET_STATE_CACHE_ENABLED`（通常運用は `true` 推奨）
 - `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（通常運用は `300`）
@@ -71,7 +71,11 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 
 ## 5. LIFF
 
-- `ALLOW_ANONYMOUS_ACCESS=true` の場合、LIFF 認証はスキップして画面を直接利用する。
+- LIFF 画面は GitHub Pages の `pages/` を公開して利用する（`https://<user>.github.io/<repo>/`）。
+- `pages/config.json` に以下を設定する。
+  - `gasApiBaseUrl`: GAS WebアプリURL（`.../exec`）
+  - `liffId`: LIFF ID（`1234567890-xxxxxxx`）
+- 更新系APIは `idToken` 必須。LIFF認証が通らない場合はチェック更新できない。
 - `/api/link` は廃止済み（`410`）。LINE 連携フォームは使用しない。
 - 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` にする。
 

@@ -96,10 +96,7 @@
         var actualMethod = method;
         var url = normalizedBaseUrl + path;
         var options = {
-          method: method,
-          headers: {
-            'Content-Type': 'application/json'
-          }
+          method: method
         };
         if (method === 'PUT' || method === 'DELETE') {
           actualMethod = 'POST';
@@ -681,7 +678,18 @@
         });
       }
 
+      function ensureWritableSession() {
+        if (state.idToken) {
+          return true;
+        }
+        setError('LINE認証が完了していないため更新できません。LINEから開き直してください。');
+        return false;
+      }
+
       function handleCheck(runItemId) {
+        if (!ensureWritableSession()) {
+          return;
+        }
         var currentItem = findChecklistItemById(runItemId);
         if (!currentItem || currentItem.status === 'checked') {
           return;
@@ -709,6 +717,9 @@
       }
 
       function handleUncheck(runItemId) {
+        if (!ensureWritableSession()) {
+          return;
+        }
         var currentItem = findChecklistItemById(runItemId);
         if (!currentItem || currentItem.status === 'unchecked') {
           return;
@@ -766,7 +777,7 @@
               clearStatus();
               handleCheck(item.id);
             });
-            checkButton.disabled = !!pendingItemActions[item.id];
+            checkButton.disabled = !!pendingItemActions[item.id] || !state.idToken;
             actions.appendChild(checkButton);
           }
           if (canUncheck(item) && api.uncheckItem) {
@@ -775,7 +786,7 @@
               clearStatus();
               handleUncheck(item.id);
             }, 'action-button ghost-button');
-            uncheckButton.disabled = !!pendingItemActions[item.id];
+            uncheckButton.disabled = !!pendingItemActions[item.id] || !state.idToken;
             actions.appendChild(uncheckButton);
           }
 

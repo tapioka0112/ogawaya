@@ -17,10 +17,10 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 
 ## 実装上の補足
 - GAS Web App の `doPost(e)` は公式ドキュメント上ヘッダーを受け取らないため、LIFF の `idToken` はクエリパラメータ `idToken` として受け取り、サーバー側で LINE の verify API に送って `sub` を取得する。
-- 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` とする。
+- 現行運用は `LIFF( GitHub Pages ) + GAS API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` とする。
 - Webhook を将来使う場合のみ、`X-Line-Signature` を `signature` クエリとして渡せる受信経路を別途用意する。
 - GAS Web App は `GET` / `POST` だけを直接受けるため、`PUT` / `DELETE` は `_method` クエリでメソッドオーバーライドして扱う。
-- MVP では `ALLOW_ANONYMOUS_ACCESS=true` で LIFF 認証なしでも利用できる。
+- `ALLOW_ANONYMOUS_ACCESS=true` は閲覧のフォールバック用途として残している。更新系APIは `idToken` 必須。
 - MVP で `ALLOW_ANONYMOUS_ACCESS=true` の場合、当日チェックリストが未作成なら初回アクセス時に自動生成する。
 - `DEBUG_EVENT_SHEET_ENABLED=false` のときは `debug_events` への追記を止め、実行速度を優先する（Cloud Logs は継続）。
 - `SPREADSHEET_STATE_CACHE_ENABLED=true`（既定）で Spreadsheet state を ScriptCache に保持し、連続アクセス時の読み込みを短縮する。
@@ -39,7 +39,8 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - ビジネスロジック: GAS (`gas/src/services`)
 - 日次バッチ: GAS Trigger (`gas/src/scheduler`)
 - データストア: Spreadsheet (`gas/src/storage`)
-- LIFF: GAS Web App (`gas/src/liff/user`)
+- LIFF フロント: GitHub Pages (`pages/`)
+- LIFF 用テンプレート(互換保持): GAS (`gas/src/liff/user`)
 - 共通設定: `gas/appsscript.json`, `gas/.clasp.json`
 - テスト: Node 標準テストランナー (`tests/`)
 - CI: GitHub Actions (`.github/workflows/test.yml`)
@@ -80,14 +81,17 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 ## デプロイ準備
 1. [gas/.clasp.json](/home/sota411/Documents/project/ogawaya/gas/.clasp.json) の `scriptId` を設定する。
 2. [gas/appsscript.json](/home/sota411/Documents/project/ogawaya/gas/appsscript.json) の必要権限（External Request / Spreadsheet）を設定する。
-3. `gas/src` 配下の `.gs` / `.html` を実装する。
-4. Script Properties に `ALLOW_ANONYMOUS_ACCESS` を設定する（MVPは `true` 推奨）。
-5. `clasp push` で反映する。
-6. Trigger を2本作成する。
+3. `gas/src` 配下の `.gs` を実装する。
+4. `pages/config.json` に `gasApiBaseUrl` と `liffId` を設定する。
+5. Script Properties に `ALLOW_ANONYMOUS_ACCESS` を設定する（`true` は閲覧のみフォールバック）。
+6. `clasp push` で GAS を反映する。
+7. GitHub Pages を有効化し、`Deploy LIFF Pages` ワークフローで `pages/` を公開する。
+8. Trigger を2本作成する。
    - 10:30: `runDailyStart`
    - 0:00: `runDailyClosing`
-7. LIFF URL（`https://liff.line.me/<LIFF_ID>`）をLINEリッチメニューに紐づける。
-8. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
+9. LINE Developers の LIFF Endpoint URL を `https://<user>.github.io/<repo>/` に設定する。
+10. LIFF URL（`https://liff.line.me/<LIFF_ID>`）をLINEリッチメニューに紐づける。
+11. LINE Developers の `Use webhook` は `OFF` にする（任意機能として後から有効化可能）。
 
 詳細な初期データ投入と運用手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照する。
 

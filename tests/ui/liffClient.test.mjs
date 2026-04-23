@@ -903,6 +903,52 @@ test('チェック操作は API 応答前でも UI を即時反映する', async
   await Promise.resolve();
 });
 
+test('idToken なしの状態ではチェック更新を拒否し API を呼ばない', async () => {
+  const { client } = await loadClientModule();
+  const documentRef = createFakeDocument();
+  let checkItemCallCount = 0;
+  const controller = client.createController({
+    document: documentRef,
+    auth: {
+      async initialize() {
+        return { idToken: '' };
+      }
+    },
+    api: {
+      async getTodayChecklist() {
+        return createChecklistPayload({
+          currentUser: {
+            userId: 'anonymous',
+            name: '匿名ユーザー',
+            role: '',
+            store: { id: 'store-001', name: '青山店' }
+          }
+        });
+      },
+      async checkItem() {
+        checkItemCallCount += 1;
+        return { item: { id: 'run-item-001', status: 'checked' } };
+      },
+      async uncheckItem() {
+        return { item: { id: 'run-item-001', status: 'unchecked' } };
+      }
+    },
+    mode: 'user'
+  });
+
+  await controller.init();
+
+  const checkButton = findByDataset(documentRef.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  assert.equal(checkButton.disabled, true);
+
+  await checkButton.click();
+
+  assert.equal(checkItemCallCount, 0);
+  assert.equal(documentRef.elements['error-message'].dataset.visible, 'true');
+  assert.match(documentRef.elements['error-message'].textContent, /LINE認証/);
+});
+
 test('管理者は UI から他人のチェックを取り消せる', async () => {
   const { client } = await loadClientModule();
   const documentRef = createFakeDocument();

@@ -282,6 +282,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return buildCurrentUserContext(identity);
     }
 
+    function requireAuthenticatedWriteUser(query) {
+      var safeQuery = query || {};
+      ns.assert(safeQuery.idToken, 'unauthorized', '更新操作には LIFF 認証が必要です', 401);
+      var identity = resolveIdentity(safeQuery);
+      return buildCurrentUserContext(identity);
+    }
+
     function getTodayRunForUser(user) {
       var targetDate = clock.today();
       var run = repository.findRunByStoreAndDate(user.store_id, targetDate);
@@ -446,7 +453,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       checkItem: function (query, runItemId, body) {
-        var currentUser = requireAuthenticatedUser(query);
+        var currentUser = requireAuthenticatedWriteUser(query);
         var scopedRunItem = getRunItemWithScope(runItemId, currentUser.user);
         var item = scopedRunItem.item;
 
@@ -472,7 +479,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       uncheckItem: function (query, runItemId, body) {
-        var currentUser = requireAuthenticatedUser(query);
+        var currentUser = requireAuthenticatedWriteUser(query);
         var scopedRunItem = getRunItemWithScope(runItemId, currentUser.user);
         var item = scopedRunItem.item;
 
@@ -498,7 +505,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       createTemplate: function (query, body) {
-        var currentUser = requireAuthenticatedUser(query);
+        var currentUser = requireAuthenticatedWriteUser(query);
         ensureManager(currentUser.user);
         var name = ns.requireString(body.name, 'name');
         var now = ns.toIsoString(clock.now());
@@ -527,7 +534,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       updateTemplate: function (query, templateId, body) {
-        var currentUser = requireAuthenticatedUser(query);
+        var currentUser = requireAuthenticatedWriteUser(query);
         ensureManager(currentUser.user);
         var template = repository.findTemplateById(templateId);
         ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
@@ -540,7 +547,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       createTemplateItem: function (query, templateId, body) {
-        var currentUser = requireAuthenticatedUser(query);
+        var currentUser = requireAuthenticatedWriteUser(query);
         ensureManager(currentUser.user);
         var template = repository.findTemplateById(templateId);
         ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
@@ -562,7 +569,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       updateTemplateItem: function (query, templateId, itemId, body) {
-        var currentUser = requireAuthenticatedUser(query);
+        var currentUser = requireAuthenticatedWriteUser(query);
         ensureManager(currentUser.user);
         var template = repository.findTemplateById(templateId);
         ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
@@ -579,7 +586,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       deleteTemplateItem: function (query, templateId, itemId) {
-        var currentUser = requireAuthenticatedUser(query);
+        var currentUser = requireAuthenticatedWriteUser(query);
         ensureManager(currentUser.user);
         var template = repository.findTemplateById(templateId);
         ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
@@ -590,7 +597,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       notifyIncompleteManually: function (query, runId) {
-        var currentUser = requireAuthenticatedUser(query);
+        var currentUser = requireAuthenticatedWriteUser(query);
         ensureManager(currentUser.user);
         var run = getRunWithScope(runId, currentUser.user);
         var store = repository.findStoreById(run.store_id);
