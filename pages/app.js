@@ -983,6 +983,13 @@
         return Promise.resolve();
       }
       actionState.confirmedItem = cloneChecklistItem(response.item);
+      var latestDesiredStatusAtResponse = actionState.desiredStatus;
+      if (
+        latestDesiredStatusAtResponse &&
+        latestDesiredStatusAtResponse !== response.item.status
+      ) {
+        return Promise.resolve();
+      }
       applyChecklistItemUpdate(response.item);
       return emitRealtimeEvent(response.item).then(function () {
         return persistChecklistSnapshot();

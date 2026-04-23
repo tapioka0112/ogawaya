@@ -68,3 +68,12 @@ test('GitHub Pages の API再取得マージは未確定 desiredStatus を維持
     /if\s*\(\s*actionState\.confirmedItem &&\s*actionState\.desiredStatus &&\s*actionState\.desiredStatus !== actionState\.confirmedItem\.status\s*\)\s*\{\s*return cloneChecklistItem\(localItem\);\s*\}/
   );
 });
+
+test('GitHub Pages の連打時は古い API 応答を UI に反映しない', async () => {
+  const appJs = await readFile('pages/app.js', 'utf8');
+
+  assert.match(
+    appJs,
+    /var latestDesiredStatusAtResponse = actionState\.desiredStatus;\s*if\s*\(\s*latestDesiredStatusAtResponse &&\s*latestDesiredStatusAtResponse !== response\.item\.status\s*\)\s*\{\s*return Promise\.resolve\(\);\s*\}\s*applyChecklistItemUpdate\(response\.item\);/
+  );
+});
