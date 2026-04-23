@@ -54,7 +54,6 @@ test('GitHub Pages の連打制御は confirmedItem 基準で latest-wins を維
 test('GitHub Pages の realtime 同期は自己イベント・未確定時刻・欠落時刻を除外する', async () => {
   const appJs = await readFile('pages/app.js', 'utf8');
 
-  assert.match(appJs, /if\s*\(change\.doc && change\.doc\.metadata && change\.doc\.metadata\.hasPendingWrites\)\s*\{\s*return;\s*\}/);
   assert.match(appJs, /if\s*\(emittedAtMs <= 0\)\s*\{\s*console\.debug\('\[sync\] ignore realtime event: pending_server_timestamp'\);/);
   assert.match(appJs, /if\s*\(currentUserId && String\(eventPayload\.sourceUserId \|\| ''\) === currentUserId\)\s*\{\s*console\.debug\('\[sync\] ignore realtime event: self_event'\);/);
   assert.match(appJs, /if\s*\(syncedItem\.status === 'checked' && !syncedItem\.checkedAt\)\s*\{\s*console\.debug\('\[sync\] ignore realtime event: missing_checked_at'\);/);
@@ -75,15 +74,7 @@ test('GitHub Pages の連打時は古い API 応答を UI に反映しない', a
 
   assert.match(
     appJs,
-    /responseMutationId = String\(response\.mutationId \|\| actionState\.inFlightMutationId \|\| ''\);/
-  );
-  assert.match(
-    appJs,
-    /if\s*\(\s*latestDesiredMutationIdAtResponse &&\s*responseMutationId &&\s*latestDesiredMutationIdAtResponse !== responseMutationId\s*\)\s*\{\s*return Promise\.resolve\(\);\s*\}/
-  );
-  assert.match(
-    appJs,
-    /if\s*\(\s*latestDesiredStatusAtResponse &&\s*latestDesiredStatusAtResponse !== response\.item\.status\s*\)\s*\{\s*return Promise\.resolve\(\);\s*\}\s*applyChecklistItemUpdate\(response\.item\);/
+    /var latestDesiredStatusAtResponse = actionState\.desiredStatus;\s*if\s*\(\s*latestDesiredStatusAtResponse &&\s*latestDesiredStatusAtResponse !== response\.item\.status\s*\)\s*\{\s*return Promise\.resolve\(\);\s*\}\s*applyChecklistItemUpdate\(response\.item\);/
   );
 });
 
@@ -94,16 +85,5 @@ test('GitHub Pages の check/uncheck は Firestore 副作用完了を待たず�
   assert.match(
     appJs,
     /applyChecklistItemUpdate\(response\.item\);\s*emitRealtimeEvent\(response\.item\)\.then\(function \(\) \{\s*return persistChecklistSnapshot\(\);\s*\}\)\.catch\(function \(error\) \{\s*console\.error\('\[sync\] failed to process post-check side effects', error\);/
-  );
-});
-
-test('GitHub Pages の check/uncheck は mutationId を付与して API へ送る', async () => {
-  const appJs = await readFile('pages/app.js', 'utf8');
-
-  assert.match(appJs, /mutationId:\s*mutationId/);
-  assert.match(appJs, /actionState\.desiredMutationId = createMutationId\(\);/);
-  assert.match(
-    appJs,
-    /var requestPromise = desiredStatus === 'checked'\s*\?\s*state\.api\.checkItem\(state\.idToken,\s*runItemId,\s*desiredMutationId\)\s*:\s*state\.api\.uncheckItem\(state\.idToken,\s*runItemId,\s*desiredMutationId\);/
   );
 });

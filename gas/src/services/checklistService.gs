@@ -461,67 +461,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         };
       },
 
-      getDateChecklist: function (query, targetDate) {
-        var currentUser = requireAuthenticatedUser(query);
-        var run = repository.findRunByStoreAndDate(currentUser.user.store_id, targetDate);
-        if (!run) {
-          return { exists: false, targetDate: targetDate };
-        }
-        var items = repository.listRunItems(run.id);
-        var response = buildChecklistResponse(repository, currentUser, run, items);
-        response.exists = true;
-        return response;
-      },
-
-      getMonthlyStats: function (query, month) {
-        var currentUser = requireAuthenticatedUser(query);
-        ns.assert(
-          typeof month === 'string' && /^\d{4}-\d{2}$/.test(month),
-          'invalid_request', 'month は YYYY-MM 形式で指定してください', 400
-        );
-        var parts = month.split('-');
-        var year = parseInt(parts[0], 10);
-        var monthNum = parseInt(parts[1], 10);
-        var startDate = month + '-01';
-        var lastDay = new Date(year, monthNum, 0).getDate();
-        var endDate = month + '-' + (lastDay < 10 ? '0' + lastDay : String(lastDay));
-
-        var runs = repository.listRunsByStoreAndDateRange(currentUser.user.store_id, startDate, endDate);
-        var daysAchieved = 0;
-        var personalChecked = 0;
-        var personalTotal = 0;
-        var dayMap = {};
-
-        runs.forEach(function (run) {
-          var items = repository.listRunItems(run.id);
-          var checkedCount = items.filter(function (i) { return i.status === ns.ITEM_STATUS.CHECKED; }).length;
-          var total = items.length;
-          var myChecked = items.filter(function (i) { return i.checked_by === currentUser.user.id; }).length;
-          var achieved = total > 0 && checkedCount === total;
-          if (achieved) {
-            daysAchieved += 1;
-          }
-          personalChecked += myChecked;
-          personalTotal += total;
-          dayMap[run.target_date] = {
-            date: run.target_date,
-            hasRun: true,
-            checked: checkedCount,
-            total: total,
-            achieved: achieved
-          };
-        });
-
-        return {
-          month: month,
-          days: dayMap,
-          daysAchieved: daysAchieved,
-          totalDaysInMonth: lastDay,
-          personalChecked: personalChecked,
-          personalTotal: personalTotal
-        };
-      },
-
       checkItem: function (query, runItemId, body) {
         var startedAt = nowMillis();
         var currentUser = requireAuthenticatedWriteUser(query);

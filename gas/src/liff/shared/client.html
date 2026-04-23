@@ -125,12 +125,6 @@
         getTodayIncomplete: function (idToken) {
           return request('GET', '/api/checklists/today/incomplete', idToken);
         },
-        getChecklistByDate: function (idToken, date) {
-          return request('GET', '/api/checklists/date/' + encodeURIComponent(date), idToken);
-        },
-        getMonthlyStats: function (idToken, month) {
-          return request('GET', '/api/stats/monthly', idToken, null, { month: month });
-        },
         checkItem: function (idToken, runItemId, body) {
           return request('POST', '/api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, body);
         },
@@ -363,11 +357,7 @@
         incomplete: null,
         templates: [],
         selectedTemplateId: '',
-        selectedTemplateItemId: '',
-        activeTab: 'home',
-        viewDate: '',
-        statsMonth: '',
-        statsData: null
+        selectedTemplateItemId: ''
       };
       var pendingItemActions = {};
       var documentRef = options.document;
@@ -416,26 +406,7 @@
         progressRingProgress: documentRef.getElementById('progress-ring-progress'),
         progressRingLabel: documentRef.getElementById('progress-ring-label'),
         hamburgerButton: documentRef.getElementById('hamburger-button'),
-        todoMenu: documentRef.getElementById('todo-menu'),
-        tabHome: documentRef.getElementById('tab-home'),
-        tabStats: documentRef.getElementById('tab-stats'),
-        homeSection: documentRef.getElementById('home-section'),
-        statsSection: documentRef.getElementById('stats-section'),
-        viewDateLabel: documentRef.getElementById('view-date-label'),
-        prevDayButton: documentRef.getElementById('prev-day-button'),
-        nextDayButton: documentRef.getElementById('next-day-button'),
-        statsRing1Progress: documentRef.getElementById('stats-ring1-progress'),
-        statsRing1Label: documentRef.getElementById('stats-ring1-label'),
-        statsRing1Count: documentRef.getElementById('stats-ring1-count'),
-        statsRing1Sub: documentRef.getElementById('stats-ring1-sub'),
-        statsRing2Progress: documentRef.getElementById('stats-ring2-progress'),
-        statsRing2Label: documentRef.getElementById('stats-ring2-label'),
-        statsRing2Count: documentRef.getElementById('stats-ring2-count'),
-        statsRing2Sub: documentRef.getElementById('stats-ring2-sub'),
-        statsCalendarTitle: documentRef.getElementById('stats-calendar-title'),
-        statsCalendarPrev: documentRef.getElementById('stats-calendar-prev'),
-        statsCalendarNext: documentRef.getElementById('stats-calendar-next'),
-        statsCalendarGrid: documentRef.getElementById('stats-calendar-grid')
+        todoMenu: documentRef.getElementById('todo-menu')
       };
 
       function normalizeArray(value) {
@@ -648,188 +619,6 @@
           elements.progressRingProgress.style.strokeDashoffset = String(offset);
         }
         setText(elements.progressRingLabel, pct + '%');
-      }
-
-      function todayDateString() {
-        return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
-      }
-
-      function monthStringFromDate(dateStr) {
-        return dateStr.slice(0, 7);
-      }
-
-      function addDays(dateStr, n) {
-        var p = dateStr.split('-');
-        var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10) + n);
-        return [
-          d.getFullYear(),
-          String(d.getMonth() + 1).padStart(2, '0'),
-          String(d.getDate()).padStart(2, '0')
-        ].join('-');
-      }
-
-      function formatViewDateLabel(dateStr) {
-        var today = todayDateString();
-        var tomorrow = addDays(today, 1);
-        var yesterday = addDays(today, -1);
-        if (dateStr === today) { return '今日　' + dateStr; }
-        if (dateStr === tomorrow) { return '明日　' + dateStr; }
-        if (dateStr === yesterday) { return '昨日　' + dateStr; }
-        return dateStr;
-      }
-
-      function switchTab(tabName) {
-        if (mode !== 'user') { return; }
-        state.activeTab = tabName;
-        ['home', 'stats'].forEach(function (t) {
-          var btn = t === 'home' ? elements.tabHome : elements.tabStats;
-          var sec = t === 'home' ? elements.homeSection : elements.statsSection;
-          if (btn) { btn.dataset.active = (t === tabName) ? 'true' : 'false'; }
-          if (sec) { sec.hidden = t !== tabName; }
-        });
-        if (tabName === 'stats') {
-          var month = state.statsMonth || monthStringFromDate(state.viewDate || todayDateString());
-          if (!state.statsData || state.statsData.month !== month) {
-            loadStatsForMonth(month);
-          } else {
-            renderStats(state.statsData);
-          }
-        }
-      }
-
-      function setViewDate(dateStr) {
-        state.viewDate = dateStr;
-        setText(elements.viewDateLabel, formatViewDateLabel(dateStr));
-        loadChecklistForViewDate();
-      }
-
-      function loadChecklistForViewDate() {
-        var today = todayDateString();
-        var date = state.viewDate || today;
-        clearError();
-        clearStatus();
-        var promise;
-        if (date === today || !api.getChecklistByDate) {
-          promise = api.getTodayChecklist(state.idToken).then(function (checklist) {
-            if (checklist && checklist.currentUser) { applyCurrentUser(checklist.currentUser); }
-            renderOverview(checklist);
-            renderChecklist(checklist);
-            renderIncomplete(buildIncompleteFromChecklist(checklist));
-          });
-        } else {
-          promise = api.getChecklistByDate(state.idToken, date).then(function (result) {
-            var checklist;
-            if (!result || !result.exists) {
-              checklist = { items: [], progress: { checked: 0, total: 0 }, targetDate: date, storeName: state.me && state.me.store ? state.me.store.name : '' };
-            } else {
-              checklist = result;
-            }
-            renderOverview(checklist);
-            renderChecklist(checklist);
-            renderIncomplete(buildIncompleteFromChecklist(checklist));
-          });
-        }
-        promise.catch(function (error) {
-          setError(error && error.message ? String(error.message) : 'チェックリストの取得に失敗しました');
-        });
-      }
-
-      function loadStatsForMonth(month) {
-        if (!api.getMonthlyStats) { return; }
-        state.statsMonth = month;
-        state.statsData = null;
-        renderStatsLoading();
-        api.getMonthlyStats(state.idToken, month).then(function (data) {
-          state.statsData = data;
-          renderStats(data);
-        }).catch(function (error) {
-          setError(error && error.message ? String(error.message) : '統計データの取得に失敗しました');
-        });
-      }
-
-      function renderStatsLoading() {
-        if (elements.statsCalendarGrid) {
-          elements.statsCalendarGrid.innerHTML = '';
-          var msg = documentRef.createElement('div');
-          msg.className = 'stats-loading';
-          msg.textContent = '読み込み中…';
-          elements.statsCalendarGrid.appendChild(msg);
-        }
-      }
-
-      function updateStatRing(ringEl, labelEl, pct) {
-        var CIRCUMFERENCE = 201.06;
-        if (ringEl) { ringEl.style.strokeDashoffset = String(CIRCUMFERENCE * (1 - pct / 100)); }
-        setText(labelEl, pct + '%');
-      }
-
-      function renderStats(data) {
-        if (!data) { return; }
-        var daysAchieved = typeof data.daysAchieved === 'number' ? data.daysAchieved : 0;
-        var totalDays = typeof data.totalDaysInMonth === 'number' ? data.totalDaysInMonth : 1;
-        var pct1 = totalDays > 0 ? Math.round(daysAchieved / totalDays * 100) : 0;
-        updateStatRing(elements.statsRing1Progress, elements.statsRing1Label, pct1);
-        setText(elements.statsRing1Count, daysAchieved + '日 / ' + totalDays + '日');
-        setText(elements.statsRing1Sub, '目標達成日数');
-
-        var personalChecked = typeof data.personalChecked === 'number' ? data.personalChecked : 0;
-        var personalTotal = typeof data.personalTotal === 'number' ? data.personalTotal : 0;
-        var pct2 = personalTotal > 0 ? Math.round(personalChecked / personalTotal * 100) : 0;
-        updateStatRing(elements.statsRing2Progress, elements.statsRing2Label, pct2);
-        setText(elements.statsRing2Count, personalChecked + '件 / ' + personalTotal + '件');
-        setText(elements.statsRing2Sub, '自分のチェック数');
-
-        renderCalendar(data.month, data.days || {});
-      }
-
-      function renderCalendar(month, daysData) {
-        var p = month.split('-');
-        var year = parseInt(p[0], 10);
-        var monthNum = parseInt(p[1], 10);
-        var ja = ['日', '月', '火', '水', '木', '金', '土'];
-        var firstDay = new Date(year, monthNum - 1, 1).getDay();
-        var lastDate = new Date(year, monthNum, 0).getDate();
-        var today = todayDateString();
-
-        setText(elements.statsCalendarTitle, year + '年' + monthNum + '月');
-
-        if (!elements.statsCalendarGrid) { return; }
-        elements.statsCalendarGrid.innerHTML = '';
-
-        ja.forEach(function (d) {
-          var cell = documentRef.createElement('div');
-          cell.className = 'cal-head';
-          cell.textContent = d;
-          elements.statsCalendarGrid.appendChild(cell);
-        });
-
-        for (var blank = 0; blank < firstDay; blank++) {
-          var emptyCell = documentRef.createElement('div');
-          emptyCell.className = 'cal-cell cal-empty';
-          elements.statsCalendarGrid.appendChild(emptyCell);
-        }
-
-        for (var day = 1; day <= lastDate; day++) {
-          var dateStr = year + '-' +
-            String(monthNum).padStart(2, '0') + '-' +
-            String(day).padStart(2, '0');
-          var dayInfo = daysData[dateStr];
-          var cell2 = documentRef.createElement('div');
-          cell2.className = 'cal-cell';
-          if (dateStr === today) { cell2.className += ' cal-today'; }
-          if (dayInfo && dayInfo.achieved) { cell2.className += ' cal-achieved'; }
-          else if (dayInfo && dayInfo.hasRun) { cell2.className += ' cal-partial'; }
-          if (dateStr === (state.viewDate || today)) { cell2.className += ' cal-selected'; }
-
-          cell2.textContent = String(day);
-          var clickDate = dateStr;
-          cell2.addEventListener('click', function () {
-            state.statsData = null;
-            switchTab('home');
-            setViewDate(clickDate);
-          });
-          elements.statsCalendarGrid.appendChild(cell2);
-        }
       }
 
       function rerenderRoleDependentSections() {
@@ -1423,26 +1212,9 @@
         var includeAncillary = refreshOptions.includeAncillary !== false;
         clearError();
 
-        var today = todayDateString();
-        var date = state.viewDate || today;
-        var checklist;
-        if (date === today || !api.getChecklistByDate) {
-          checklist = await api.getTodayChecklist(state.idToken);
-          if (checklist && checklist.currentUser) {
-            applyCurrentUser(checklist.currentUser);
-          }
-        } else {
-          var result = await api.getChecklistByDate(state.idToken, date);
-          if (!result || !result.exists) {
-            checklist = {
-              items: [],
-              progress: { checked: 0, total: 0 },
-              targetDate: date,
-              storeName: state.me && state.me.store ? state.me.store.name : ''
-            };
-          } else {
-            checklist = result;
-          }
+        var checklist = await api.getTodayChecklist(state.idToken);
+        if (checklist && checklist.currentUser) {
+          applyCurrentUser(checklist.currentUser);
         }
         renderOverview(checklist);
         renderChecklist(checklist);
@@ -1457,11 +1229,6 @@
 
         if (templatesTask) {
           await templatesTask;
-        }
-
-        if (state.activeTab === 'stats') {
-          var statsMonth = state.statsMonth || monthStringFromDate(date);
-          loadStatsForMonth(statsMonth);
         }
       }
 
@@ -1642,45 +1409,6 @@
         elements.todoMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
       }
 
-      function bindTabsAndDateNav() {
-        if (elements.tabHome && !elements.tabHome.__boundTab) {
-          elements.tabHome.__boundTab = true;
-          elements.tabHome.addEventListener('click', function () { switchTab('home'); });
-        }
-        if (elements.tabStats && !elements.tabStats.__boundTab) {
-          elements.tabStats.__boundTab = true;
-          elements.tabStats.addEventListener('click', function () { switchTab('stats'); });
-        }
-        if (elements.prevDayButton && !elements.prevDayButton.__boundNav) {
-          elements.prevDayButton.__boundNav = true;
-          elements.prevDayButton.addEventListener('click', function () {
-            setViewDate(addDays(state.viewDate || todayDateString(), -1));
-          });
-        }
-        if (elements.nextDayButton && !elements.nextDayButton.__boundNav) {
-          elements.nextDayButton.__boundNav = true;
-          elements.nextDayButton.addEventListener('click', function () {
-            setViewDate(addDays(state.viewDate || todayDateString(), 1));
-          });
-        }
-        if (elements.statsCalendarPrev && !elements.statsCalendarPrev.__boundCal) {
-          elements.statsCalendarPrev.__boundCal = true;
-          elements.statsCalendarPrev.addEventListener('click', function () {
-            var p = (state.statsMonth || todayDateString().slice(0, 7)).split('-');
-            var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 2, 1);
-            loadStatsForMonth(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
-          });
-        }
-        if (elements.statsCalendarNext && !elements.statsCalendarNext.__boundCal) {
-          elements.statsCalendarNext.__boundCal = true;
-          elements.statsCalendarNext.addEventListener('click', function () {
-            var p = (state.statsMonth || todayDateString().slice(0, 7)).split('-');
-            var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10), 1);
-            loadStatsForMonth(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
-          });
-        }
-      }
-
       function bindHamburgerMenu() {
         if (!elements.hamburgerButton || !elements.todoMenu || elements.hamburgerButton.__boundMenu) {
           return;
@@ -1741,11 +1469,6 @@
       }
 
       async function init() {
-        if (mode === 'user') {
-          state.viewDate = todayDateString();
-          setText(elements.viewDateLabel, formatViewDateLabel(state.viewDate));
-          bindTabsAndDateNav();
-        }
         bindEvents();
         var initStartedAt = typeof Date === 'function' && typeof Date.now === 'function' ? Date.now() : 0;
         setText(elements.screenMode, 'チェック LIFF');

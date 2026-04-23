@@ -309,14 +309,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }).map(ns.clone);
     }
 
-    function listRunsByStoreAndDateRange(storeId, startDate, endDate) {
-      return getTableRowsUnsafe('checklist_runs').filter(function (run) {
-        return run.store_id === storeId &&
-          run.target_date >= startDate &&
-          run.target_date <= endDate;
-      }).map(ns.clone);
-    }
-
     function createChecklistRun(run) {
       return appendRow('checklist_runs', run);
     }
@@ -555,7 +547,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       listLogsByRunId: listLogsByRunId,
       listRunItems: listRunItems,
       listRunsByDate: listRunsByDate,
-      listRunsByStoreAndDateRange: listRunsByStoreAndDateRange,
       listTableUnsafe: readState,
       listTemplateItems: listTemplateItems,
       listUsersByStore: listUsersByStore,
