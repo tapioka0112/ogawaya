@@ -103,7 +103,9 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - 初期表示用スナップショットは `stores/{storeId}/runs/{targetDate}/snapshots/today` に保存する。
 - チェック更新は `Firestore 先行反映 -> GAS API バックグラウンド同期` の順で処理し、UI は API 応答待ちをしない。
 - API 同期が失敗した場合はクライアント側で指数バックオフ再試行し、成功時に Spreadsheet 正本へ反映する。
+- API 同期は 2.5 秒でタイムアウト判定し、停滞時も UI 更新を止めず再試行へ移る。
 - 画面側は Firestore 購読に加えて 30 秒周期の整合リフレッシュを実施する。
+- snapshot 保存はデバウンスして集約し、連打時の余分な write を抑制する。
 - スプレッドシートを直接編集した内容は API 整合リフレッシュ時に反映され、最新状態でスナップショットも上書きされる。
 - スナップショットは先に表示されるため、開いた直後の数秒間は最新反映前の状態が見えることがある。
 - Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。

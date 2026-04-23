@@ -111,7 +111,9 @@
   var LAST_STORE_ID_STORAGE_KEY = 'ogawaya:last-store-id';
   var SNAPSHOT_DOC_ID = 'today';
   var ITEM_ACTION_DISPATCH_DEBOUNCE_MS = 120;
+  var ITEM_ACTION_REQUEST_TIMEOUT_MS = 2500;
   var ITEM_ACTION_RETRY_MAX_ATTEMPTS = 6;
+  var SNAPSHOT_PERSIST_DEBOUNCE_MS = 1500;
   var STATS_REFRESH_DEBOUNCE_MS = 180;
 
   function getTodayDateInJst() {
@@ -301,6 +303,7 @@
     syncUnsubscribe: null,
     syncSessionStartedAtMs: 0,
     consistencyTimerId: null,
+    snapshotPersistTimerId: null,
     visibilityHandlerBound: false,
     statsYear: new Date().getFullYear(),
     statsMonth: new Date().getMonth() + 1,
@@ -1065,12 +1068,28 @@
     actionState.retryTimerId = null;
   }
 
+  function clearSnapshotPersistTimer() {
+    if (!state.snapshotPersistTimerId) {
+      return;
+    }
+    global.clearTimeout(state.snapshotPersistTimerId);
+    state.snapshotPersistTimerId = null;
+  }
+
+  function scheduleChecklistSnapshotPersist() {
+    if (!state.checklist) {
+      return;
+    }
+    clearSnapshotPersistTimer();
+    state.snapshotPersistTimerId = global.setTimeout(function () {
+      state.snapshotPersistTimerId = null;
+      persistChecklistSnapshot();
+    }, SNAPSHOT_PERSIST_DEBOUNCE_MS);
+  }
+
   function emitRealtimeSideEffects(updatedItem) {
-    emitRealtimeEvent(updatedItem).then(function () {
-      return persistChecklistSnapshot();
-    }).catch(function (error) {
-      console.error('[sync] failed to process post-check side effects', error);
-    });
+    emitRealtimeEvent(updatedItem);
+    scheduleChecklistSnapshotPersist();
   }
 
   function applyChecklistItemUpdate(updatedItem) {
@@ -1386,7 +1405,7 @@
     }
     applyChecklistItemUpdate(syncedItem);
     actionState.confirmedItem = cloneChecklistItem(syncedItem);
-    persistChecklistSnapshot();
+    scheduleChecklistSnapshotPersist();
   }
 
   function stopRealtimeSync() {
@@ -1569,8 +1588,13 @@
     var requestPromise = desiredStatus === 'checked'
       ? state.api.checkItem(state.idToken, runItemId)
       : state.api.uncheckItem(state.idToken, runItemId);
+    var requestPromiseWithTimeout = withTimeout(
+      requestPromise,
+      ITEM_ACTION_REQUEST_TIMEOUT_MS,
+      'API 同期がタイムアウトしました'
+    );
 
-    requestPromise.then(function (response) {
+    requestPromiseWithTimeout.then(function (response) {
       if (!response || !response.item) {
         requestFailed = true;
         return Promise.resolve();
@@ -1589,12 +1613,13 @@
         return Promise.resolve();
       }
       applyChecklistItemUpdate(response.item);
-      persistChecklistSnapshot().catch(function (error) {
-        console.error('[sync] failed to persist checklist snapshot', error);
-      });
+      scheduleChecklistSnapshotPersist();
       return Promise.resolve();
     }).catch(function (error) {
       requestFailed = true;
+      if (typeof error.statusCode !== 'number') {
+        error.statusCode = 0;
+      }
       requestError = error;
       setError(buildApiErrorMessage(error, 'チェック更新に失敗しました'));
     }).finally(function () {
@@ -1751,7 +1776,7 @@
     var refreshOptions = options || {};
     var checklist = await state.api.getTodayChecklist(state.idToken);
     applyChecklistPayload(checklist, { restartSync: refreshOptions.restartSync !== false });
-    persistChecklistSnapshot();
+    scheduleChecklistSnapshotPersist();
   }
 
   function startConsistencyRefresh() {
@@ -1851,6 +1876,7 @@
     global.addEventListener('beforeunload', function () {
       stopRealtimeSync();
       stopConsistencyRefresh();
+      clearSnapshotPersistTimer();
       clearStatsRefreshTimer();
     });
 
