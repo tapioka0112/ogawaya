@@ -1055,9 +1055,6 @@
           setError('LINE認証が完了していないため更新できません。LINEから開き直してください。');
           return;
         }
-        if (actionState.inFlight) {
-          return;
-        }
         clearError();
         clearStatus();
         if (item.status === 'unchecked') {

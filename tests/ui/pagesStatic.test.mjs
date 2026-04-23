@@ -31,3 +31,12 @@ test('GitHub Pages の config.json は必須キーを持つ', async () => {
   assert.equal(typeof config.firebase.projectId, 'string');
   assert.equal(typeof config.firebase.appId, 'string');
 });
+
+test('GitHub Pages は pending 中でもクリックを無効化しない', async () => {
+  const css = await readFile('pages/style.css', 'utf8');
+  const appJs = await readFile('pages/app.js', 'utf8');
+
+  assert.match(css, /\.todo-item\[data-pending='true'\]\s*\{/);
+  assert.doesNotMatch(css, /pointer-events\s*:\s*none/);
+  assert.doesNotMatch(appJs, /if\s*\(actionState\.inFlight\)\s*\{\s*return;\s*\}\s*clearError\(\);\s*clearStatus\(\);/);
+});

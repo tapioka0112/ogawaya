@@ -295,7 +295,6 @@ body.user-mode {
 
 .user-mode .todo-item[data-pending='true'] {
   opacity: 0.55;
-  pointer-events: none;
 }
 
 .user-mode .todo-bullet {
