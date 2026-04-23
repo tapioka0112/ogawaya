@@ -114,7 +114,6 @@
   var ITEM_ACTION_REQUEST_TIMEOUT_MS = 2500;
   var ITEM_ACTION_RETRY_MAX_ATTEMPTS = 6;
   var SNAPSHOT_PERSIST_DEBOUNCE_MS = 1500;
-  var STATS_REFRESH_DEBOUNCE_MS = 180;
 
   function getTodayDateInJst() {
     var formatter = new Intl.DateTimeFormat('en-CA', {
@@ -241,17 +240,6 @@
       getTodayChecklist: function (idToken) {
         return request('GET', 'api/checklists/today', idToken);
       },
-      getMonthlyStats: function (idToken, year, month) {
-        return request('GET', 'api/stats/monthly', idToken, {}, {
-          year: String(year),
-          month: String(month)
-        });
-      },
-      getDailyStats: function (idToken, date) {
-        return request('GET', 'api/stats/daily', idToken, {}, {
-          date: String(date)
-        });
-      },
       checkItem: function (idToken, runItemId) {
         return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, { comment: '' });
       },
@@ -313,7 +301,9 @@
     statsDailyLoading: false,
     statsLoadRequestId: 0,
     statsDailyRequestId: 0,
-    statsRefreshTimerId: null,
+    monthlyStatsUnsubscribe: null,
+    dailyStatsUnsubscribe: null,
+    statsStoreId: '',
     activeTab: 'home',
     authUserContext: {
       userId: '',
@@ -478,6 +468,7 @@
         state.statsMonth = 12;
         state.statsYear -= 1;
       }
+      stopDailyStatsSubscription();
       state.statsData = null;
       state.statsSelectedDate = '';
       state.statsDailyData = null;
@@ -490,6 +481,7 @@
         state.statsMonth = 1;
         state.statsYear += 1;
       }
+      stopDailyStatsSubscription();
       state.statsData = null;
       state.statsSelectedDate = '';
       state.statsDailyData = null;
@@ -717,23 +709,24 @@
     return null;
   }
 
-  function clearStatsRefreshTimer() {
-    if (!state.statsRefreshTimerId) {
-      return;
+  function stopMonthlyStatsSubscription() {
+    if (typeof state.monthlyStatsUnsubscribe === 'function') {
+      state.monthlyStatsUnsubscribe();
     }
-    global.clearTimeout(state.statsRefreshTimerId);
-    state.statsRefreshTimerId = null;
+    state.monthlyStatsUnsubscribe = null;
+    state.statsStoreId = '';
   }
 
-  function scheduleStatsReload() {
-    if (state.activeTab !== 'stats' || !state.api || !state.idToken) {
-      return;
+  function stopDailyStatsSubscription() {
+    if (typeof state.dailyStatsUnsubscribe === 'function') {
+      state.dailyStatsUnsubscribe();
     }
-    clearStatsRefreshTimer();
-    state.statsRefreshTimerId = global.setTimeout(function () {
-      state.statsRefreshTimerId = null;
-      loadStats();
-    }, STATS_REFRESH_DEBOUNCE_MS);
+    state.dailyStatsUnsubscribe = null;
+  }
+
+  function stopStatsSubscriptions() {
+    stopMonthlyStatsSubscription();
+    stopDailyStatsSubscription();
   }
 
   function applyStatsDeltaForItemChange(previousItem, updatedItem) {
@@ -779,7 +772,6 @@
       if (statsUpdatedLocally) {
         renderStats();
       }
-      scheduleStatsReload();
     }
   }
 
@@ -807,73 +799,110 @@
     renderStatsDayDetails();
   }
 
-  async function loadDailyStats(date) {
-    if (!state.api || !state.idToken || !date) {
+  function subscribeDailyStats(targetDate) {
+    if (!targetDate) {
+      stopDailyStatsSubscription();
+      return;
+    }
+    if (!initializeRealtimeClient()) {
+      setError('統計データの購読に失敗しました。Firebase 設定を確認してください。');
+      return;
+    }
+    var storeId = resolveStatsStoreId();
+    if (!storeId) {
       return;
     }
     var requestId = state.statsDailyRequestId + 1;
     state.statsDailyRequestId = requestId;
-    state.statsSelectedDate = date;
+    state.statsSelectedDate = targetDate;
     state.statsDailyLoading = true;
     state.statsDailyData = null;
     renderStatsDayDetails();
-    try {
-      var data = await state.api.getDailyStats(state.idToken, date);
+
+    stopDailyStatsSubscription();
+    var docRef = buildDailyStatsDocRef(storeId, targetDate);
+    state.dailyStatsUnsubscribe = docRef.onSnapshot(function (doc) {
       if (state.statsDailyRequestId !== requestId) {
         return;
       }
-      state.statsDailyData = data;
-    } catch (error) {
+      state.statsDailyLoading = false;
+      if (!doc.exists) {
+        state.statsDailyData = normalizeDailyStatsPayload(null, targetDate);
+      } else {
+        state.statsDailyData = normalizeDailyStatsPayload(doc.data() || {}, targetDate);
+      }
+      renderStatsDayDetails();
+    }, function (error) {
       if (state.statsDailyRequestId !== requestId) {
         return;
       }
+      state.statsDailyLoading = false;
       state.statsDailyData = {
         errorMessage: buildApiErrorMessage(error, '日次統計の取得に失敗しました'),
-        date: date,
+        date: targetDate,
         total: 0,
         checked: 0,
         items: []
       };
-    } finally {
-      if (state.statsDailyRequestId === requestId) {
-        state.statsDailyLoading = false;
-        renderStatsDayDetails();
-      }
-    }
+      renderStatsDayDetails();
+    });
   }
 
-  async function loadStats() {
-    if (!state.api || !state.idToken) {
+  function subscribeMonthlyStats(year, month) {
+    if (!initializeRealtimeClient()) {
+      setError('統計データの購読に失敗しました。Firebase 設定を確認してください。');
+      return;
+    }
+    var storeId = resolveStatsStoreId();
+    if (!storeId) {
       return;
     }
     var requestId = state.statsLoadRequestId + 1;
     state.statsLoadRequestId = requestId;
+    state.statsStoreId = storeId;
     updateMonthLabel();
-    renderCalendar(state.statsYear, state.statsMonth, []);
-    renderStatsDayDetails();
-    try {
-      var data = await state.api.getMonthlyStats(state.idToken, state.statsYear, state.statsMonth);
+    state.statsData = buildEmptyMonthlyStats(year, month);
+    renderStats();
+
+    stopMonthlyStatsSubscription();
+    var docRef = buildMonthlyStatsDocRef(storeId, year, month);
+    state.monthlyStatsUnsubscribe = docRef.onSnapshot(function (doc) {
       if (state.statsLoadRequestId !== requestId) {
         return;
       }
-      state.statsData = data;
+      var userId = state.checklist && state.checklist.currentUser
+        ? String(state.checklist.currentUser.userId || '')
+        : '';
+      state.statsData = normalizeMonthlyStatsPayload(doc.exists ? (doc.data() || {}) : null, year, month, userId);
       renderStats();
       if (state.statsSelectedDate) {
-        var selectedDateExists = (data.calendar || []).some(function (entry) {
+        var selectedDateExists = (state.statsData.calendar || []).some(function (entry) {
           return entry.date === state.statsSelectedDate;
         });
         if (selectedDateExists) {
-          loadDailyStats(state.statsSelectedDate);
+          subscribeDailyStats(state.statsSelectedDate);
         } else {
           state.statsSelectedDate = '';
           state.statsDailyData = null;
           state.statsDailyLoading = false;
+          stopDailyStatsSubscription();
           renderStatsDayDetails();
         }
       }
-    } catch (error) {
+    }, function (error) {
+      if (state.statsLoadRequestId !== requestId) {
+        return;
+      }
       setError(buildApiErrorMessage(error, '統計データの取得に失敗しました'));
-    }
+    });
+  }
+
+  function loadDailyStats(date) {
+    subscribeDailyStats(date);
+  }
+
+  function loadStats() {
+    subscribeMonthlyStats(state.statsYear, state.statsMonth);
   }
 
   function clearList(element) {
@@ -1019,6 +1048,16 @@
     rememberStoreIdFromChecklist(state.checklist);
     if (applyOptions.restartSync !== false) {
       startRealtimeSync();
+    }
+    if (state.activeTab === 'stats') {
+      var latestStatsStoreId = resolveStatsStoreId();
+      var shouldReloadStats = !state.statsData || typeof state.monthlyStatsUnsubscribe !== 'function' || state.statsStoreId !== latestStatsStoreId;
+      if (shouldReloadStats) {
+        loadStats();
+      }
+      if (state.statsSelectedDate && typeof state.dailyStatsUnsubscribe !== 'function') {
+        loadDailyStats(state.statsSelectedDate);
+      }
     }
   }
 
@@ -1238,6 +1277,119 @@
       .doc(targetDate)
       .collection('snapshots')
       .doc(SNAPSHOT_DOC_ID);
+  }
+
+  function buildMonthlyStatsDocRef(storeId, year, month) {
+    var monthString = month < 10 ? '0' + month : String(month);
+    var yearMonth = String(year) + '-' + monthString;
+    return state.firestore
+      .collection('stores')
+      .doc(storeId)
+      .collection('monthly_stats')
+      .doc(yearMonth);
+  }
+
+  function buildDailyStatsDocRef(storeId, targetDate) {
+    return state.firestore
+      .collection('stores')
+      .doc(storeId)
+      .collection('daily_stats')
+      .doc(targetDate);
+  }
+
+  function resolveStatsStoreId() {
+    if (state.checklist && state.checklist.currentUser && state.checklist.currentUser.store) {
+      var checklistStoreId = String(state.checklist.currentUser.store.id || '');
+      if (checklistStoreId) {
+        return checklistStoreId;
+      }
+    }
+    var storedStoreId = readStorageValue(LAST_STORE_ID_STORAGE_KEY);
+    if (storedStoreId) {
+      return storedStoreId;
+    }
+    if (state.config && state.config.defaultStoreId) {
+      return String(state.config.defaultStoreId);
+    }
+    return '';
+  }
+
+  function buildEmptyMonthlyStats(year, month) {
+    return {
+      year: year,
+      month: month,
+      totalDays: 0,
+      achievedDays: 0,
+      totalItems: 0,
+      myCheckedItems: 0,
+      calendar: []
+    };
+  }
+
+  function normalizeMonthlyStatsPayload(payload, year, month, currentUserId) {
+    if (!payload || typeof payload !== 'object') {
+      return buildEmptyMonthlyStats(year, month);
+    }
+    var rawCalendar = Array.isArray(payload.calendar) ? payload.calendar : [];
+    var calendar = rawCalendar.map(function (entry) {
+      var total = Number(entry && entry.total ? entry.total : 0);
+      var checked = Number(entry && entry.checked ? entry.checked : 0);
+      return {
+        date: String(entry && entry.date ? entry.date : ''),
+        achieved: entry && entry.achieved === true,
+        total: total,
+        checked: checked
+      };
+    }).filter(function (entry) {
+      return entry.date !== '';
+    }).sort(function (left, right) {
+      return left.date.localeCompare(right.date);
+    });
+    var userCounts = payload.checkedByUserCounts && typeof payload.checkedByUserCounts === 'object'
+      ? payload.checkedByUserCounts
+      : {};
+    var myCheckedItems = Number(currentUserId && userCounts[currentUserId] ? userCounts[currentUserId] : 0);
+    return {
+      year: Number(payload.year || year),
+      month: Number(payload.month || month),
+      totalDays: Number(payload.totalDays || calendar.length),
+      achievedDays: Number(payload.achievedDays || 0),
+      totalItems: Number(payload.totalItems || 0),
+      myCheckedItems: myCheckedItems,
+      calendar: calendar
+    };
+  }
+
+  function normalizeDailyStatsPayload(payload, targetDate) {
+    if (!payload || typeof payload !== 'object') {
+      return {
+        date: targetDate,
+        total: 0,
+        checked: 0,
+        achieved: false,
+        items: []
+      };
+    }
+    var rawItems = Array.isArray(payload.items) ? payload.items : [];
+    var items = rawItems.map(function (item) {
+      return {
+        id: String(item && item.id ? item.id : ''),
+        title: String(item && item.title ? item.title : ''),
+        status: String(item && item.status ? item.status : 'unchecked') === 'checked' ? 'checked' : 'unchecked',
+        checkedBy: item && item.checkedBy ? String(item.checkedBy) : null,
+        checkedByUserId: item && item.checkedByUserId ? String(item.checkedByUserId) : null,
+        checkedAt: item && item.checkedAt ? String(item.checkedAt) : null
+      };
+    }).filter(function (item) {
+      return item.id !== '' && item.title !== '';
+    });
+    return {
+      date: String(payload.date || targetDate),
+      total: Number(payload.total || items.length),
+      checked: Number(payload.checked || 0),
+      achieved: payload.achieved === true,
+      items: items
+    };
   }
 
   function buildChecklistSnapshotPayload(checklist) {
@@ -1876,8 +2028,8 @@
     global.addEventListener('beforeunload', function () {
       stopRealtimeSync();
       stopConsistencyRefresh();
+      stopStatsSubscriptions();
       clearSnapshotPersistTimer();
-      clearStatsRefreshTimer();
     });
 
     boot().catch(function (error) {

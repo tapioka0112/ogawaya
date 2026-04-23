@@ -14,6 +14,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /stores/{storeId}/monthly_stats/{monthId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /stores/{storeId}/daily_stats/{targetDate} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

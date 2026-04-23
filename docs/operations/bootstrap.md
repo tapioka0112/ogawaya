@@ -82,7 +82,7 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 - 更新系APIは `idToken` 必須。LIFF認証が通らない場合はチェック更新できない。
 - `/api/link` は廃止済み（`410`）。LINE 連携フォームは使用しない。
 - 現行運用は `LIFF + API + Trigger` を前提とし、LINE Developers の `Use webhook` は `OFF` にする。
-- Firestore は同期イベント + 初期表示スナップショット専用で、正本データは従来どおり Spreadsheet を使用する。
+- Firestore は同期イベント + 初期表示スナップショット + 統計表示用ドキュメントで使用し、正本データは従来どおり Spreadsheet を使用する。
 
 ## 5.5 Firestore Rules（リアルタイム同期を使う場合のみ）
 
@@ -97,9 +97,24 @@ Apps Script をまだ実行できず、手動 import を使う場合は以下の
 - 禁止: 上記以外の全パス（`read/write`）
 - 禁止: `events` の `update/delete`
 - 禁止: `snapshots` の `delete`
+- 許可: `stores/{storeId}/monthly_stats/*` の `read`
+- 許可: `stores/{storeId}/daily_stats/*` の `read`
 
 補足:
 - 画面は snapshot を先に表示し、その後 API で整合するため、起動直後は短時間だけ古い状態が見えることがある。
+
+## 5.6 Cloud Functions（統計集計）
+
+統計タブを Firestore 集計ドキュメントで表示する場合、以下を実行する。
+
+1. `firebase/functions` に移動して `npm install` を実行する。
+2. `firebase/` に戻る。
+3. `firebase deploy --project owagaya-fd93b --only functions:syncStatsFromSnapshot` を実行する。
+
+この関数は `stores/{storeId}/runs/{targetDate}/snapshots/today` 更新時に、以下を更新する。
+
+- `stores/{storeId}/daily_stats/{targetDate}`
+- `stores/{storeId}/monthly_stats/{YYYY-MM}`
 
 ## 6. Trigger
 
