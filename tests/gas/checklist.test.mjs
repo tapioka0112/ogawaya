@@ -285,6 +285,71 @@ test('同日チェックリストを返す', async () => {
   assert.equal(response.body.currentUser.name, '田中LINE');
 });
 
+test('10:30 前は前日の運用日チェックリストを返す', async () => {
+  const runtime = await loadGasRuntime();
+  const seed = createBaseDataset();
+  seed.checklist_runs = [
+    {
+      id: 'run-prev',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-21',
+      status: 'open',
+      notified_at: '2026-04-21T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-21T01:30:00Z'
+    }
+  ];
+  seed.checklist_run_items = [
+    {
+      id: 'run-item-prev-001',
+      run_id: 'run-prev',
+      template_item_id: 'tmpl-item-001',
+      title: '開店準備',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-21T01:30:00Z'
+    }
+  ];
+
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    identityClient: {
+      verifyIdToken(idToken) {
+        if (idToken !== 'valid-pt') {
+          throw new Error('invalid token');
+        }
+        return { lineUserId: 'line-user-001', displayName: '田中LINE' };
+      }
+    },
+    clock: {
+      now() {
+        return new Date('2026-04-21T16:00:00Z');
+      },
+      today() {
+        return '2026-04-22';
+      },
+      yesterday() {
+        return '2026-04-21';
+      }
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/today',
+    query: { idToken: 'valid-pt' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.targetDate, '2026-04-21');
+  assert.equal(response.body.runId, 'run-prev');
+});
+
 test('匿名アクセス有効時は当日 run が無ければ自動生成して返す', async () => {
   const app = await createAnonymousChecklistApp();
 

@@ -64,6 +64,24 @@ test('daily start は当日分を作成し、既存時は二重作成しない',
   assert.ok(app.repository.listTable('checklist_run_items').every((item) => item.status === 'unchecked'));
 });
 
+test('daily start は 10:30 境界で運用日の target_date を切り替える', async () => {
+  const app = await createSchedulerApp({
+    pushMessage() {
+      return { status: 'sent' };
+    }
+  });
+
+  app.clock.now = () => new Date('2026-04-21T00:20:00Z');
+  const beforeCutover = app.runDailyStart();
+  assert.equal(beforeCutover.createdRuns.length, 1);
+  assert.equal(beforeCutover.createdRuns[0].target_date, '2026-04-20');
+
+  app.clock.now = () => new Date('2026-04-21T01:40:00Z');
+  const afterCutover = app.runDailyStart();
+  assert.equal(afterCutover.createdRuns.length, 1);
+  assert.equal(afterCutover.createdRuns[0].target_date, '2026-04-21');
+});
+
 test('daily start は通知送信対象が 0 件でもスキップして異常終了しない', async () => {
   let pushCount = 0;
   const app = await createSchedulerApp({

@@ -115,15 +115,30 @@
   var ITEM_ACTION_REQUEST_TIMEOUT_MS = 2500;
   var ITEM_ACTION_RETRY_MAX_ATTEMPTS = 6;
   var SNAPSHOT_PERSIST_DEBOUNCE_MS = 1500;
+  var JST_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  var JST_HOUR_MINUTE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Tokyo',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
 
   function getTodayDateInJst() {
-    var formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Tokyo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    });
-    return formatter.format(new Date());
+    var now = new Date();
+    var hourMinuteText = JST_HOUR_MINUTE_FORMATTER.format(now);
+    var parts = hourMinuteText.split(':');
+    var hour = Number(parts[0] || 0);
+    var minute = Number(parts[1] || 0);
+    if (hour > 10 || (hour === 10 && minute >= 30)) {
+      return JST_DATE_FORMATTER.format(now);
+    }
+    var previousDate = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+    return JST_DATE_FORMATTER.format(previousDate);
   }
 
   function readStorageValue(key) {

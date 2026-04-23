@@ -30,6 +30,24 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return new Date().getTime();
   }
 
+  function isBusinessDayCutoverPassed(date) {
+    var isoString = Utilities.formatDate(date, ns.TIMEZONE, "yyyy-MM-dd'T'HH:mm:ss'Z'");
+    var timeMatch = isoString.match(/T(\d{2}):(\d{2}):\d{2}Z$/);
+    ns.assert(timeMatch, 'internal_error', '時刻フォーマットの解析に失敗しました', 500);
+    var hour = Number(timeMatch[1]);
+    var minute = Number(timeMatch[2]);
+    return hour > 10 || (hour === 10 && minute >= 30);
+  }
+
+  function resolveBusinessDate(now) {
+    var normalizedNow = now || new Date();
+    var baseDate = normalizedNow;
+    if (!isBusinessDayCutoverPassed(normalizedNow)) {
+      baseDate = new Date(normalizedNow.getTime() - (24 * 60 * 60 * 1000));
+    }
+    return Utilities.formatDate(baseDate, ns.TIMEZONE, 'yyyy-MM-dd');
+  }
+
   function getScriptCacheSafely() {
     if (typeof CacheService === 'undefined' || !CacheService || typeof CacheService.getScriptCache !== 'function') {
       return null;
@@ -291,7 +309,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function getTodayRunForUser(user) {
-      var targetDate = clock.today();
+      var targetDate = resolveBusinessDate(clock.now());
       var run = repository.findRunByStoreAndDate(user.store_id, targetDate);
       if (run) {
         return run;
@@ -763,8 +781,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
       runDailyStart: function () {
         var createdRuns = [];
+        var targetDate = resolveBusinessDate(clock.now());
         repository.listActiveTemplates().forEach(function (template) {
-          var existingRun = repository.findRunByStoreAndDate(template.store_id, clock.today());
+          var existingRun = repository.findRunByStoreAndDate(template.store_id, targetDate);
           if (existingRun) {
             return;
           }
@@ -775,7 +794,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             id: runId,
             template_id: template.id,
             store_id: template.store_id,
-            target_date: clock.today(),
+            target_date: targetDate,
             status: ns.RUN_STATUS.OPEN,
             notified_at: now,
             closed_at: '',
