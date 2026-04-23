@@ -50,10 +50,12 @@ test('GitHub Pages の連打制御は confirmedItem 基準で latest-wins を維
   const appJs = await readFile('pages/app.js', 'utf8');
 
   assert.match(appJs, /confirmedItem:\s*null/);
+  assert.match(appJs, /retryTimerId:\s*null/);
+  assert.match(appJs, /retryAttempt:\s*0/);
   assert.match(appJs, /if\s*\(!actionState\.confirmedItem\)\s*\{\s*actionState\.confirmedItem = cloneChecklistItem\(currentItem\);\s*\}/);
   assert.match(appJs, /applyOptimisticStatus\(runItemId,\s*desiredStatus\);/);
-  assert.match(appJs, /if\s*\(requestFailed\)\s*\{\s*actionState\.desiredStatus = latestConfirmedStatus;/);
-  assert.match(appJs, /if\s*\(latestDesiredStatus && latestConfirmedStatus && latestDesiredStatus !== latestConfirmedStatus\)\s*\{/);
+  assert.match(appJs, /if\s*\(requestFailed\)\s*\{\s*scheduleItemStatusRetry\(runItemId,\s*requestError\);/);
+  assert.match(appJs, /if\s*\(latestDesiredStatus && latestConfirmedStatus && latestDesiredStatus !== latestConfirmedStatus\)\s*\{\s*processItemStatusChange\(runItemId\);/);
 });
 
 test('GitHub Pages の realtime 同期は自己イベント・未確定時刻・欠落時刻を除外する', async () => {
@@ -88,11 +90,26 @@ test('GitHub Pages の連打時は古い API 応答を UI に反映しない', a
 test('GitHub Pages の check/uncheck は Firestore 副作用完了を待たずに inFlight を解放する', async () => {
   const appJs = await readFile('pages/app.js', 'utf8');
 
-  assert.doesNotMatch(appJs, /return emitRealtimeEvent\(response\.item\)\.then/);
   assert.match(
     appJs,
-    /applyChecklistItemUpdate\(response\.item\);\s*emitRealtimeEvent\(response\.item\)\.then\(function \(\) \{\s*return persistChecklistSnapshot\(\);\s*\}\)\.catch\(function \(error\) \{\s*console\.error\('\[sync\] failed to process post-check side effects', error\);/
+    /var optimisticItemForDispatch = desiredStatus === 'checked'\s*\?\s*buildOptimisticCheckedItem\(currentItem\)\s*:\s*buildOptimisticUncheckedItem\(currentItem\);/
   );
+  assert.match(appJs, /emitRealtimeSideEffects\(optimisticItemForDispatch\);/);
+  assert.doesNotMatch(appJs, /applyChecklistItemUpdate\(actionState\.confirmedItem\);/);
+  assert.match(
+    appJs,
+    /function emitRealtimeSideEffects\(updatedItem\)\s*\{\s*emitRealtimeEvent\(updatedItem\)\.then\(function \(\) \{\s*return persistChecklistSnapshot\(\);\s*\}\)\.catch\(function \(error\) \{\s*console\.error\('\[sync\] failed to process post-check side effects', error\);/
+  );
+});
+
+test('GitHub Pages の API 同期失敗は指数バックオフで再試行する', async () => {
+  const appJs = await readFile('pages/app.js', 'utf8');
+
+  assert.match(appJs, /function scheduleItemStatusRetry\(runItemId,\s*requestError\)/);
+  assert.match(appJs, /var retryable = statusCode === 0 \|\| statusCode >= 500;/);
+  assert.match(appJs, /actionState\.retryAttempt = Math\.min\(actionState\.retryAttempt \+ 1,\s*ITEM_ACTION_RETRY_MAX_ATTEMPTS\);/);
+  assert.match(appJs, /var delayMs = Math\.min\(10000,\s*400 \* Math\.pow\(2,\s*actionState\.retryAttempt - 1\)\);/);
+  assert.match(appJs, /actionState\.retryTimerId = global\.setTimeout\(function \(\) \{\s*actionState\.retryTimerId = null;\s*processItemStatusChange\(runItemId\);\s*\}, delayMs\);/);
 });
 
 test('GitHub Pages の連打制御は dispatch debounce で送信を集約する', async () => {

@@ -101,6 +101,8 @@ LINE Bot + LIFF + 日次バッチを Google Apps Script（GAS）と Spreadsheet 
 - `pages/config.json` の `enableRealtimeSync=true` かつ `firebase` が有効なときだけリアルタイム同期が動作する。
 - イベント配信先は `stores/{storeId}/runs/{targetDate}/events`。
 - 初期表示用スナップショットは `stores/{storeId}/runs/{targetDate}/snapshots/today` に保存する。
+- チェック更新は `Firestore 先行反映 -> GAS API バックグラウンド同期` の順で処理し、UI は API 応答待ちをしない。
+- API 同期が失敗した場合はクライアント側で指数バックオフ再試行し、成功時に Spreadsheet 正本へ反映する。
 - 画面側は Firestore 購読に加えて 30 秒周期の整合リフレッシュを実施する。
 - スプレッドシートを直接編集した内容は API 整合リフレッシュ時に反映され、最新状態でスナップショットも上書きされる。
 - スナップショットは先に表示されるため、開いた直後の数秒間は最新反映前の状態が見えることがある。

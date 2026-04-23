@@ -111,6 +111,7 @@
   var LAST_STORE_ID_STORAGE_KEY = 'ogawaya:last-store-id';
   var SNAPSHOT_DOC_ID = 'today';
   var ITEM_ACTION_DISPATCH_DEBOUNCE_MS = 120;
+  var ITEM_ACTION_RETRY_MAX_ATTEMPTS = 6;
   var STATS_REFRESH_DEBOUNCE_MS = 180;
 
   function getTodayDateInJst() {
@@ -1048,10 +1049,28 @@
         inFlight: false,
         lastSyncedAtMs: 0,
         confirmedItem: null,
-        dispatchTimerId: null
+        dispatchTimerId: null,
+        retryTimerId: null,
+        retryAttempt: 0
       };
     }
     return state.itemActions[runItemId];
+  }
+
+  function clearItemRetryTimer(actionState) {
+    if (!actionState || !actionState.retryTimerId) {
+      return;
+    }
+    global.clearTimeout(actionState.retryTimerId);
+    actionState.retryTimerId = null;
+  }
+
+  function emitRealtimeSideEffects(updatedItem) {
+    emitRealtimeEvent(updatedItem).then(function () {
+      return persistChecklistSnapshot();
+    }).catch(function (error) {
+      console.error('[sync] failed to process post-check side effects', error);
+    });
   }
 
   function applyChecklistItemUpdate(updatedItem) {
@@ -1486,9 +1505,34 @@
     if (!actionState.confirmedItem) {
       actionState.confirmedItem = cloneChecklistItem(currentItem);
     }
+    clearItemRetryTimer(actionState);
+    actionState.retryAttempt = 0;
     actionState.desiredStatus = desiredStatus;
     applyOptimisticStatus(runItemId, desiredStatus);
     scheduleItemStatusChange(runItemId);
+  }
+
+  function scheduleItemStatusRetry(runItemId, requestError) {
+    var actionState = getItemActionState(runItemId);
+    if (actionState.inFlight || actionState.retryTimerId) {
+      return;
+    }
+    var statusCode = requestError && typeof requestError.statusCode === 'number'
+      ? requestError.statusCode
+      : 0;
+    var retryable = statusCode === 0 || statusCode >= 500;
+    if (!retryable) {
+      actionState.retryAttempt = 0;
+      return;
+    }
+
+    actionState.retryAttempt = Math.min(actionState.retryAttempt + 1, ITEM_ACTION_RETRY_MAX_ATTEMPTS);
+    var delayMs = Math.min(10000, 400 * Math.pow(2, actionState.retryAttempt - 1));
+    actionState.retryTimerId = global.setTimeout(function () {
+      actionState.retryTimerId = null;
+      processItemStatusChange(runItemId);
+    }, delayMs);
+    setStatus('通信遅延のため保存を再試行しています...');
   }
 
   function processItemStatusChange(runItemId) {
@@ -1513,8 +1557,14 @@
       actionState.desiredStatus = confirmedStatus;
       return;
     }
+    var optimisticItemForDispatch = desiredStatus === 'checked'
+      ? buildOptimisticCheckedItem(currentItem)
+      : buildOptimisticUncheckedItem(currentItem);
+    emitRealtimeSideEffects(optimisticItemForDispatch);
+
     actionState.inFlight = true;
     var requestFailed = false;
+    var requestError = null;
 
     var requestPromise = desiredStatus === 'checked'
       ? state.api.checkItem(state.idToken, runItemId)
@@ -1539,27 +1589,26 @@
         return Promise.resolve();
       }
       applyChecklistItemUpdate(response.item);
-      emitRealtimeEvent(response.item).then(function () {
-        return persistChecklistSnapshot();
-      }).catch(function (error) {
-        console.error('[sync] failed to process post-check side effects', error);
+      persistChecklistSnapshot().catch(function (error) {
+        console.error('[sync] failed to persist checklist snapshot', error);
       });
       return Promise.resolve();
     }).catch(function (error) {
       requestFailed = true;
-      applyChecklistItemUpdate(actionState.confirmedItem);
+      requestError = error;
       setError(buildApiErrorMessage(error, 'チェック更新に失敗しました'));
     }).finally(function () {
       actionState.inFlight = false;
       var latestDesiredStatus = actionState.desiredStatus;
       var latestConfirmedStatus = actionState.confirmedItem ? actionState.confirmedItem.status : '';
       if (requestFailed) {
-        actionState.desiredStatus = latestConfirmedStatus;
+        scheduleItemStatusRetry(runItemId, requestError);
         renderChecklist();
         return;
       }
+      clearItemRetryTimer(actionState);
+      actionState.retryAttempt = 0;
       if (latestDesiredStatus && latestConfirmedStatus && latestDesiredStatus !== latestConfirmedStatus) {
-        applyOptimisticStatus(runItemId, latestDesiredStatus);
         processItemStatusChange(runItemId);
         return;
       }
