@@ -667,8 +667,12 @@
         if (elements.statsContent) {
           elements.statsContent.hidden = !isStats;
         }
-        if (isStats && !state.statsData) {
-          loadStats();
+        if (isStats) {
+          updateMonthLabel();
+          renderCalendar(state.statsYear, state.statsMonth, state.statsData ? state.statsData.calendar : []);
+          if (!state.statsData) {
+            loadStats();
+          }
         }
       }
 
@@ -721,9 +725,10 @@
         });
 
         var now = new Date();
-        var todayStr = now.getFullYear() + '-'
-          + String(now.getMonth() + 1).padStart(2, '0') + '-'
-          + String(now.getDate()).padStart(2, '0');
+        var tz = now.getMonth() + 1;
+        var td = now.getDate();
+        var todayStr = now.getFullYear() + '-' + (tz < 10 ? '0' + tz : tz) + '-' + (td < 10 ? '0' + td : td);
+        var mm = month < 10 ? '0' + month : String(month);
 
         elements.statsCalendar.innerHTML = '';
 
@@ -734,9 +739,8 @@
         }
 
         for (var d = 1; d <= daysInMonth; d++) {
-          var dateStr = year + '-'
-            + String(month).padStart(2, '0') + '-'
-            + String(d).padStart(2, '0');
+          var dd = d < 10 ? '0' + d : String(d);
+          var dateStr = year + '-' + mm + '-' + dd;
           var item = calMap[dateStr];
           var el = documentRef.createElement('div');
           el.textContent = String(d);
@@ -781,6 +785,7 @@
 
       async function loadStats() {
         updateMonthLabel();
+        renderCalendar(state.statsYear, state.statsMonth, []);
         try {
           var data = await api.getMonthlyStats(state.idToken, state.statsYear, state.statsMonth);
           state.statsData = data;
