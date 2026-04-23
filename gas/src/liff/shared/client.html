@@ -399,7 +399,14 @@
         newItemDescriptionInput: documentRef.getElementById('new-item-description-input'),
         newItemSortOrderInput: documentRef.getElementById('new-item-sort-order-input'),
         newItemRequiredInput: documentRef.getElementById('new-item-required-input'),
-        addTemplateItemButton: documentRef.getElementById('add-template-item-button')
+        addTemplateItemButton: documentRef.getElementById('add-template-item-button'),
+        progressCountChecked: documentRef.getElementById('progress-count-checked'),
+        progressCountTotal: documentRef.getElementById('progress-count-total'),
+        progressBarFill: documentRef.getElementById('progress-bar-fill'),
+        progressRingProgress: documentRef.getElementById('progress-ring-progress'),
+        progressRingLabel: documentRef.getElementById('progress-ring-label'),
+        hamburgerButton: documentRef.getElementById('hamburger-button'),
+        todoMenu: documentRef.getElementById('todo-menu')
       };
 
       function normalizeArray(value) {
@@ -594,6 +601,24 @@
         if (checklist.progress) {
           setText(elements.progressSummary, checklist.progress.checked + ' / ' + checklist.progress.total);
         }
+        renderProgressGauge(checklist.progress);
+      }
+
+      function renderProgressGauge(progress) {
+        var checked = progress && typeof progress.checked === 'number' ? progress.checked : 0;
+        var total = progress && typeof progress.total === 'number' ? progress.total : 0;
+        var pct = total > 0 ? Math.round((checked / total) * 100) : 0;
+        setText(elements.progressCountChecked, String(checked));
+        setText(elements.progressCountTotal, String(total));
+        if (elements.progressBarFill) {
+          elements.progressBarFill.style.width = pct + '%';
+        }
+        if (elements.progressRingProgress) {
+          var CIRCUMFERENCE = 201.06; // 2 * pi * 32
+          var offset = CIRCUMFERENCE * (1 - pct / 100);
+          elements.progressRingProgress.style.strokeDashoffset = String(offset);
+        }
+        setText(elements.progressRingLabel, pct + '%');
       }
 
       function rerenderRoleDependentSections() {
@@ -787,6 +812,10 @@
       }
 
       function renderChecklist(checklist) {
+        if (mode === 'user') {
+          renderChecklistUserMode(checklist);
+          return;
+        }
         clearList(elements.checklistItems);
         normalizeArray(checklist.items).forEach(function (item) {
           var listItem = documentRef.createElement('li');
@@ -849,9 +878,99 @@
         }
       }
 
+      function renderChecklistUserMode(checklist) {
+        if (!elements.checklistItems) {
+          return;
+        }
+        clearList(elements.checklistItems);
+        normalizeArray(checklist.items).forEach(function (item) {
+          var listItem = documentRef.createElement('li');
+          listItem.className = 'todo-item';
+          listItem.dataset.status = item.status;
+          if (pendingItemActions[item.id]) {
+            listItem.dataset.pending = 'true';
+          }
+          listItem.setAttribute('role', 'button');
+          listItem.setAttribute('tabindex', '0');
+          listItem.setAttribute(
+            'aria-label',
+            item.status === 'checked' ? item.title + ' (完了済み、タップで未完了に戻す)' : item.title + ' (未完了、タップで完了にする)'
+          );
+
+          var bullet = documentRef.createElement('span');
+          bullet.className = 'todo-bullet';
+          bullet.dataset.status = item.status;
+
+          var main = documentRef.createElement('div');
+          main.className = 'todo-main';
+
+          var titleEl = documentRef.createElement('div');
+          titleEl.className = 'todo-title-text';
+          titleEl.textContent = item.title;
+          main.appendChild(titleEl);
+
+          if (item.status === 'checked') {
+            var meta = documentRef.createElement('div');
+            meta.className = 'todo-meta';
+            var checkedBy = item.checkedBy || 'LINEユーザー';
+            var checkedAtText = formatCheckedAtJst(item.checkedAt);
+            meta.textContent = checkedAtText ? checkedBy + ' ・ ' + checkedAtText : checkedBy;
+            main.appendChild(meta);
+          }
+
+          var chevron = documentRef.createElement('span');
+          chevron.className = 'todo-chevron';
+          chevron.setAttribute('aria-hidden', 'true');
+          chevron.textContent = '›';
+
+          listItem.appendChild(bullet);
+          listItem.appendChild(main);
+          listItem.appendChild(chevron);
+
+          var toggleHandler = function () {
+            if (pendingItemActions[item.id]) {
+              return;
+            }
+            clearError();
+            clearStatus();
+            var current = findChecklistItemById(item.id);
+            if (!current) {
+              return;
+            }
+            if (current.status === 'unchecked' && api.checkItem) {
+              handleCheck(item.id);
+            } else if (canUncheck(current) && api.uncheckItem) {
+              handleUncheck(item.id);
+            }
+          };
+          listItem.addEventListener('click', toggleHandler);
+          listItem.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+              event.preventDefault();
+              toggleHandler();
+            }
+          });
+
+          elements.checklistItems.appendChild(listItem);
+        });
+
+        if (elements.checklistItems.children.length === 0) {
+          var empty = documentRef.createElement('li');
+          empty.className = 'todo-empty';
+          empty.textContent = '当日の項目はありません。';
+          elements.checklistItems.appendChild(empty);
+        }
+      }
+
       function renderIncomplete(incomplete) {
         state.incomplete = incomplete;
         setText(elements.incompleteSummary, '未完了 ' + normalizeArray(incomplete.items).length + ' 件');
+        if (!elements.incompleteItems) {
+          if (elements.notifyButton) {
+            elements.notifyButton.disabled = !canManageTemplates() || normalizeArray(incomplete.items).length === 0;
+          }
+          return;
+        }
         clearList(elements.incompleteItems);
 
         normalizeArray(incomplete.items).forEach(function (item) {
@@ -1276,6 +1395,44 @@
         bindChange(elements.templateItemSelect, function (event) {
           state.selectedTemplateItemId = event.target.value;
           renderTemplateItemEditor(getSelectedTemplate());
+        });
+        bindHamburgerMenu();
+      }
+
+      function setMenuOpen(open) {
+        if (!elements.hamburgerButton || !elements.todoMenu) {
+          return;
+        }
+        elements.hamburgerButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+        elements.hamburgerButton.setAttribute('aria-label', open ? 'メニューを閉じる' : 'メニューを開く');
+        elements.todoMenu.dataset.open = open ? 'true' : 'false';
+        elements.todoMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+      }
+
+      function bindHamburgerMenu() {
+        if (!elements.hamburgerButton || !elements.todoMenu || elements.hamburgerButton.__boundMenu) {
+          return;
+        }
+        elements.hamburgerButton.__boundMenu = true;
+        elements.hamburgerButton.addEventListener('click', function (event) {
+          event.stopPropagation();
+          var isOpen = elements.hamburgerButton.getAttribute('aria-expanded') === 'true';
+          setMenuOpen(!isOpen);
+        });
+        documentRef.addEventListener('click', function (event) {
+          if (elements.hamburgerButton.getAttribute('aria-expanded') !== 'true') {
+            return;
+          }
+          if (elements.todoMenu.contains(event.target) || elements.hamburgerButton.contains(event.target)) {
+            return;
+          }
+          setMenuOpen(false);
+        });
+        documentRef.addEventListener('keydown', function (event) {
+          if (event.key === 'Escape' && elements.hamburgerButton.getAttribute('aria-expanded') === 'true') {
+            setMenuOpen(false);
+            elements.hamburgerButton.focus();
+          }
         });
       }
 
