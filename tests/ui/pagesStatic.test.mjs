@@ -77,3 +77,13 @@ test('GitHub Pages の連打時は古い API 応答を UI に反映しない', a
     /var latestDesiredStatusAtResponse = actionState\.desiredStatus;\s*if\s*\(\s*latestDesiredStatusAtResponse &&\s*latestDesiredStatusAtResponse !== response\.item\.status\s*\)\s*\{\s*return Promise\.resolve\(\);\s*\}\s*applyChecklistItemUpdate\(response\.item\);/
   );
 });
+
+test('GitHub Pages の check/uncheck は Firestore 副作用完了を待たずに inFlight を解放する', async () => {
+  const appJs = await readFile('pages/app.js', 'utf8');
+
+  assert.doesNotMatch(appJs, /return emitRealtimeEvent\(response\.item\)\.then/);
+  assert.match(
+    appJs,
+    /applyChecklistItemUpdate\(response\.item\);\s*emitRealtimeEvent\(response\.item\)\.then\(function \(\) \{\s*return persistChecklistSnapshot\(\);\s*\}\)\.catch\(function \(error\) \{\s*console\.error\('\[sync\] failed to process post-check side effects', error\);/
+  );
+});

@@ -343,6 +343,23 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function updateRunItem(runItemId, changes) {
+      if (storage && typeof storage.updateRunItem === 'function') {
+        var runItems = getTableRowsUnsafe('checklist_run_items');
+        var runItemIndex = runItems.findIndex(function (row) {
+          return row.id === runItemId;
+        });
+        ns.assert(runItemIndex !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
+        var updatedRow = ns.clone(runItems[runItemIndex]);
+        Object.keys(changes).forEach(function (key) {
+          updatedRow[key] = changes[key];
+        });
+        validateRow('checklist_run_items', updatedRow);
+        storage.updateRunItem(runItemId, ns.clone(updatedRow));
+        runItems[runItemIndex] = ns.clone(updatedRow);
+        cachedState.checklist_run_items = runItems;
+        loadedSheetFlags.checklist_run_items = true;
+        return ns.clone(updatedRow);
+      }
       return updateRow('checklist_run_items', runItemId, function (row) {
         Object.keys(changes).forEach(function (key) {
           row[key] = changes[key];
@@ -1073,6 +1090,33 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return cloneTableRows(loadedRows);
     }
 
+    function updateRunItem(runItemId, updatedRunItem) {
+      var spreadsheet = getSpreadsheet();
+      var runItemsSheet = spreadsheet.getSheetByName('checklist_run_items') || spreadsheet.insertSheet('checklist_run_items');
+      ensureSheetHeader(runItemsSheet, 'checklist_run_items');
+
+      var runItemRow = findDataRowById(runItemsSheet, 'checklist_run_items', runItemId);
+      runItemsSheet
+        .getRange(runItemRow, 1, 1, ns.SHEET_DEFINITIONS.checklist_run_items.length)
+        .setValues([buildRowValues('checklist_run_items', updatedRunItem)]);
+
+      var runItems = loadTable('checklist_run_items');
+      var runItemIndex = runItems.findIndex(function (row) {
+        return row.id === runItemId;
+      });
+      ns.assert(runItemIndex !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
+      runItems[runItemIndex] = ns.clone(updatedRunItem);
+      tableStateCache.checklist_run_items = cloneTableRows(runItems);
+
+      var cache = getScriptCache();
+      if (lastLoadedState) {
+        lastLoadedState.checklist_run_items = cloneTableRows(runItems);
+        writeStateToCache(cache, lastLoadedState);
+        return;
+      }
+      writeTableToCache(cache, 'checklist_run_items', runItems);
+    }
+
     function updateRunItemWithLog(runItemId, updatedRunItem, log) {
       var spreadsheet = getSpreadsheet();
       var runItemsSheet = spreadsheet.getSheetByName('checklist_run_items') || spreadsheet.insertSheet('checklist_run_items');
@@ -1192,6 +1236,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       load: load,
       loadTable: loadTable,
       save: save,
+      updateRunItem: updateRunItem,
       updateRunItemWithLog: updateRunItemWithLog
     };
   };

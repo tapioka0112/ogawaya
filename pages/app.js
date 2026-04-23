@@ -991,9 +991,12 @@
         return Promise.resolve();
       }
       applyChecklistItemUpdate(response.item);
-      return emitRealtimeEvent(response.item).then(function () {
+      emitRealtimeEvent(response.item).then(function () {
         return persistChecklistSnapshot();
+      }).catch(function (error) {
+        console.error('[sync] failed to process post-check side effects', error);
       });
+      return Promise.resolve();
     }).catch(function (error) {
       requestFailed = true;
       applyChecklistItemUpdate(actionState.confirmedItem);

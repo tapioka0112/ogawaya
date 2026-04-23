@@ -395,6 +395,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       ].join('\n');
     }
 
+    function logCheckMutationBreakdown(eventName, startedAt, authMs, storageWriteMs, idempotent) {
+      ns.logEvent('info', eventName, {
+        authMs: authMs,
+        storageWriteMs: storageWriteMs,
+        totalMs: nowMillis() - startedAt,
+        idempotent: idempotent === true
+      });
+    }
+
     return {
       getCurrentUser: requireAuthenticatedUser,
 
@@ -453,11 +462,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       checkItem: function (query, runItemId, body) {
+        var startedAt = nowMillis();
         var currentUser = requireAuthenticatedWriteUser(query);
+        var authMs = nowMillis() - startedAt;
         var scopedRunItem = getRunItemWithScope(runItemId, currentUser.user);
         var item = scopedRunItem.item;
 
         if (item.status === ns.ITEM_STATUS.CHECKED) {
+          logCheckMutationBreakdown('api.check_item.breakdown', startedAt, authMs, 0, true);
           return {
             item: buildRunItemResponse(item)
           };
@@ -471,7 +483,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           checked_at: now,
           updated_at: now
         };
+        var writeStartedAt = nowMillis();
         var updatedItem = repository.updateRunItem(item.id, changes);
+        var storageWriteMs = nowMillis() - writeStartedAt;
+        logCheckMutationBreakdown('api.check_item.breakdown', startedAt, authMs, storageWriteMs, false);
         return {
           item: buildRunItemResponse(updatedItem),
           comment: body.comment || ''
@@ -479,11 +494,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
 
       uncheckItem: function (query, runItemId, body) {
+        var startedAt = nowMillis();
         var currentUser = requireAuthenticatedWriteUser(query);
+        var authMs = nowMillis() - startedAt;
         var scopedRunItem = getRunItemWithScope(runItemId, currentUser.user);
         var item = scopedRunItem.item;
 
         if (item.status === ns.ITEM_STATUS.UNCHECKED) {
+          logCheckMutationBreakdown('api.uncheck_item.breakdown', startedAt, authMs, 0, true);
           return {
             item: buildRunItemResponse(item)
           };
@@ -497,7 +515,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           checked_at: '',
           updated_at: now
         };
+        var writeStartedAt = nowMillis();
         var updatedItem = repository.updateRunItem(item.id, changes);
+        var storageWriteMs = nowMillis() - writeStartedAt;
+        logCheckMutationBreakdown('api.uncheck_item.breakdown', startedAt, authMs, storageWriteMs, false);
         return {
           item: buildRunItemResponse(updatedItem),
           reason: body.reason || ''
