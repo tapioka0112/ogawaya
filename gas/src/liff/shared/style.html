@@ -808,4 +808,238 @@
       padding: 14px 16px;
     }
   }
+
+  /* ===== 統計タブ ===== */
+
+  .tab-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: var(--u-surface);
+    border-top: 1px solid var(--u-line);
+    display: flex;
+    z-index: 100;
+    display: none;
+  }
+
+  body.user-mode .tab-bar {
+    display: flex;
+  }
+
+  .tab-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    font-size: 10px;
+    font-family: inherit;
+    color: var(--u-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: color 0.15s;
+  }
+
+  .tab-btn--active {
+    color: var(--u-accent);
+  }
+
+  .tab-btn svg {
+    display: block;
+  }
+
+  #stats-content {
+    padding: 8px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .stats-page-header {
+    padding: 4px 0 4px;
+  }
+
+  .stats-page-header h2 {
+    margin: 0 0 4px;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--u-ink);
+  }
+
+  .stats-page-header p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--u-muted);
+  }
+
+  .stats-card {
+    background: var(--u-surface);
+    border-radius: var(--u-radius);
+    padding: 16px;
+    box-shadow: var(--u-shadow);
+  }
+
+  .stats-card-heading {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--u-ink);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .stats-card-heading svg {
+    color: var(--u-accent);
+    flex-shrink: 0;
+  }
+
+  .stats-donut-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .stats-donut-wrap {
+    position: relative;
+    flex-shrink: 0;
+    width: 80px;
+    height: 80px;
+  }
+
+  .stats-donut-track {
+    stroke: rgba(31, 43, 37, 0.1);
+  }
+
+  .stats-donut-progress {
+    stroke: var(--u-accent);
+    transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .stats-donut-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--u-ink);
+    pointer-events: none;
+  }
+
+  .stats-donut-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .stats-info-main {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--u-ink);
+    line-height: 1.1;
+  }
+
+  .stats-info-main em {
+    font-style: normal;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--u-muted);
+    margin-left: 2px;
+  }
+
+  .stats-info-sub {
+    font-size: 12px;
+    color: var(--u-muted);
+    line-height: 1.4;
+  }
+
+  .stats-info-sub strong {
+    color: var(--u-accent-strong);
+    font-weight: 600;
+  }
+
+  .stats-cal-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .stats-cal-nav-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 22px;
+    color: var(--u-accent);
+    padding: 4px 10px;
+    border-radius: 8px;
+    line-height: 1;
+  }
+
+  .stats-cal-nav-btn:hover {
+    background: var(--u-accent-soft);
+  }
+
+  #stats-month-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--u-ink);
+  }
+
+  .stats-cal-grid-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    margin-bottom: 4px;
+  }
+
+  .stats-cal-dow {
+    text-align: center;
+    font-size: 10px;
+    color: var(--u-muted);
+    padding: 2px 0;
+  }
+
+  .stats-cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+  }
+
+  .stats-cal-day {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--u-muted);
+  }
+
+  .stats-cal-day--achieved {
+    background: var(--u-accent);
+    color: #fff;
+    font-weight: 700;
+  }
+
+  .stats-cal-day--partial {
+    background: var(--u-accent-soft);
+    color: var(--u-accent-strong);
+    font-weight: 600;
+  }
+
+  .stats-cal-day--today {
+    outline: 2px solid var(--u-accent);
+    outline-offset: 1px;
+  }
 </style>

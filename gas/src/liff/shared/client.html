@@ -161,6 +161,9 @@
         },
         notifyIncomplete: function (idToken, runId) {
           return request('POST', '/api/admin/checklists/' + encodeURIComponent(runId) + '/notify-incomplete', idToken, {});
+        },
+        getMonthlyStats: function (idToken, year, month) {
+          return request('GET', '/api/stats/monthly', idToken, {}, { year: String(year), month: String(month) });
         }
       };
     }
@@ -357,7 +360,10 @@
         incomplete: null,
         templates: [],
         selectedTemplateId: '',
-        selectedTemplateItemId: ''
+        selectedTemplateItemId: '',
+        statsYear: new Date().getFullYear(),
+        statsMonth: new Date().getMonth() + 1,
+        statsData: null
       };
       var pendingItemActions = {};
       var documentRef = options.document;
@@ -406,7 +412,21 @@
         progressRingProgress: documentRef.getElementById('progress-ring-progress'),
         progressRingLabel: documentRef.getElementById('progress-ring-label'),
         hamburgerButton: documentRef.getElementById('hamburger-button'),
-        todoMenu: documentRef.getElementById('todo-menu')
+        todoMenu: documentRef.getElementById('todo-menu'),
+        tabHome: documentRef.getElementById('tab-home'),
+        tabStats: documentRef.getElementById('tab-stats'),
+        statsContent: documentRef.getElementById('stats-content'),
+        statsOverallProgress: documentRef.getElementById('stats-overall-progress'),
+        statsOverallPct: documentRef.getElementById('stats-overall-pct'),
+        statsOverallInfo: documentRef.getElementById('stats-overall-info'),
+        statsMineProgress: documentRef.getElementById('stats-mine-progress'),
+        statsMinePct: documentRef.getElementById('stats-mine-pct'),
+        statsMineInfo: documentRef.getElementById('stats-mine-info'),
+        statsCalendar: documentRef.getElementById('stats-calendar'),
+        statsCalGridHeader: documentRef.getElementById('stats-cal-grid-header'),
+        statsMonthLabel: documentRef.getElementById('stats-month-label'),
+        statsPrevMonth: documentRef.getElementById('stats-prev-month'),
+        statsNextMonth: documentRef.getElementById('stats-next-month')
       };
 
       function normalizeArray(value) {
@@ -619,6 +639,155 @@
           elements.progressRingProgress.style.strokeDashoffset = String(offset);
         }
         setText(elements.progressRingLabel, pct + '%');
+      }
+
+      function switchTab(tab) {
+        var isStats = tab === 'stats';
+        if (elements.tabHome) {
+          if (isStats) {
+            elements.tabHome.classList.remove('tab-btn--active');
+          } else {
+            elements.tabHome.classList.add('tab-btn--active');
+          }
+        }
+        if (elements.tabStats) {
+          if (isStats) {
+            elements.tabStats.classList.add('tab-btn--active');
+          } else {
+            elements.tabStats.classList.remove('tab-btn--active');
+          }
+        }
+        var progressCard = documentRef.querySelector && documentRef.querySelector('.progress-card');
+        if (progressCard) {
+          progressCard.hidden = isStats;
+        }
+        if (elements.mainContent) {
+          elements.mainContent.hidden = isStats;
+        }
+        if (elements.statsContent) {
+          elements.statsContent.hidden = !isStats;
+        }
+        if (isStats && !state.statsData) {
+          loadStats();
+        }
+      }
+
+      function updateMonthLabel() {
+        setText(elements.statsMonthLabel, state.statsYear + '年' + state.statsMonth + '月');
+      }
+
+      function renderDonutChart(progressEl, labelEl, pct) {
+        var CIRCUMFERENCE = 201.06;
+        var safePct = Math.max(0, Math.min(100, isFinite(pct) ? Math.round(pct) : 0));
+        if (progressEl) {
+          progressEl.style.strokeDashoffset = String(CIRCUMFERENCE * (1 - safePct / 100));
+        }
+        setText(labelEl, safePct + '%');
+      }
+
+      function renderStatsInfoContent(infoEl, lines) {
+        if (!infoEl) {
+          return;
+        }
+        infoEl.innerHTML = '';
+        lines.forEach(function (line) {
+          var div = documentRef.createElement('div');
+          div.className = line.className || '';
+          div.innerHTML = line.html;
+          infoEl.appendChild(div);
+        });
+      }
+
+      function renderCalendar(year, month, calendarItems) {
+        if (!elements.statsCalendar) {
+          return;
+        }
+        if (elements.statsCalGridHeader) {
+          elements.statsCalGridHeader.innerHTML = '';
+          ['日', '月', '火', '水', '木', '金', '土'].forEach(function (dow) {
+            var el = documentRef.createElement('div');
+            el.className = 'stats-cal-dow';
+            el.textContent = dow;
+            elements.statsCalGridHeader.appendChild(el);
+          });
+        }
+
+        var daysInMonth = new Date(year, month, 0).getDate();
+        var firstDow = new Date(year, month - 1, 1).getDay();
+
+        var calMap = {};
+        (calendarItems || []).forEach(function (item) {
+          calMap[item.date] = item;
+        });
+
+        var now = new Date();
+        var todayStr = now.getFullYear() + '-'
+          + String(now.getMonth() + 1).padStart(2, '0') + '-'
+          + String(now.getDate()).padStart(2, '0');
+
+        elements.statsCalendar.innerHTML = '';
+
+        for (var blank = 0; blank < firstDow; blank++) {
+          var blankEl = documentRef.createElement('div');
+          blankEl.className = 'stats-cal-day';
+          elements.statsCalendar.appendChild(blankEl);
+        }
+
+        for (var d = 1; d <= daysInMonth; d++) {
+          var dateStr = year + '-'
+            + String(month).padStart(2, '0') + '-'
+            + String(d).padStart(2, '0');
+          var item = calMap[dateStr];
+          var el = documentRef.createElement('div');
+          el.textContent = String(d);
+          var classes = ['stats-cal-day'];
+          if (item) {
+            if (item.achieved) {
+              classes.push('stats-cal-day--achieved');
+            } else if (item.total > 0) {
+              classes.push('stats-cal-day--partial');
+            }
+          }
+          if (dateStr === todayStr) {
+            classes.push('stats-cal-day--today');
+          }
+          el.className = classes.join(' ');
+          elements.statsCalendar.appendChild(el);
+        }
+      }
+
+      function renderStats() {
+        var data = state.statsData;
+        if (!data) {
+          return;
+        }
+        var overallPct = data.totalDays > 0 ? (data.achievedDays / data.totalDays) * 100 : 0;
+        renderDonutChart(elements.statsOverallProgress, elements.statsOverallPct, overallPct);
+        renderStatsInfoContent(elements.statsOverallInfo, [
+          { className: 'stats-info-main', html: String(data.achievedDays) + '<em>日達成</em>' },
+          { className: 'stats-info-sub', html: '今月は <strong>' + data.achievedDays + '/' + data.totalDays + '日</strong> でタスク達成' }
+        ]);
+
+        var minePct = data.totalItems > 0 ? (data.myCheckedItems / data.totalItems) * 100 : 0;
+        renderDonutChart(elements.statsMineProgress, elements.statsMinePct, minePct);
+        renderStatsInfoContent(elements.statsMineInfo, [
+          { className: 'stats-info-main', html: String(data.myCheckedItems) + '<em>件 / ' + data.totalItems + '件</em>' },
+          { className: 'stats-info-sub', html: '達成率 <strong>' + Math.round(minePct) + '%</strong>' }
+        ]);
+
+        updateMonthLabel();
+        renderCalendar(data.year, data.month, data.calendar);
+      }
+
+      async function loadStats() {
+        updateMonthLabel();
+        try {
+          var data = await api.getMonthlyStats(state.idToken, state.statsYear, state.statsMonth);
+          state.statsData = data;
+          renderStats();
+        } catch (error) {
+          setError(error && error.message ? error.message : '統計データの取得に失敗しました');
+        }
       }
 
       function rerenderRoleDependentSections() {
@@ -1397,6 +1566,20 @@
           renderTemplateItemEditor(getSelectedTemplate());
         });
         bindHamburgerMenu();
+        bindButton(elements.tabHome, function () { switchTab('home'); });
+        bindButton(elements.tabStats, function () { switchTab('stats'); });
+        bindButton(elements.statsPrevMonth, function () {
+          state.statsMonth -= 1;
+          if (state.statsMonth < 1) { state.statsMonth = 12; state.statsYear -= 1; }
+          state.statsData = null;
+          loadStats();
+        });
+        bindButton(elements.statsNextMonth, function () {
+          state.statsMonth += 1;
+          if (state.statsMonth > 12) { state.statsMonth = 1; state.statsYear += 1; }
+          state.statsData = null;
+          loadStats();
+        });
       }
 
       function setMenuOpen(open) {

@@ -96,7 +96,85 @@
       <section class="todo-list-wrap" id="main-content">
         <ul class="todo-list" id="checklist-items"></ul>
       </section>
+
+      <section id="stats-content" hidden>
+        <div class="stats-page-header">
+          <h2>統計</h2>
+          <p>あなたのタスク達成状況を確認しましょう</p>
+        </div>
+        <div class="stats-card">
+          <div class="stats-card-heading">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21.21 15.89A10 10 0 1 1 8 2.83" /><path d="M22 12A10 10 0 0 0 12 2v10z" />
+            </svg>
+            <span>今月のタスクの達成状況</span>
+          </div>
+          <div class="stats-donut-row">
+            <div class="stats-donut-wrap">
+              <svg class="stats-donut" viewBox="0 0 80 80" width="80" height="80" aria-hidden="true">
+                <circle class="stats-donut-track" cx="40" cy="40" r="32" fill="none" stroke-width="8" />
+                <circle
+                  class="stats-donut-progress"
+                  id="stats-overall-progress"
+                  cx="40" cy="40" r="32" fill="none" stroke-width="8"
+                  stroke-linecap="round" transform="rotate(-90 40 40)"
+                  stroke-dasharray="201.06" stroke-dashoffset="201.06"
+                />
+              </svg>
+              <span class="stats-donut-label" id="stats-overall-pct">0%</span>
+            </div>
+            <div class="stats-donut-info" id="stats-overall-info"></div>
+          </div>
+        </div>
+        <div class="stats-card">
+          <div class="stats-card-heading">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
+            </svg>
+            <span>達成したタスク数</span>
+          </div>
+          <div class="stats-donut-row">
+            <div class="stats-donut-wrap">
+              <svg class="stats-donut" viewBox="0 0 80 80" width="80" height="80" aria-hidden="true">
+                <circle class="stats-donut-track" cx="40" cy="40" r="32" fill="none" stroke-width="8" />
+                <circle
+                  class="stats-donut-progress"
+                  id="stats-mine-progress"
+                  cx="40" cy="40" r="32" fill="none" stroke-width="8"
+                  stroke-linecap="round" transform="rotate(-90 40 40)"
+                  stroke-dasharray="201.06" stroke-dashoffset="201.06"
+                />
+              </svg>
+              <span class="stats-donut-label" id="stats-mine-pct">0%</span>
+            </div>
+            <div class="stats-donut-info" id="stats-mine-info"></div>
+          </div>
+        </div>
+        <div class="stats-card">
+          <div class="stats-cal-nav">
+            <button class="stats-cal-nav-btn" id="stats-prev-month" type="button" aria-label="前月">&#8249;</button>
+            <span id="stats-month-label"></span>
+            <button class="stats-cal-nav-btn" id="stats-next-month" type="button" aria-label="翌月">&#8250;</button>
+          </div>
+          <div class="stats-cal-grid-header" id="stats-cal-grid-header"></div>
+          <div class="stats-cal-grid" id="stats-calendar"></div>
+        </div>
+      </section>
     </main>
+    <nav class="tab-bar" aria-label="画面タブ">
+      <button class="tab-btn tab-btn--active" id="tab-home" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+        </svg>
+        ホーム
+      </button>
+      <button class="tab-btn" id="tab-stats" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
+        </svg>
+        統計
+      </button>
+    </nav>
     <?!= HtmlService.createHtmlOutputFromFile('src/liff/shared/client').getContent(); ?>
     <script>
       (function () {
