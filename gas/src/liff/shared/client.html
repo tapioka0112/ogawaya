@@ -262,11 +262,10 @@
             if (!global.liff || !normalizedLiffId || typeof global.liff.init !== 'function') {
               return buildAnonymousContext();
             }
-            var anonymousPreContext = buildRuntimeContext();
             try {
               await global.liff.init({
                 liffId: normalizedLiffId,
-                withLoginOnExternalBrowser: !anonymousPreContext.isInClient
+                withLoginOnExternalBrowser: true
               });
             } catch (error) {
               return buildAnonymousContext();
@@ -288,10 +287,9 @@
             throw new Error('LIFF ID が未設定です');
           }
 
-          var preContext = buildRuntimeContext();
           await global.liff.init({
             liffId: normalizedLiffId,
-            withLoginOnExternalBrowser: !preContext.isInClient
+            withLoginOnExternalBrowser: true
           });
           var postContext = buildRuntimeContext();
           if (typeof global.liff.isLoggedIn === 'function' && !global.liff.isLoggedIn()) {
