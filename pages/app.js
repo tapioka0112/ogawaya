@@ -216,6 +216,46 @@
     return item;
   }
 
+  function formatCheckedAtJst(value) {
+    if (!value) {
+      return '';
+    }
+    var date = new Date(value);
+    if (isNaN(date.getTime())) {
+      return String(value);
+    }
+    if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') {
+      var jstDate = new Date(date.getTime() + (9 * 60 * 60 * 1000));
+      var fallbackMinute = jstDate.getUTCMinutes();
+      return (
+        (jstDate.getUTCMonth() + 1) +
+        '月' +
+        jstDate.getUTCDate() +
+        '日' +
+        jstDate.getUTCHours() +
+        '時' +
+        (fallbackMinute < 10 ? '0' + fallbackMinute : String(fallbackMinute)) +
+        '分'
+      );
+    }
+    var formatter = new Intl.DateTimeFormat('ja-JP', {
+      timeZone: 'Asia/Tokyo',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: false
+    });
+    var values = {};
+    formatter.formatToParts(date).forEach(function (part) {
+      values[part.type] = part.value;
+    });
+    if (!values.month || !values.day || !values.hour || !values.minute) {
+      return String(value);
+    }
+    return values.month + '月' + values.day + '日' + values.hour + '時' + values.minute + '分';
+  }
+
   function recomputeProgress() {
     if (!state.checklist) {
       return;
@@ -396,9 +436,13 @@
 
       var meta = document.createElement('div');
       meta.className = 'item-meta';
-      meta.textContent = item.status === 'checked'
-        ? (item.checkedBy || 'LINEユーザー') + ' / ' + (item.checkedAt || '')
-        : '未チェック';
+      if (item.status === 'checked') {
+        var checkedBy = item.checkedBy || 'LINEユーザー';
+        var checkedAtText = formatCheckedAtJst(item.checkedAt);
+        meta.textContent = checkedAtText ? checkedBy + ' / ' + checkedAtText : checkedBy;
+      } else {
+        meta.textContent = '未チェック';
+      }
 
       var actions = document.createElement('div');
       actions.className = 'button-row item-actions';
