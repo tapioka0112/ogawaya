@@ -68,7 +68,8 @@ function doPost(e) {
   if (request.path === '/webhook' || request.path === '/api/webhook') {
     return Ogawaya.toTextOutput(app.handleWebhook({
       body: e.postData.contents,
-      signature: (e.parameter && e.parameter.signature) || ''
+      signature: (e.parameter && e.parameter.signature) || '',
+      token: (e.parameter && e.parameter.token) || ''
     }));
   }
   return Ogawaya.toTextOutput(app.handleApiRequest(request));
