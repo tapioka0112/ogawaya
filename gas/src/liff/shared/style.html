@@ -695,10 +695,37 @@
 
   .user-mode .todo-item[data-pending='true'] {
     opacity: 0.55;
-    pointer-events: none;
+    pointer-events: auto;
+  }
+
+  .user-mode .todo-item:focus-visible,
+  .user-mode .todo-check-button:focus-visible {
+    outline: 3px solid rgba(244, 122, 57, 0.28);
+    outline-offset: 3px;
+  }
+
+  .user-mode .todo-check-button {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    margin: -5px 0 -5px -4px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    transition: background-color 160ms ease, transform 120ms ease;
+  }
+
+  .user-mode .todo-check-button:active {
+    transform: scale(0.94);
   }
 
   .user-mode .todo-bullet {
+    display: block;
     flex: 0 0 24px;
     width: 24px;
     height: 24px;
@@ -765,6 +792,49 @@
     text-align: center;
     color: var(--u-muted);
     font-size: 14px;
+  }
+
+  .user-mode .task-detail-card {
+    margin-top: 14px;
+    padding: 18px;
+    background:
+      linear-gradient(135deg, rgba(244, 122, 57, 0.14), rgba(255, 255, 255, 0) 52%),
+      var(--u-surface);
+    border: 1px solid rgba(244, 122, 57, 0.18);
+    border-radius: var(--u-radius);
+    box-shadow: var(--u-shadow);
+  }
+
+  .user-mode .task-detail-card[hidden] {
+    display: none;
+  }
+
+  .user-mode .task-detail-label {
+    color: var(--u-accent-strong);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+
+  .user-mode .task-detail-title {
+    margin: 6px 0 8px;
+    color: var(--u-ink);
+    font-size: 20px;
+    line-height: 1.35;
+  }
+
+  .user-mode .task-detail-description {
+    margin: 0;
+    color: var(--u-ink);
+    font-size: 15px;
+    line-height: 1.75;
+    white-space: pre-wrap;
+  }
+
+  .user-mode .task-detail-meta {
+    margin-top: 12px;
+    color: var(--u-muted);
+    font-size: 12px;
   }
 
   .user-mode .error-box,

@@ -163,12 +163,37 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   }
 
-  function buildRunItemResponse(item) {
+  function buildTemplateItemDescriptionMap(repository, items) {
+    var neededIds = {};
+    (items || []).forEach(function (item) {
+      var templateItemId = String(item.template_item_id || '').trim();
+      if (templateItemId) {
+        neededIds[templateItemId] = true;
+      }
+    });
+    if (Object.keys(neededIds).length === 0) {
+      return {};
+    }
+
+    var descriptions = {};
+    repository.listTable('checklist_template_items').forEach(function (templateItem) {
+      if (neededIds[templateItem.id]) {
+        descriptions[templateItem.id] = String(templateItem.description || '');
+      }
+    });
+    return descriptions;
+  }
+
+  function buildRunItemResponse(item, descriptionByTemplateItemId) {
     var checkedByName = String(item.checked_by_name || '').trim();
     var checkedByUserId = String(item.checked_by || '').trim();
+    var templateItemId = String(item.template_item_id || '').trim();
     return {
       id: item.id,
       title: item.title,
+      description: descriptionByTemplateItemId && templateItemId
+        ? String(descriptionByTemplateItemId[templateItemId] || '')
+        : '',
       status: item.status,
       checkedBy: checkedByName || null,
       checkedByUserId: checkedByUserId || null,
@@ -177,10 +202,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   }
 
+  function buildSingleRunItemResponse(repository, item) {
+    return buildRunItemResponse(item, buildTemplateItemDescriptionMap(repository, [item]));
+  }
+
   function buildChecklistResponse(repository, currentUser, run, items) {
     var checkedCount = items.filter(function (item) {
       return item.status === ns.ITEM_STATUS.CHECKED;
     }).length;
+    var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, items);
 
     return {
       runId: run.id,
@@ -194,7 +224,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         checked: checkedCount
       },
       items: items.map(function (item) {
-        return buildRunItemResponse(item);
+        return buildRunItemResponse(item, descriptionByTemplateItemId);
       })
     };
   }
@@ -648,6 +678,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       var checkedItems = runItems.filter(function (item) {
         return item.status === ns.ITEM_STATUS.CHECKED;
       }).length;
+      var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, runItems);
       return {
         date: targetDate,
         runCount: runs.length,
@@ -655,7 +686,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         checked: checkedItems,
         achieved: runItems.length > 0 && checkedItems === runItems.length,
         items: runItems.map(function (item) {
-          return buildRunItemResponse(item);
+          return buildRunItemResponse(item, descriptionByTemplateItemId);
         })
       };
     }
@@ -805,12 +836,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     function buildAdminRunResponse(store, targetDate, run, items) {
+      var runItems = items || [];
+      var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, runItems);
       return {
         runId: run ? run.id : '',
         targetDate: targetDate,
         status: run ? run.status : ns.RUN_STATUS.OPEN,
         storeName: store.name,
-        items: (items || []).map(buildRunItemResponse)
+        items: runItems.map(function (item) {
+          return buildRunItemResponse(item, descriptionByTemplateItemId);
+        })
       };
     }
 
@@ -1083,7 +1118,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           }
         ])[0];
         return {
-          item: buildRunItemResponse(createdItem)
+          item: buildRunItemResponse(createdItem, buildTemplateItemDescriptionMap(repository, [createdItem]))
         };
       },
 
@@ -1128,9 +1163,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           };
         });
         var insertedItems = newItems.length > 0 ? repository.createRunItems(newItems) : [];
+        var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, insertedItems);
         return {
           insertedCount: insertedItems.length,
-          items: insertedItems.map(buildRunItemResponse)
+          items: insertedItems.map(function (item) {
+            return buildRunItemResponse(item, descriptionByTemplateItemId);
+          })
         };
       },
 
@@ -1168,7 +1206,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         if (item.status === ns.ITEM_STATUS.CHECKED) {
           logCheckMutationBreakdown('api.check_item.breakdown', startedAt, authMs, 0, true);
           return {
-            item: buildRunItemResponse(item)
+            item: buildSingleRunItemResponse(repository, item)
           };
         }
 
@@ -1185,7 +1223,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var storageWriteMs = nowMillis() - writeStartedAt;
         logCheckMutationBreakdown('api.check_item.breakdown', startedAt, authMs, storageWriteMs, false);
         return {
-          item: buildRunItemResponse(updatedItem),
+          item: buildSingleRunItemResponse(repository, updatedItem),
           comment: body.comment || ''
         };
       },
@@ -1200,7 +1238,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         if (item.status === ns.ITEM_STATUS.UNCHECKED) {
           logCheckMutationBreakdown('api.uncheck_item.breakdown', startedAt, authMs, 0, true);
           return {
-            item: buildRunItemResponse(item)
+            item: buildSingleRunItemResponse(repository, item)
           };
         }
 
@@ -1217,7 +1255,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var storageWriteMs = nowMillis() - writeStartedAt;
         logCheckMutationBreakdown('api.uncheck_item.breakdown', startedAt, authMs, storageWriteMs, false);
         return {
-          item: buildRunItemResponse(updatedItem),
+          item: buildSingleRunItemResponse(repository, updatedItem),
           reason: body.reason || ''
         };
       },

@@ -380,6 +380,7 @@
     statsMonthStoreId: '',
     statsMonthlySnapshots: {},
     activeTab: 'home',
+    selectedTaskDetailId: '',
     authUserContext: {
       userId: '',
       name: ''
@@ -399,6 +400,10 @@
     progressRingProgress: document.getElementById('progress-ring-progress'),
     progressRingLabel: document.getElementById('progress-ring-label'),
     checklistItems: document.getElementById('checklist-items'),
+    taskDetailPanel: document.getElementById('task-detail-panel'),
+    taskDetailTitle: document.getElementById('task-detail-title'),
+    taskDetailDescription: document.getElementById('task-detail-description'),
+    taskDetailMeta: document.getElementById('task-detail-meta'),
     incompleteSummary: document.getElementById('incomplete-summary'),
     incompleteItems: document.getElementById('incomplete-items'),
     refreshButton: document.getElementById('refresh-button'),
@@ -1099,6 +1104,7 @@
     return {
       id: item.id,
       title: item.title,
+      description: item.description,
       status: item.status,
       checkedBy: item.checkedBy,
       checkedByUserId: item.checkedByUserId,
@@ -1128,6 +1134,7 @@
       return {
         id: String(item.id || ''),
         title: String(item.title || ''),
+        description: String(item.description || ''),
         status: item.status === 'checked' ? 'checked' : 'unchecked',
         checkedBy: item.checkedBy ? String(item.checkedBy) : null,
         checkedByUserId: item.checkedByUserId ? String(item.checkedByUserId) : null,
@@ -1180,6 +1187,7 @@
     recomputeProgress();
     renderOverview();
     renderChecklist();
+    renderSelectedTaskDetail({ scroll: false });
     renderIncomplete();
     rememberStoreIdFromChecklist(state.checklist);
     if (applyOptions.restartSync !== false) {
@@ -1279,8 +1287,12 @@
     target.checkedByUserId = updatedItem.checkedByUserId;
     target.checkedAt = updatedItem.checkedAt;
     target.updatedAt = updatedItem.updatedAt;
+    if (Object.prototype.hasOwnProperty.call(updatedItem, 'description')) {
+      target.description = updatedItem.description;
+    }
     recomputeProgress();
     renderChecklist();
+    renderSelectedTaskDetail({ scroll: false });
     renderOverview();
     renderIncomplete();
     onChecklistMutation(previousItem, cloneChecklistItem(target));
@@ -1290,6 +1302,7 @@
     return {
       id: item.id,
       title: item.title,
+      description: item.description,
       status: 'checked',
       checkedBy: state.checklist && state.checklist.currentUser ? state.checklist.currentUser.name : 'LINEユーザー',
       checkedByUserId: state.checklist && state.checklist.currentUser ? state.checklist.currentUser.userId : '',
@@ -1302,6 +1315,7 @@
     return {
       id: item.id,
       title: item.title,
+      description: item.description,
       status: 'unchecked',
       checkedBy: null,
       checkedByUserId: null,
@@ -1460,6 +1474,7 @@
     return {
       id: String(item && item.id ? item.id : ''),
       title: String(item && item.title ? item.title : ''),
+      description: String(item && item.description ? item.description : ''),
       status: String(item && item.status ? item.status : 'unchecked') === 'checked' ? 'checked' : 'unchecked',
       checkedBy: item && item.checkedBy ? String(item.checkedBy) : null,
       checkedByUserId: item && item.checkedByUserId ? String(item.checkedByUserId) : null,
@@ -1577,6 +1592,7 @@
         return {
           id: String(item.id || ''),
           title: String(item.title || ''),
+          description: String(item.description || ''),
           status: String(item.status || 'unchecked'),
           checkedBy: item.checkedBy ? String(item.checkedBy) : '',
           checkedByUserId: item.checkedByUserId ? String(item.checkedByUserId) : '',
@@ -1993,10 +2009,74 @@
     setText(elements.progressRingLabel, pct + '%');
   }
 
+  function buildTaskDetailMetaText(item) {
+    if (!item) {
+      return '';
+    }
+    if (item.status !== 'checked') {
+      return '未完了';
+    }
+    var checkedBy = item.checkedBy || 'LINEユーザー';
+    var checkedAtText = formatCheckedAtJst(item.checkedAt);
+    return checkedAtText ? checkedBy + ' ・ ' + checkedAtText : checkedBy;
+  }
+
+  function hideTaskDetail() {
+    state.selectedTaskDetailId = '';
+    if (!elements.taskDetailPanel) {
+      return;
+    }
+    elements.taskDetailPanel.hidden = true;
+    delete elements.taskDetailPanel.dataset.status;
+  }
+
+  function renderTaskDetail(item, options) {
+    if (!elements.taskDetailPanel || !item) {
+      return;
+    }
+    var renderOptions = options || {};
+    setText(elements.taskDetailTitle, item.title);
+    setText(
+      elements.taskDetailDescription,
+      item.description ? String(item.description) : 'このタスクには詳細が登録されていません。'
+    );
+    setText(elements.taskDetailMeta, buildTaskDetailMetaText(item));
+    elements.taskDetailPanel.dataset.status = item.status;
+    elements.taskDetailPanel.hidden = false;
+    if (renderOptions.scroll !== false && typeof elements.taskDetailPanel.scrollIntoView === 'function') {
+      elements.taskDetailPanel.scrollIntoView({
+        block: 'start',
+        behavior: 'smooth'
+      });
+    }
+  }
+
+  function renderSelectedTaskDetail(options) {
+    if (!state.selectedTaskDetailId) {
+      return;
+    }
+    var selectedItem = findChecklistItemById(state.selectedTaskDetailId);
+    if (!selectedItem) {
+      hideTaskDetail();
+      return;
+    }
+    renderTaskDetail(selectedItem, options);
+  }
+
+  function openTaskDetail(runItemId) {
+    var item = findChecklistItemById(runItemId);
+    if (!item) {
+      return;
+    }
+    state.selectedTaskDetailId = item.id;
+    renderTaskDetail(item);
+  }
+
   function renderChecklist() {
     var checklist = state.checklist;
     clearList(elements.checklistItems);
     if (!checklist || !Array.isArray(checklist.items) || checklist.items.length === 0) {
+      hideTaskDetail();
       var empty = document.createElement('li');
       empty.className = 'todo-empty';
       empty.textContent = '当日の項目はありません。';
@@ -2014,16 +2094,23 @@
       }
       listItem.setAttribute('role', 'button');
       listItem.setAttribute('tabindex', '0');
-      listItem.setAttribute(
+      listItem.setAttribute('aria-label', item.title + ' の詳細を表示');
+
+      var checkButton = document.createElement('button');
+      checkButton.type = 'button';
+      checkButton.className = 'todo-check-button';
+      checkButton.dataset.itemId = item.id;
+      checkButton.dataset.action = item.status === 'checked' ? 'uncheck' : 'check';
+      checkButton.setAttribute(
         'aria-label',
         item.status === 'checked'
-          ? item.title + ' (完了済み、タップで未完了に戻す)'
-          : item.title + ' (未完了、タップで完了にする)'
+          ? item.title + ' を未完了に戻す'
+          : item.title + ' を完了にする'
       );
-
       var bullet = document.createElement('span');
       bullet.className = 'todo-bullet';
       bullet.dataset.status = item.status;
+      checkButton.appendChild(bullet);
 
       var main = document.createElement('div');
       main.className = 'todo-main';
@@ -2047,7 +2134,13 @@
       chevron.setAttribute('aria-hidden', 'true');
       chevron.textContent = '›';
 
-      var toggleHandler = function () {
+      var openDetailHandler = function () {
+        openTaskDetail(item.id);
+      };
+      var toggleHandler = function (event) {
+        if (event && typeof event.stopPropagation === 'function') {
+          event.stopPropagation();
+        }
         clearError();
         clearStatus();
         var latestItem = findChecklistItemById(item.id);
@@ -2057,15 +2150,16 @@
         var nextStatus = latestItem.status === 'unchecked' ? 'checked' : 'unchecked';
         requestItemStatusChange(item.id, nextStatus);
       };
-      listItem.addEventListener('click', toggleHandler);
+      checkButton.addEventListener('click', toggleHandler);
+      listItem.addEventListener('click', openDetailHandler);
       listItem.addEventListener('keydown', function (event) {
         if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
           event.preventDefault();
-          toggleHandler();
+          openDetailHandler();
         }
       });
 
-      listItem.appendChild(bullet);
+      listItem.appendChild(checkButton);
       listItem.appendChild(main);
       listItem.appendChild(chevron);
       elements.checklistItems.appendChild(listItem);

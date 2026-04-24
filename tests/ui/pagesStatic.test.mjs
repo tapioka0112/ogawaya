@@ -10,6 +10,10 @@ test('GitHub Pages 用 LIFF 画面は必要スクリプトと要素を持つ', a
   assert.match(html, /https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-firestore-compat\.js/);
   assert.match(html, /<script src="\.\/app\.js"><\/script>/);
   assert.match(html, /id="checklist-items"/);
+  assert.match(html, /id="task-detail-panel"/);
+  assert.match(html, /id="task-detail-title"/);
+  assert.match(html, /id="task-detail-description"/);
+  assert.match(html, /id="task-detail-meta"/);
   assert.match(html, /id="incomplete-items"/);
   assert.match(html, /id="error-message"/);
   assert.match(html, /id="open-admin-button"/);
@@ -144,9 +148,19 @@ test('GitHub Pages の連打制御は dispatch debounce で送信を集約する
 test('GitHub Pages のトグル判定は最新 state から next status を決める', async () => {
   const appJs = await readFile('pages/app.js', 'utf8');
 
+  assert.match(appJs, /function openTaskDetail\(runItemId\)/);
+  assert.match(appJs, /listItem\.addEventListener\('click', openDetailHandler\);/);
+  assert.match(appJs, /checkButton\.addEventListener\('click', toggleHandler\);/);
   assert.match(appJs, /var latestItem = findChecklistItemById\(item\.id\);/);
   assert.match(appJs, /var nextStatus = latestItem\.status === 'unchecked' \? 'checked' : 'unchecked';/);
   assert.match(appJs, /requestItemStatusChange\(item\.id,\s*nextStatus\);/);
+});
+
+test('GitHub Pages の checklist snapshot はタスク詳細を保持する', async () => {
+  const appJs = await readFile('pages/app.js', 'utf8');
+
+  assert.match(appJs, /description: String\(item\.description \|\| ''\),/);
+  assert.match(appJs, /setText\(\s*elements\.taskDetailDescription,\s*item\.description \? String\(item\.description\) : 'このタスクには詳細が登録されていません。'\s*\);/);
 });
 
 test('GitHub Pages のタブUIはホームと統計を切り替えられる', async () => {

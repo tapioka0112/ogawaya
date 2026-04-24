@@ -115,6 +115,10 @@ function createFakeDocument() {
     ['div', 'target-date'],
     ['div', 'progress-summary'],
     ['ul', 'checklist-items'],
+    ['article', 'task-detail-panel'],
+    ['h2', 'task-detail-title'],
+    ['p', 'task-detail-description'],
+    ['div', 'task-detail-meta'],
     ['section', 'main-content'],
     ['section', 'link-panel'],
     ['input', 'link-employee-code-input'],
@@ -213,6 +217,7 @@ function createChecklistPayload(overrides = {}) {
       {
         id: 'run-item-001',
         title: '開店準備',
+        description: '券売機と入口を確認する',
         status: 'unchecked',
         checkedBy: null,
         checkedByUserId: null,
@@ -221,6 +226,7 @@ function createChecklistPayload(overrides = {}) {
       {
         id: 'run-item-002',
         title: '清掃確認',
+        description: '客席と厨房の床を確認する',
         status: 'checked',
         checkedBy: '田中 花子',
         checkedByUserId: 'user-pt-001',
@@ -861,7 +867,11 @@ test('チェック操作で UI と未完了一覧を更新する', async () => {
   assert.ok(uncheckedItem);
   assert.equal(uncheckedItem.tagName, 'li');
 
-  await uncheckedItem.click();
+  const checkButton = findByDataset(documentRef.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  assert.equal(checkButton.tagName, 'button');
+
+  await checkButton.click();
 
   assert.deepEqual(toPlainJson(calls[0]), {
     idToken: 'token',
@@ -876,6 +886,56 @@ test('チェック操作で UI と未完了一覧を更新する', async () => {
   assert.ok(checkedItem);
   assert.equal(checkedItem.tagName, 'li');
   assert.equal(checklistCallCount, 1);
+});
+
+test('ホームのタスクカード押下は詳細を表示しチェック API を呼ばない', async () => {
+  const { client } = await loadClientModule();
+  const documentRef = createFakeDocument();
+  let checkItemCallCount = 0;
+  const controller = client.createController({
+    document: documentRef,
+    auth: {
+      async initialize() {
+        return { idToken: 'token' };
+      }
+    },
+    api: {
+      async getMe() {
+        return {
+          userId: 'user-pt-001',
+          name: '田中 花子',
+          role: 'part_time',
+          store: { id: 'store-001', name: '青山店' }
+        };
+      },
+      async getTodayChecklist() {
+        return createChecklistPayload();
+      },
+      async getTodayIncomplete() {
+        return createIncompletePayload();
+      },
+      async checkItem() {
+        checkItemCallCount += 1;
+        return { item: { id: 'run-item-001', status: 'checked' } };
+      },
+      async uncheckItem() {
+        return { item: { id: 'run-item-001', status: 'unchecked' } };
+      }
+    },
+    mode: 'user'
+  });
+
+  await controller.init();
+
+  const uncheckedItem = findByDataset(documentRef.elements['checklist-items'], 'status', 'unchecked');
+  assert.ok(uncheckedItem);
+  await uncheckedItem.click();
+
+  assert.equal(checkItemCallCount, 0);
+  assert.equal(documentRef.elements['task-detail-panel'].hidden, false);
+  assert.equal(documentRef.elements['task-detail-title'].textContent, '開店準備');
+  assert.equal(documentRef.elements['task-detail-description'].textContent, '券売機と入口を確認する');
+  assert.equal(documentRef.elements['task-detail-meta'].textContent, '未完了');
 });
 
 test('チェック操作は API 応答前でも UI を即時反映する', async () => {
@@ -920,7 +980,9 @@ test('チェック操作は API 応答前でも UI を即時反映する', async
 
   const uncheckedItem = findByDataset(documentRef.elements['checklist-items'], 'status', 'unchecked');
   assert.ok(uncheckedItem);
-  uncheckedItem.click();
+  const checkButton = findByDataset(documentRef.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  checkButton.click();
 
   assert.equal(documentRef.elements['progress-summary'].textContent, '2 / 2');
   assert.equal(documentRef.elements['incomplete-summary'].textContent, '未完了 0 件');
@@ -980,7 +1042,9 @@ test('idToken なしの状態ではチェック更新を拒否し API を呼ば�
   const uncheckedItem = findByDataset(documentRef.elements['checklist-items'], 'status', 'unchecked');
   assert.ok(uncheckedItem);
 
-  await uncheckedItem.click();
+  const checkButton = findByDataset(documentRef.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  await checkButton.click();
 
   assert.equal(checkItemCallCount, 0);
   assert.equal(documentRef.elements['error-message'].dataset.visible, 'true');
