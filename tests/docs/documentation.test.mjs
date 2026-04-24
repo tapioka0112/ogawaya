@@ -6,12 +6,15 @@ const importCsvHeaders = {
   'docs/operations/import/stores.csv': 'id,name,status,created_at',
   'docs/operations/import/users.csv': 'id,store_id,name,employee_code,passcode,role,status,created_at',
   'docs/operations/import/line_accounts.csv': 'id,user_id,line_user_id,display_name,linked_at',
+  'docs/operations/import/notification_channels.csv': 'id,store_id,name,access_token_property,monthly_limit,recipient_limit,status,created_at,updated_at',
+  'docs/operations/import/notification_recipients.csv': 'id,store_id,line_user_id,display_name,channel_id,status,last_seen_at,created_at,updated_at',
+  'docs/operations/import/notification_channel_usage.csv': 'id,channel_id,year_month,monthly_limit,official_sent_count,local_sent_count,remaining_count,last_synced_at,error_message',
   'docs/operations/import/checklist_templates.csv': 'id,store_id,name,notify_time,closing_time,is_active,created_by,created_at,updated_at',
   'docs/operations/import/checklist_template_items.csv': 'id,template_id,title,description,sort_order,is_required,is_active,created_at,updated_at',
   'docs/operations/import/checklist_runs.csv': 'id,template_id,store_id,target_date,status,notified_at,closed_at,created_at',
   'docs/operations/import/checklist_run_items.csv': 'id,run_id,template_item_id,title,sort_order,status,checked_by,checked_by_name,checked_at,updated_at',
   'docs/operations/import/checklist_item_logs.csv': 'id,run_item_id,action,user_id,before_value,after_value,is_after_close,created_at',
-  'docs/operations/import/notifications.csv': 'id,store_id,user_id,type,message,status,sent_at,error_message'
+  'docs/operations/import/notifications.csv': 'id,store_id,user_id,type,channel_id,dedupe_key,message,status,sent_at,error_message'
 };
 
 test('README に単一店舗前提・匿名運用・日次時刻・LINE表示名記録が記載されている', async () => {
@@ -84,4 +87,16 @@ test('Firestore 同期用 rules の実体と適用手順が存在する', async 
   assert.match(readme, /正本データ: Spreadsheet/);
   assert.match(firestoreRules, /allow create, update, delete: if false/);
   assert.match(firestoreRules, /match \/\{document=\*\*\}/);
+});
+
+test('LINE公式アカウント分散通知の運用手順が存在する', async () => {
+  const readme = await readFile('README.md', 'utf8');
+  const bootstrap = await readFile('docs/operations/bootstrap.md', 'utf8');
+  const scaling = await readFile('docs/operations/line-notification-scaling.md', 'utf8');
+
+  assert.match(readme, /line-notification-scaling\.md/);
+  assert.match(bootstrap, /installReminderTriggers/);
+  assert.match(scaling, /notification_channels/);
+  assert.match(scaling, /rebalanceNotificationRecipients/);
+  assert.match(scaling, /LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01/);
 });

@@ -12,6 +12,9 @@ Firestore はリアルタイム同期（read-only）で利用します。
 - `stores`
 - `users`
 - `line_accounts`
+- `notification_channels`
+- `notification_recipients`
+- `notification_channel_usage`
 - `checklist_templates`
 - `checklist_template_items`
 - `checklist_runs`
@@ -28,7 +31,9 @@ Firestore はリアルタイム同期（read-only）で利用します。
 - `LINE_CHANNEL_ID`
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
+- `LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01`
 - `LIFF_ID`
+- `CHECKLIST_APP_URL`
 - `ADMIN_LOGIN_ID`
 - `ADMIN_LOGIN_PASSWORD`
 
@@ -39,6 +44,9 @@ Firestore はリアルタイム同期（read-only）で利用します。
 - `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（通常 `300`）
 - `SPREADSHEET_STATE_CACHE_CHUNK_SIZE`（通常 `90000`）
 - `ADMIN_SESSION_TTL_SECONDS`（通常 `43200`）
+
+通知用LINE公式アカウントを増やす場合は、`LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_02` のように連番で追加します。
+追加したキー名は `notification_channels.access_token_property` に入れます。
 
 テンプレートは [script-properties.example.json](./import/script-properties.example.json) を使用します。
 
@@ -100,3 +108,35 @@ Firestore はリアルタイム同期（read-only）で利用します。
 GAS の時間主導トリガーを設定:
 - `runDailyStart` を毎日 10:30
 - `runDailyClosing` を毎日 0:00
+
+0:30 未完了通知は手動で通常の日次トリガーを作りません。Apps Script エディタで `installReminderTriggers` を 1 回実行します。
+
+作成されるトリガー:
+- `runDailyIncompleteReminder`: 次回 0:30 JST の one-shot trigger
+- `runReminderWatchdog`: 15分おきの漏れ補正 trigger
+
+理由:
+- Apps Script の通常の繰り返し時刻トリガーは実行時刻が揺れます。
+- `nearMinute()` も指定分の前後15分で実行されます。
+- そのため、この実装では毎回 `at(date)` で次の0:30を作り直し、watchdogで送信漏れを補正します。
+
+## 9. 0:30 未完了通知の初期設定
+
+1. 通知用LINE公式アカウントを作成する。
+2. Messaging API を有効化し、長期チャネルアクセストークンを発行する。
+3. Script Properties に `LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01` として保存する。
+4. `notification_channels` に以下の行を追加する。
+   - `id`: `notify-01`
+   - `store_id`: `stores.id`
+   - `name`: 管理用の名前
+   - `access_token_property`: `LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01`
+   - `monthly_limit`: `200`
+   - `recipient_limit`: `6`
+   - `status`: `active`
+5. 従業員にLIFFを開いてもらう。
+6. `notification_recipients` に従業員の `line_user_id` と `display_name` が入ったことを確認する。
+7. Apps Script エディタで `rebalanceNotificationRecipients` を実行する。
+8. `notification_recipients.channel_id` に `notify-01` などが入ったことを確認する。
+9. Apps Script エディタで `installReminderTriggers` を実行する。
+
+詳細な増員・退職・公式アカウント追加の手順は [line-notification-scaling.md](./line-notification-scaling.md) を参照してください。

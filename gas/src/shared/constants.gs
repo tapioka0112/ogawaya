@@ -19,9 +19,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   ns.NOTIFICATION_TYPES = {
     DAILY_START: 'daily_start',
     INCOMPLETE: 'incomplete',
-    MANUAL_REMINDER: 'manual_reminder'
+    MANUAL_REMINDER: 'manual_reminder',
+    DAILY_INCOMPLETE_REMINDER: 'daily_incomplete_reminder'
   };
   ns.NOTIFICATION_STATUSES = ['sent', 'failed', 'skipped'];
+  ns.NOTIFICATION_CHANNEL_STATUSES = ['active', 'inactive'];
+  ns.NOTIFICATION_RECIPIENT_STATUSES = ['active', 'inactive'];
   ns.MENU_ITEMS = [
     '今日のチェックリスト',
     '未完了一覧',
@@ -35,6 +38,39 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     stores: ['id', 'name', 'status', 'created_at'],
     users: ['id', 'store_id', 'name', 'employee_code', 'passcode', 'role', 'status', 'created_at'],
     line_accounts: ['id', 'user_id', 'line_user_id', 'display_name', 'linked_at'],
+    notification_channels: [
+      'id',
+      'store_id',
+      'name',
+      'access_token_property',
+      'monthly_limit',
+      'recipient_limit',
+      'status',
+      'created_at',
+      'updated_at'
+    ],
+    notification_recipients: [
+      'id',
+      'store_id',
+      'line_user_id',
+      'display_name',
+      'channel_id',
+      'status',
+      'last_seen_at',
+      'created_at',
+      'updated_at'
+    ],
+    notification_channel_usage: [
+      'id',
+      'channel_id',
+      'year_month',
+      'monthly_limit',
+      'official_sent_count',
+      'local_sent_count',
+      'remaining_count',
+      'last_synced_at',
+      'error_message'
+    ],
     checklist_templates: [
       'id',
       'store_id',
@@ -94,6 +130,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       'store_id',
       'user_id',
       'type',
+      'channel_id',
+      'dedupe_key',
       'message',
       'status',
       'sent_at',

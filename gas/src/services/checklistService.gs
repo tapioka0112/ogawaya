@@ -234,6 +234,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var identityClient = options.identityClient || buildDefaultIdentityClient(options.lineChannelId);
     var notificationService = options.notificationService;
     var appBaseUrl = options.appBaseUrl || '';
+    var checklistAppUrl = options.checklistAppUrl || appBaseUrl;
     var allowAnonymousAccess = options.allowAnonymousAccess === true;
     function normalizeAdminCredential(value) {
       var normalized = String(value || '').trim();
@@ -307,6 +308,24 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       };
     }
 
+    function registerNotificationRecipient(currentUser) {
+      if (currentUser.user.id === 'anonymous') {
+        return null;
+      }
+      var now = ns.toIsoString(clock.now());
+      return repository.upsertNotificationRecipient({
+        id: Utilities.getUuid(),
+        store_id: currentUser.store.id,
+        line_user_id: currentUser.user.id,
+        display_name: currentUser.user.name,
+        channel_id: '',
+        status: 'active',
+        last_seen_at: now,
+        created_at: now,
+        updated_at: now
+      });
+    }
+
     function requireAuthenticatedUser(query) {
       var safeQuery = query || {};
       if (!safeQuery.idToken) {
@@ -320,14 +339,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }
 
       var identity = resolveIdentity(safeQuery);
-      return buildCurrentUserContext(identity);
+      var currentUser = buildCurrentUserContext(identity);
+      registerNotificationRecipient(currentUser);
+      return currentUser;
     }
 
     function requireAuthenticatedWriteUser(query) {
       var safeQuery = query || {};
       ns.assert(safeQuery.idToken, 'unauthorized', '更新操作には LIFF 認証が必要です', 401);
       var identity = resolveIdentity(safeQuery);
-      return buildCurrentUserContext(identity);
+      var currentUser = buildCurrentUserContext(identity);
+      registerNotificationRecipient(currentUser);
+      return currentUser;
     }
 
     function getTodayRunForUser(user) {
@@ -434,6 +457,81 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         '',
         items.map(function (item) { return '・' + item.title; }).join('\n')
       ].join('\n');
+    }
+
+    function buildDailyIncompleteReminderMessage(store, run, items) {
+      var lines = [
+        '今日の残りタスクです。',
+        '',
+        '店舗：' + store.name,
+        '対象日：' + run.target_date,
+        '',
+        '未完了項目：'
+      ].concat(items.map(function (item) {
+        return '・' + item.title;
+      }));
+      if (checklistAppUrl) {
+        lines.push('', 'チェックはこちら', checklistAppUrl);
+      }
+      return lines.join('\n');
+    }
+
+    function buildDailyIncompleteReminderDedupeKey(run, recipient) {
+      return [
+        ns.NOTIFICATION_TYPES.DAILY_INCOMPLETE_REMINDER,
+        run.store_id,
+        run.target_date,
+        recipient.line_user_id
+      ].join(':');
+    }
+
+    function hasSentDailyIncompleteReminder(storeId, targetDate) {
+      var prefix = [
+        ns.NOTIFICATION_TYPES.DAILY_INCOMPLETE_REMINDER,
+        storeId,
+        targetDate,
+        ''
+      ].join(':');
+      return repository.listTable('notifications').some(function (notification) {
+        return notification.status === 'sent'
+          && notification.type === ns.NOTIFICATION_TYPES.DAILY_INCOMPLETE_REMINDER
+          && String(notification.dedupe_key || '').indexOf(prefix) === 0;
+      });
+    }
+
+    function getJstMinutesOfDay(date) {
+      var isoString = Utilities.formatDate(date, ns.TIMEZONE, "yyyy-MM-dd'T'HH:mm:ss'Z'");
+      var timeMatch = isoString.match(/T(\d{2}):(\d{2}):\d{2}Z$/);
+      ns.assert(timeMatch, 'internal_error', '時刻フォーマットの解析に失敗しました', 500);
+      return Number(timeMatch[1]) * 60 + Number(timeMatch[2]);
+    }
+
+    function isReminderWatchdogWindow(date) {
+      var minutes = getJstMinutesOfDay(date);
+      return minutes >= 30 && minutes <= 90;
+    }
+
+    function getCurrentStoreReminderContext() {
+      var store = findCurrentStore();
+      var targetDate = resolveBusinessDate(clock.now());
+      var run = repository.findRunByStoreAndDate(store.id, targetDate);
+      return {
+        store: store,
+        targetDate: targetDate,
+        run: run
+      };
+    }
+
+    function ensureNotificationChannelsCapacity(channels, recipients) {
+      var totalCapacity = channels.reduce(function (sum, channel) {
+        return sum + Number(channel.recipient_limit);
+      }, 0);
+      ns.assert(
+        recipients.length <= totalCapacity,
+        'invalid_state',
+        '通知チャネル容量が不足しています。公式アカウントを追加してください',
+        409
+      );
     }
 
     function logCheckMutationBreakdown(eventName, startedAt, authMs, storageWriteMs, idempotent) {
@@ -1232,6 +1330,137 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           buildManualReminderMessage(store, run, items)
         );
         return { notifications: notifications };
+      },
+
+      rebalanceNotificationRecipients: function () {
+        var store = findCurrentStore();
+        var channels = repository.listActiveNotificationChannelsByStore(store.id).sort(function (left, right) {
+          return left.id.localeCompare(right.id);
+        });
+        var recipients = repository.listActiveNotificationRecipientsByStore(store.id).sort(function (left, right) {
+          return left.line_user_id.localeCompare(right.line_user_id);
+        });
+        ensureNotificationChannelsCapacity(channels, recipients);
+
+        var assignments = [];
+        var channelIndex = 0;
+        var usedCountForCurrentChannel = 0;
+        recipients.forEach(function (recipient) {
+          var channel = channels[channelIndex];
+          ns.assert(channel, 'invalid_state', '通知チャネル容量が不足しています。公式アカウントを追加してください', 409);
+          var recipientLimit = Number(channel.recipient_limit);
+          if (usedCountForCurrentChannel >= recipientLimit) {
+            channelIndex += 1;
+            usedCountForCurrentChannel = 0;
+            channel = channels[channelIndex];
+          }
+          ns.assert(channel, 'invalid_state', '通知チャネル容量が不足しています。公式アカウントを追加してください', 409);
+          assignments.push({
+            recipientId: recipient.id,
+            channelId: channel.id
+          });
+          usedCountForCurrentChannel += 1;
+        });
+
+        var updatedRecipients = repository.assignNotificationRecipientChannels(
+          assignments,
+          ns.toIsoString(clock.now())
+        );
+        var usageRows = notificationService.refreshUsageRows(channels);
+        return {
+          assignedCount: updatedRecipients.length,
+          channels: channels.map(function (channel) {
+            return {
+              id: channel.id,
+              recipientCount: updatedRecipients.filter(function (recipient) {
+                return recipient.channel_id === channel.id;
+              }).length
+            };
+          }),
+          usage: usageRows
+        };
+      },
+
+      runDailyIncompleteReminder: function () {
+        var context = getCurrentStoreReminderContext();
+        if (!context.run) {
+          return {
+            skipped: true,
+            reason: 'no_run',
+            targetDate: context.targetDate,
+            notifications: []
+          };
+        }
+
+        var items = repository.listRunItems(context.run.id).filter(function (item) {
+          return item.status === ns.ITEM_STATUS.UNCHECKED;
+        });
+        if (items.length === 0) {
+          return {
+            skipped: true,
+            reason: 'no_unchecked_items',
+            targetDate: context.targetDate,
+            notifications: []
+          };
+        }
+
+        var channels = repository.listActiveNotificationChannelsByStore(context.store.id);
+        var recipients = repository.listActiveNotificationRecipientsByStore(context.store.id);
+        ns.assert(
+          recipients.length > 0,
+          'invalid_state',
+          '通知対象者がいません。従業員にLIFFを開いてもらってください',
+          409
+        );
+        ensureNotificationChannelsCapacity(channels, recipients);
+        var message = buildDailyIncompleteReminderMessage(context.store, context.run, items);
+        var notifications = notificationService.sendToNotificationRecipients(
+          context.run,
+          recipients,
+          channels,
+          ns.NOTIFICATION_TYPES.DAILY_INCOMPLETE_REMINDER,
+          message,
+          {
+            buildDedupeKey: function (recipient) {
+              return buildDailyIncompleteReminderDedupeKey(context.run, recipient);
+            }
+          }
+        );
+        return {
+          skipped: false,
+          targetDate: context.targetDate,
+          uncheckedCount: items.length,
+          notifications: notifications
+        };
+      },
+
+      runReminderWatchdog: function () {
+        var context = getCurrentStoreReminderContext();
+        if (!isReminderWatchdogWindow(clock.now())) {
+          return {
+            skipped: true,
+            reason: 'outside_window',
+            targetDate: context.targetDate,
+            notifications: []
+          };
+        }
+        if (hasSentDailyIncompleteReminder(context.store.id, context.targetDate)) {
+          return {
+            skipped: true,
+            reason: 'already_sent',
+            targetDate: context.targetDate,
+            notifications: []
+          };
+        }
+        return this.runDailyIncompleteReminder();
+      },
+
+      syncNotificationChannelUsage: function () {
+        var store = findCurrentStore();
+        var channels = repository.listActiveNotificationChannelsByStore(store.id);
+        return {
+          usage: notificationService.refreshUsageRows(channels)
+        };
       },
 
       runDailyStart: function () {

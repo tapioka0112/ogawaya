@@ -1,1 +1,1 @@
-id,store_id,user_id,type,message,status,sent_at,error_message
+id,store_id,user_id,type,channel_id,dedupe_key,message,status,sent_at,error_message

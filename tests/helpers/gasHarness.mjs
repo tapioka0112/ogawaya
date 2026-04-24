@@ -13,6 +13,7 @@ const GAS_FILE_PATHS = [
   'gas/src/handlers/webhook.gs',
   'gas/src/scheduler/dailyStart.gs',
   'gas/src/scheduler/dailyClosing.gs',
+  'gas/src/scheduler/incompleteReminder.gs',
   'gas/src/main.gs'
 ];
 

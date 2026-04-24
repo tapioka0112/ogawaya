@@ -26,6 +26,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     ns.assert(ns.isDateString(value), 'invalid_data', fieldName + ' の形式が不正です', 400);
   }
 
+  function validatePositiveIntegerString(value, fieldName) {
+    ns.assert(/^\d+$/.test(String(value || '')), 'invalid_data', fieldName + ' は 0 以上の整数で指定してください', 400);
+  }
+
+  function validateYearMonth(value, fieldName) {
+    ns.assert(/^\d{4}-\d{2}$/.test(String(value || '')), 'invalid_data', fieldName + ' の形式が不正です', 400);
+  }
+
   function validateRow(sheetName, row) {
     if (sheetName === 'users') {
       ns.assert([ns.ROLES.PART_TIME, ns.ROLES.MANAGER, ns.ROLES.ADMIN].indexOf(row.role) !== -1, 'invalid_data', 'role が不正です', 400);
@@ -37,6 +45,46 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
     if (sheetName === 'line_accounts') {
       validateTimestamp(row.linked_at, 'line_accounts.linked_at');
+    }
+    if (sheetName === 'notification_channels') {
+      ns.requireString(row.store_id, 'store_id');
+      ns.requireString(row.name, 'name');
+      ns.requireString(row.access_token_property, 'access_token_property');
+      validatePositiveIntegerString(row.monthly_limit, 'monthly_limit');
+      validatePositiveIntegerString(row.recipient_limit, 'recipient_limit');
+      ns.assert(
+        ns.NOTIFICATION_CHANNEL_STATUSES.indexOf(row.status) !== -1,
+        'invalid_data',
+        'notification_channels.status が不正です',
+        400
+      );
+      validateTimestamp(row.created_at, 'notification_channels.created_at');
+      validateTimestamp(row.updated_at, 'notification_channels.updated_at');
+    }
+    if (sheetName === 'notification_recipients') {
+      ns.requireString(row.store_id, 'store_id');
+      ns.requireString(row.line_user_id, 'line_user_id');
+      ns.requireString(row.display_name, 'display_name');
+      ns.assert(
+        ns.NOTIFICATION_RECIPIENT_STATUSES.indexOf(row.status) !== -1,
+        'invalid_data',
+        'notification_recipients.status が不正です',
+        400
+      );
+      validateTimestamp(row.last_seen_at, 'notification_recipients.last_seen_at');
+      validateTimestamp(row.created_at, 'notification_recipients.created_at');
+      validateTimestamp(row.updated_at, 'notification_recipients.updated_at');
+    }
+    if (sheetName === 'notification_channel_usage') {
+      ns.requireString(row.channel_id, 'channel_id');
+      validateYearMonth(row.year_month, 'year_month');
+      validatePositiveIntegerString(row.monthly_limit, 'monthly_limit');
+      validatePositiveIntegerString(row.local_sent_count, 'local_sent_count');
+      validatePositiveIntegerString(row.remaining_count, 'remaining_count');
+      if (row.official_sent_count) {
+        validatePositiveIntegerString(row.official_sent_count, 'official_sent_count');
+      }
+      validateTimestamp(row.last_synced_at, 'notification_channel_usage.last_synced_at');
     }
     if (sheetName === 'checklist_templates') {
       validateTimestamp(row.created_at, 'checklist_templates.created_at');
@@ -94,6 +142,17 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     state.line_accounts.forEach(function (lineAccount) {
       ns.assert(!linkedLineUsers[lineAccount.line_user_id], 'duplicate_link', 'duplicate line_user_id', 409);
       linkedLineUsers[lineAccount.line_user_id] = true;
+    });
+
+    var notificationRecipientsByLineUserId = {};
+    state.notification_recipients.forEach(function (recipient) {
+      ns.assert(
+        !notificationRecipientsByLineUserId[recipient.line_user_id],
+        'duplicate_notification_recipient',
+        'duplicate notification recipient line_user_id',
+        409
+      );
+      notificationRecipientsByLineUserId[recipient.line_user_id] = true;
     });
   }
 
@@ -231,6 +290,70 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       ns.assert(!findLineAccountByLineUserId(lineAccount.line_user_id), 'duplicate_link', 'LINE アカウントは既に連携済みです', 409);
       ns.assert(!findLineAccountByUserId(lineAccount.user_id), 'duplicate_link', 'ユーザーは既に LINE 連携済みです', 409);
       return appendRow('line_accounts', lineAccount);
+    }
+
+    function findNotificationRecipientByLineUserId(lineUserId) {
+      var recipients = getTableRowsUnsafe('notification_recipients');
+      for (var index = 0; index < recipients.length; index += 1) {
+        if (recipients[index].line_user_id === lineUserId) {
+          return ns.clone(recipients[index]);
+        }
+      }
+      return null;
+    }
+
+    function upsertNotificationRecipient(payload) {
+      var existing = findNotificationRecipientByLineUserId(payload.line_user_id);
+      if (!existing) {
+        return appendRow('notification_recipients', payload);
+      }
+      var unchanged = existing.store_id === payload.store_id
+        && existing.display_name === payload.display_name
+        && existing.status === payload.status;
+      if (unchanged) {
+        return existing;
+      }
+      return updateRow('notification_recipients', existing.id, function (row) {
+        row.store_id = payload.store_id;
+        row.display_name = payload.display_name;
+        row.status = payload.status;
+        row.last_seen_at = payload.last_seen_at;
+        row.updated_at = payload.updated_at;
+        return row;
+      });
+    }
+
+    function listActiveNotificationChannelsByStore(storeId) {
+      return getTableRowsUnsafe('notification_channels').filter(function (channel) {
+        return channel.store_id === storeId && channel.status === 'active';
+      }).map(ns.clone);
+    }
+
+    function listActiveNotificationRecipientsByStore(storeId) {
+      return getTableRowsUnsafe('notification_recipients').filter(function (recipient) {
+        return recipient.store_id === storeId && recipient.status === 'active';
+      }).map(ns.clone);
+    }
+
+    function assignNotificationRecipientChannels(assignments, updatedAt) {
+      return commit(function (draftState) {
+        var assignmentByRecipientId = {};
+        assignments.forEach(function (assignment) {
+          assignmentByRecipientId[assignment.recipientId] = assignment.channelId;
+        });
+        var updatedRows = [];
+        draftState.notification_recipients = draftState.notification_recipients.map(function (recipient) {
+          if (!Object.prototype.hasOwnProperty.call(assignmentByRecipientId, recipient.id)) {
+            return recipient;
+          }
+          var updated = ns.clone(recipient);
+          updated.channel_id = assignmentByRecipientId[recipient.id];
+          updated.updated_at = updatedAt;
+          updatedRows.push(ns.clone(updated));
+          return updated;
+        });
+        return updatedRows;
+      });
     }
 
     function findLinkedUserByLineUserId(lineUserId) {
@@ -453,6 +576,20 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return appendRow('notifications', notification);
     }
 
+    function findNotificationByDedupeKey(dedupeKey) {
+      if (!dedupeKey) {
+        return null;
+      }
+      var notifications = getTableRowsUnsafe('notifications');
+      for (var index = 0; index < notifications.length; index += 1) {
+        var notification = notifications[index];
+        if (notification.dedupe_key === dedupeKey && notification.status === 'sent') {
+          return ns.clone(notification);
+        }
+      }
+      return null;
+    }
+
     function findMatchingNotification(type, userId, message) {
       var notifications = getTableRowsUnsafe('notifications');
       for (var index = 0; index < notifications.length; index += 1) {
@@ -462,6 +599,22 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         }
       }
       return null;
+    }
+
+    function upsertNotificationChannelUsage(usage) {
+      var rows = getTableRowsUnsafe('notification_channel_usage');
+      for (var index = 0; index < rows.length; index += 1) {
+        var row = rows[index];
+        if (row.channel_id === usage.channel_id && row.year_month === usage.year_month) {
+          return updateRow('notification_channel_usage', row.id, function (draft) {
+            Object.keys(usage).forEach(function (key) {
+              draft[key] = usage[key];
+            });
+            return draft;
+          });
+        }
+      }
+      return appendRow('notification_channel_usage', usage);
     }
 
     function createTemplate(template) {
@@ -549,8 +702,11 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       createTemplate: createTemplate,
       createTemplateItem: createTemplateItem,
       deleteTemplateItem: deleteTemplateItem,
+      assignNotificationRecipientChannels: assignNotificationRecipientChannels,
       findLineAccountByUserId: findLineAccountByUserId,
       findLinkedUserByLineUserId: findLinkedUserByLineUserId,
+      findNotificationByDedupeKey: findNotificationByDedupeKey,
+      findNotificationRecipientByLineUserId: findNotificationRecipientByLineUserId,
       findMatchingNotification: findMatchingNotification,
       findRunById: findRunById,
       findRunByStoreAndDate: findRunByStoreAndDate,
@@ -561,6 +717,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       findRowById: findRowById,
       listActiveTemplates: listActiveTemplates,
       listActiveTemplatesWithItems: listActiveTemplatesWithItems,
+      listActiveNotificationChannelsByStore: listActiveNotificationChannelsByStore,
+      listActiveNotificationRecipientsByStore: listActiveNotificationRecipientsByStore,
       listLinkedUsersByStore: listLinkedUsersByStore,
       listLogsByRunItemIds: listLogsByRunItemIds,
       listLogsByRunId: listLogsByRunId,
@@ -575,7 +733,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       updateRunItem: updateRunItem,
       updateRunItemWithLog: updateRunItemWithLog,
       updateTemplate: updateTemplate,
-      updateTemplateItem: updateTemplateItem
+      updateTemplateItem: updateTemplateItem,
+      upsertNotificationChannelUsage: upsertNotificationChannelUsage,
+      upsertNotificationRecipient: upsertNotificationRecipient
     };
   }
 

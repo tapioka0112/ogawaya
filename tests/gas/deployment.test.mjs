@@ -14,6 +14,7 @@ test('GAS モジュールは constants より先に読まれても namespace 初
       'gas/src/shared/constants.gs',
       'gas/src/scheduler/dailyStart.gs',
       'gas/src/scheduler/dailyClosing.gs',
+      'gas/src/scheduler/incompleteReminder.gs',
       'gas/src/main.gs'
     ]
   });

@@ -14,10 +14,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return cachedScriptAppUrl;
   }
 
-  function createLineClient(channelAccessToken) {
+  function createLineClient(channelAccessToken, propertyName) {
     return {
       pushMessage: function (lineUserId, message) {
-        ns.assert(channelAccessToken, 'config_error', 'LINE_CHANNEL_ACCESS_TOKEN が未設定です', 500);
+        ns.assert(channelAccessToken, 'config_error', (propertyName || 'LINE_CHANNEL_ACCESS_TOKEN') + ' が未設定です', 500);
         var payload = {
           to: lineUserId,
           messages: [
@@ -36,6 +36,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           payload: JSON.stringify(payload)
         });
         return { status: 'sent' };
+      }
+    };
+  }
+
+  function createLineClientFactory(scriptProperties) {
+    return {
+      createPushClient: function (channel) {
+        var propertyName = channel.access_token_property;
+        ns.assert(propertyName, 'config_error', '通知チャネルの access_token_property が未設定です', 500);
+        return createLineClient(scriptProperties.getProperty(propertyName), propertyName);
       }
     };
   }
@@ -191,10 +201,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     var clock = options.clock || ns.defaultClock();
+    var lineClientFactory = options.lineClientFactory || createLineClientFactory(scriptProperties);
     var notificationService = ns.createNotificationService({
       repository: repository,
       clock: clock,
-      lineClient: options.lineClient || createLineClient(options.channelAccessToken || scriptProperties.getProperty('LINE_CHANNEL_ACCESS_TOKEN'))
+      lineClient: options.lineClient || createLineClient(
+        options.channelAccessToken || scriptProperties.getProperty('LINE_CHANNEL_ACCESS_TOKEN'),
+        'LINE_CHANNEL_ACCESS_TOKEN'
+      ),
+      lineClientFactory: lineClientFactory
     });
     var appBaseUrl = resolveAppBaseUrl(options.appBaseUrl);
     var checklistService = ns.createChecklistService({
@@ -203,6 +218,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       identityClient: options.identityClient,
       notificationService: notificationService,
       appBaseUrl: appBaseUrl,
+      checklistAppUrl: options.checklistAppUrl || scriptProperties.getProperty('CHECKLIST_APP_URL') || appBaseUrl,
       lineChannelId: options.lineChannelId || scriptProperties.getProperty('LINE_CHANNEL_ID'),
       allowAnonymousAccess: allowAnonymousAccess,
       adminLoginId: options.adminLoginId || scriptProperties.getProperty('ADMIN_LOGIN_ID'),
@@ -250,6 +266,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
       runDailyStart: function () {
         return checklistService.runDailyStart();
+      },
+      runDailyIncompleteReminder: function () {
+        return checklistService.runDailyIncompleteReminder();
+      },
+      runReminderWatchdog: function () {
+        return checklistService.runReminderWatchdog();
+      },
+      rebalanceNotificationRecipients: function () {
+        return checklistService.rebalanceNotificationRecipients();
+      },
+      syncNotificationChannelUsage: function () {
+        return checklistService.syncNotificationChannelUsage();
       }
     };
   };

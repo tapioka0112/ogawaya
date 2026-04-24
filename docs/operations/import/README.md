@@ -1,12 +1,15 @@
 # import 用アセット
 
-最短は Apps Script エディタから `bootstrapSpreadsheetTemplates` を 1 回実行して、9 シートのヘッダーと最小サンプル行をまとめて入れる方法です。CSV import は手動 fallback として、このディレクトリに残しています。
+最短は Apps Script エディタから `bootstrapSpreadsheetTemplates` を 1 回実行して、12 シートのヘッダーと最小サンプル行をまとめて入れる方法です。CSV import は手動 fallback として、このディレクトリに残しています。
 
 ## 含まれるファイル
 
 - `stores.csv`
 - `users.csv`
 - `line_accounts.csv`
+- `notification_channels.csv`
+- `notification_recipients.csv`
+- `notification_channel_usage.csv`
 - `checklist_templates.csv`
 - `checklist_template_items.csv`
 - `checklist_runs.csv`
@@ -46,8 +49,18 @@ Apps Script をまだ実行できない場合は、従来どおり CSV を手で
 - `LINE_CHANNEL_ID`
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
+- `LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01`
 - `LIFF_ID`
+- `CHECKLIST_APP_URL`
 - `ADMIN_LOGIN_ID`
 - `ADMIN_LOGIN_PASSWORD`
 - `store-001` や `user-*-001` などのサンプル ID
 - 店舗名、テンプレート名、項目名
+
+## 0:30 未完了通知の追加設定
+
+1. `notification_channels` に通知用LINE公式アカウントを追加する。
+2. `access_token_property` には `LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01` のように Script Properties のキー名を入れる。
+3. 従業員がLIFFを開くと `notification_recipients` にLINE userIdが登録される。
+4. Apps Script エディタで `rebalanceNotificationRecipients` を実行し、従業員を通知チャネルへ割り当てる。
+5. `notification_channel_usage` でチャネルごとの月間送信数と残数を確認する。

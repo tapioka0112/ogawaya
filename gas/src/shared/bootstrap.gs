@@ -43,6 +43,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }
     ],
     line_accounts: [],
+    notification_channels: [],
+    notification_recipients: [],
+    notification_channel_usage: [],
     checklist_templates: [
       {
         id: 'tmpl-001',
