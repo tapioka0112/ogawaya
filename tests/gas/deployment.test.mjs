@@ -30,6 +30,7 @@ test('scriptId 未設定時はデプロイ前チェックが失敗する', async
     {
       oauthScopes: [
         'https://www.googleapis.com/auth/script.external_request',
+        'https://www.googleapis.com/auth/script.scriptapp',
         'https://www.googleapis.com/auth/spreadsheets'
       ]
     }
@@ -48,6 +49,7 @@ test('必要スコープ不足時はデプロイ前チェックが失敗する',
 
   assert.equal(result.ok, false);
   assert.match(result.errors.join('\n'), /external_request/);
+  assert.match(result.errors.join('\n'), /script\.scriptapp/);
 });
 
 test('設定正常時は clasp push 実行情報を返す', async () => {
@@ -57,6 +59,7 @@ test('設定正常時は clasp push 実行情報を返す', async () => {
     {
       oauthScopes: [
         'https://www.googleapis.com/auth/script.external_request',
+        'https://www.googleapis.com/auth/script.scriptapp',
         'https://www.googleapis.com/auth/spreadsheets'
       ]
     }

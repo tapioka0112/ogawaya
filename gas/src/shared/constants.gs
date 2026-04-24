@@ -32,6 +32,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   ];
   ns.REQUIRED_OAUTH_SCOPES = [
     'https://www.googleapis.com/auth/script.external_request',
+    'https://www.googleapis.com/auth/script.scriptapp',
     'https://www.googleapis.com/auth/spreadsheets'
   ];
   ns.SHEET_DEFINITIONS = {
