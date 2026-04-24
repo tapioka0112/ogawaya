@@ -2175,7 +2175,7 @@
         elements.progressRingLabel.classList.remove('celebrating');
       }
     }
-    setText(elements.progressRingLabel, isComplete ? '完了！' : pct + '%');
+    setText(elements.progressRingLabel, isComplete ? '完了' : pct + '%');
     if (isComplete && !wasComplete) {
       if (typeof confetti === 'function') {
         var ringWrap = elements.progressRingProgress && elements.progressRingProgress.closest('.progress-ring-wrap');
@@ -2183,6 +2183,7 @@
         confetti({
           particleCount: 80,
           spread: 60,
+          useWorker: true,
           origin: rect
             ? { x: (rect.left + rect.width / 2) / window.innerWidth, y: (rect.top + rect.height / 2) / window.innerHeight }
             : { x: 0.5, y: 0.3 },
@@ -2370,10 +2371,7 @@
       var openDetailHandler = function () {
         openTaskDetail(item.id);
       };
-      var swipeConsumed = false;
-      var swipeStartX = null;
       var toggleHandler = function () {
-        if (swipeConsumed) { swipeConsumed = false; return; }
         clearError();
         clearStatus();
         var latestItem = findChecklistItemById(item.id);
@@ -2385,27 +2383,6 @@
       };
       toggleButton.addEventListener('click', toggleHandler);
       detailButton.addEventListener('click', openDetailHandler);
-
-      listItem.addEventListener('touchstart', function (e) {
-        swipeStartX = e.touches[0].clientX;
-        swipeConsumed = false;
-      }, { passive: true });
-      listItem.addEventListener('touchend', function (e) {
-        if (swipeStartX === null) { return; }
-        var dx = e.changedTouches[0].clientX - swipeStartX;
-        swipeStartX = null;
-        if (Math.abs(dx) < 60) { return; }
-        swipeConsumed = true;
-        clearError();
-        clearStatus();
-        var latestItem = findChecklistItemById(item.id);
-        if (!latestItem) { return; }
-        if (dx > 0 && latestItem.status === 'unchecked') {
-          requestItemStatusChange(item.id, 'checked');
-        } else if (dx < 0 && latestItem.status === 'checked') {
-          requestItemStatusChange(item.id, 'unchecked');
-        }
-      }, { passive: true });
 
       listItem.appendChild(toggleButton);
       listItem.appendChild(detailButton);
