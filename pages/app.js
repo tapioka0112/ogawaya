@@ -386,8 +386,11 @@
     authUserContext: {
       userId: '',
       name: ''
-    }
+    },
+    previousProgressPct: -1
   };
+
+  var recentlyCheckedIds = new Set();
 
   var elements = {
     errorBox: document.getElementById('error-message'),
@@ -1349,6 +1352,8 @@
       return;
     }
     if (desiredStatus === 'checked') {
+      recentlyCheckedIds.add(runItemId);
+      if (navigator.vibrate) { navigator.vibrate(10); }
       applyChecklistItemUpdate(buildOptimisticCheckedItem(currentItem));
       setStatus('チェックを更新しました');
       return;
@@ -2157,7 +2162,35 @@
       var offset = circumference * (1 - pct / 100);
       elements.progressRingProgress.style.strokeDashoffset = String(offset);
     }
-    setText(elements.progressRingLabel, pct + '%');
+    var isComplete = pct === 100 && total > 0;
+    var wasComplete = state.previousProgressPct === 100;
+    state.previousProgressPct = pct;
+    if (elements.progressRingProgress) {
+      elements.progressRingProgress.style.stroke = isComplete ? '#d4a017' : '';
+    }
+    if (elements.progressRingLabel) {
+      if (isComplete) {
+        elements.progressRingLabel.classList.add('celebrating');
+      } else {
+        elements.progressRingLabel.classList.remove('celebrating');
+      }
+    }
+    setText(elements.progressRingLabel, isComplete ? '完了！' : pct + '%');
+    if (isComplete && !wasComplete) {
+      if (typeof confetti === 'function') {
+        var ringWrap = elements.progressRingProgress && elements.progressRingProgress.closest('.progress-ring-wrap');
+        var rect = ringWrap ? ringWrap.getBoundingClientRect() : null;
+        confetti({
+          particleCount: 80,
+          spread: 60,
+          origin: rect
+            ? { x: (rect.left + rect.width / 2) / window.innerWidth, y: (rect.top + rect.height / 2) / window.innerHeight }
+            : { x: 0.5, y: 0.3 },
+          colors: ['#f47a39', '#d4a017', '#ffe4d6', '#ffffff']
+        });
+      }
+      if (navigator.vibrate) { navigator.vibrate([10, 50, 30]); }
+    }
   }
 
   function buildTaskDetailMetaText(item) {
@@ -2246,7 +2279,13 @@
       return;
     }
 
-    checklist.items.forEach(function (item) {
+    var sortedItems = checklist.items.slice().sort(function (a, b) {
+      if (a.status === 'checked' && b.status !== 'checked') { return 1; }
+      if (a.status !== 'checked' && b.status === 'checked') { return -1; }
+      return 0;
+    });
+
+    sortedItems.forEach(function (item) {
       var listItem = document.createElement('li');
       listItem.className = 'todo-item';
       listItem.dataset.status = item.status;
@@ -2266,10 +2305,41 @@
           ? item.title + ' を未完了に戻す'
           : item.title + ' を完了にする'
       );
-      var bullet = document.createElement('span');
-      bullet.className = 'todo-bullet';
-      bullet.dataset.status = item.status;
-      toggleButton.appendChild(bullet);
+
+      if (actionState.inFlight) {
+        var spinner = document.createElement('span');
+        spinner.className = 'todo-bullet-spinner';
+        spinner.setAttribute('aria-label', '更新中');
+        toggleButton.appendChild(spinner);
+      } else {
+        var bulletSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        bulletSvg.setAttribute('class', 'todo-bullet-svg');
+        bulletSvg.setAttribute('viewBox', '0 0 24 24');
+        bulletSvg.setAttribute('width', '24');
+        bulletSvg.setAttribute('height', '24');
+        bulletSvg.setAttribute('aria-hidden', 'true');
+        bulletSvg.dataset.status = 'unchecked';
+        var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('class', 'todo-bullet-circle');
+        circle.setAttribute('cx', '12');
+        circle.setAttribute('cy', '12');
+        circle.setAttribute('r', '10');
+        var checkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        checkPath.setAttribute('class', 'todo-bullet-check');
+        checkPath.setAttribute('d', 'M6 12 L10 16 L18 8');
+        bulletSvg.appendChild(circle);
+        bulletSvg.appendChild(checkPath);
+        toggleButton.appendChild(bulletSvg);
+
+        if (item.status === 'checked') {
+          if (recentlyCheckedIds.has(item.id)) {
+            recentlyCheckedIds.delete(item.id);
+            requestAnimationFrame(function () { bulletSvg.dataset.status = 'checked'; });
+          } else {
+            bulletSvg.dataset.status = 'checked';
+          }
+        }
+      }
 
       var main = document.createElement('div');
       main.className = 'todo-main';
@@ -2300,7 +2370,10 @@
       var openDetailHandler = function () {
         openTaskDetail(item.id);
       };
-      var toggleHandler = function (event) {
+      var swipeConsumed = false;
+      var swipeStartX = null;
+      var toggleHandler = function () {
+        if (swipeConsumed) { swipeConsumed = false; return; }
         clearError();
         clearStatus();
         var latestItem = findChecklistItemById(item.id);
@@ -2312,6 +2385,27 @@
       };
       toggleButton.addEventListener('click', toggleHandler);
       detailButton.addEventListener('click', openDetailHandler);
+
+      listItem.addEventListener('touchstart', function (e) {
+        swipeStartX = e.touches[0].clientX;
+        swipeConsumed = false;
+      }, { passive: true });
+      listItem.addEventListener('touchend', function (e) {
+        if (swipeStartX === null) { return; }
+        var dx = e.changedTouches[0].clientX - swipeStartX;
+        swipeStartX = null;
+        if (Math.abs(dx) < 60) { return; }
+        swipeConsumed = true;
+        clearError();
+        clearStatus();
+        var latestItem = findChecklistItemById(item.id);
+        if (!latestItem) { return; }
+        if (dx > 0 && latestItem.status === 'unchecked') {
+          requestItemStatusChange(item.id, 'checked');
+        } else if (dx < 0 && latestItem.status === 'checked') {
+          requestItemStatusChange(item.id, 'unchecked');
+        }
+      }, { passive: true });
 
       listItem.appendChild(toggleButton);
       listItem.appendChild(detailButton);
