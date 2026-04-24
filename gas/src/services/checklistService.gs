@@ -788,13 +788,17 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var password = ns.requireString(safeBody.password, 'password');
         var isMatched = loginId === adminLoginId && password === adminLoginPassword;
         if (!isMatched) {
-          ns.logEvent('warn', 'admin.login.failed', {
+          var failureDetails = {
+            path: '/api/admin/login',
+            name: 'admin.login.failed',
             loginIdMatched: loginId === adminLoginId,
             loginIdLength: loginId.length,
             configuredLoginIdLength: adminLoginId.length,
             passwordLength: password.length,
             configuredPasswordLength: adminLoginPassword.length
-          });
+          };
+          ns.logEvent('warn', 'admin.login.failed', failureDetails);
+          ns.writeDebugEvent('admin.login.failed', failureDetails);
         }
         ns.assert(
           isMatched,
