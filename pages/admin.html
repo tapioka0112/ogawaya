@@ -36,42 +36,70 @@
 
       <section class="panel" id="admin-main-panel" hidden>
         <div class="panel-head">
-          <h2>タスクの作成</h2>
+          <h2>タスク操作</h2>
           <button id="admin-logout-button" type="button" class="ghost">ログアウト</button>
         </div>
-        <div class="form-grid">
-          <label class="field">
-            <span>タスク名</span>
-            <input id="task-title-input" type="text" placeholder="例: 店内清掃" />
-          </label>
-          <label class="field">
-            <span>詳細 (任意)</span>
-            <textarea id="task-description-input" rows="3" placeholder="例: 開店前にフロアと客席を清掃"></textarea>
-          </label>
-        </div>
         <div class="admin-action-grid">
-          <button id="create-task-button" type="button" class="primary">タスクを作成</button>
-          <button id="insert-task-button" type="button" class="ghost">タスクを挿入</button>
-          <button id="create-template-button" type="button" class="ghost">テンプレートを作成</button>
-          <button id="apply-template-button" type="button" class="ghost">テンプレートを挿入</button>
+          <button id="admin-flow-create-task" type="button" class="primary" data-admin-flow-button="create-task">タスクを作成</button>
+          <button id="admin-flow-insert-task" type="button" class="ghost" data-admin-flow-button="insert-task">タスクを挿入</button>
+          <button id="admin-flow-create-template" type="button" class="ghost" data-admin-flow-button="create-template">テンプレートを作成</button>
+          <button id="admin-flow-apply-template" type="button" class="ghost" data-admin-flow-button="apply-template">テンプレートを挿入</button>
         </div>
-        <div class="form-grid">
-          <label class="field">
-            <span>挿入するタスク</span>
-            <select id="task-select"></select>
-          </label>
-          <label class="field">
-            <span>新規テンプレート名</span>
-            <input id="template-name-input" type="text" placeholder="例: 開店テンプレート" />
-          </label>
-          <label class="field">
-            <span>挿入するテンプレート</span>
-            <select id="template-select"></select>
-          </label>
+
+        <div id="create-task-flow" class="admin-flow-panel" data-admin-flow-panel="create-task">
+          <div class="form-grid">
+            <label class="field">
+              <span>タスク名</span>
+              <input id="task-title-input" type="text" placeholder="例: 店内清掃" />
+            </label>
+            <label class="field">
+              <span>詳細 (任意)</span>
+              <textarea id="task-description-input" rows="3" placeholder="例: 開店前にフロアと客席を清掃"></textarea>
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="create-task-button" type="button" class="primary">タスクを作成</button>
+          </div>
         </div>
-        <div class="template-task-box">
-          <p>テンプレートに含めるタスク</p>
-          <ul id="template-task-list"></ul>
+
+        <div id="insert-task-flow" class="admin-flow-panel" data-admin-flow-panel="insert-task" hidden>
+          <div class="form-grid">
+            <label class="field">
+              <span>挿入するタスク</span>
+              <select id="task-select"></select>
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="insert-task-button" type="button" class="primary">選択したタスクを挿入</button>
+          </div>
+        </div>
+
+        <div id="create-template-flow" class="admin-flow-panel" data-admin-flow-panel="create-template" hidden>
+          <div class="form-grid">
+            <label class="field">
+              <span>新規テンプレート名</span>
+              <input id="template-name-input" type="text" placeholder="例: 開店テンプレート" />
+            </label>
+          </div>
+          <div class="template-task-box">
+            <p>テンプレートに含めるタスク</p>
+            <ul id="template-task-list"></ul>
+          </div>
+          <div class="button-row">
+            <button id="create-template-button" type="button" class="primary">テンプレートを作成</button>
+          </div>
+        </div>
+
+        <div id="apply-template-flow" class="admin-flow-panel" data-admin-flow-panel="apply-template" hidden>
+          <div class="form-grid">
+            <label class="field">
+              <span>挿入するテンプレート</span>
+              <select id="template-select"></select>
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="apply-template-button" type="button" class="primary">選択したテンプレートを挿入</button>
+          </div>
         </div>
       </section>
 
@@ -101,6 +129,6 @@
       </section>
     </main>
 
-    <script src="./admin.js?v=admin-ui-fixes-20260424"></script>
+    <script src="./admin.js?v=admin-flow-perf-20260424"></script>
   </body>
 </html>

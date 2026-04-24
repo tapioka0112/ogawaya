@@ -9,9 +9,11 @@
     selectedDate: '',
     calendarYear: 0,
     calendarMonth: 0,
+    activeFlow: 'create-task',
     tasks: [],
     templates: [],
     checklist: null,
+    runItemsByDate: {},
     runItemsRequestId: 0,
     runItemsLoading: false
   };
@@ -42,7 +44,9 @@
     calendarPrevButton: document.getElementById('calendar-prev'),
     calendarNextButton: document.getElementById('calendar-next'),
     calendarLabel: document.getElementById('calendar-label'),
-    calendarGrid: document.getElementById('calendar-grid')
+    calendarGrid: document.getElementById('calendar-grid'),
+    flowButtons: document.querySelectorAll('[data-admin-flow-button]'),
+    flowPanels: document.querySelectorAll('[data-admin-flow-panel]')
   };
 
   function normalizeBaseUrl(value) {
@@ -100,6 +104,22 @@
     }
     if (elements.calendarPanel) {
       elements.calendarPanel.hidden = !authenticated;
+    }
+  }
+
+  function setActiveFlow(flowName) {
+    state.activeFlow = String(flowName || 'create-task');
+    elements.flowButtons.forEach(function (button) {
+      var isActive = button.dataset.adminFlowButton === state.activeFlow;
+      button.dataset.active = isActive ? 'true' : 'false';
+      button.classList.toggle('primary', isActive);
+      button.classList.toggle('ghost', !isActive);
+    });
+    elements.flowPanels.forEach(function (panel) {
+      panel.hidden = panel.dataset.adminFlowPanel !== state.activeFlow;
+    });
+    if (state.activeFlow === 'create-template') {
+      renderTemplateTaskChecklist();
     }
   }
 
@@ -245,6 +265,7 @@
     elements.templateTaskList.innerHTML = '';
     if (!Array.isArray(state.tasks) || state.tasks.length === 0) {
       var empty = document.createElement('li');
+      empty.className = 'template-task-empty';
       empty.textContent = 'タスクがありません';
       elements.templateTaskList.appendChild(empty);
       return;
@@ -258,6 +279,7 @@
       var label = document.createElement('label');
       label.setAttribute('for', checkbox.id);
       label.textContent = task.title;
+      label.title = task.title;
       li.appendChild(checkbox);
       li.appendChild(label);
       elements.templateTaskList.appendChild(li);
@@ -274,7 +296,9 @@
         };
       })
     );
-    renderTemplateTaskChecklist();
+    if (state.activeFlow === 'create-template') {
+      renderTemplateTaskChecklist();
+    }
   }
 
   function renderTemplateSelector() {
@@ -295,7 +319,7 @@
     }
     elements.runItems.innerHTML = '';
     var items = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
-    if (state.runItemsLoading) {
+    if (state.runItemsLoading && items.length === 0) {
       var loading = document.createElement('li');
       loading.className = 'run-item-empty';
       loading.textContent = 'タスクを読み込み中です。';
@@ -433,9 +457,87 @@
     });
   }
 
+  function getCachedRunItems(date) {
+    return state.runItemsByDate[String(date || '')] || null;
+  }
+
+  function rememberRunItems(date, checklist) {
+    var normalizedDate = String(date || '');
+    if (!normalizedDate) {
+      return;
+    }
+    if (!checklist) {
+      delete state.runItemsByDate[normalizedDate];
+      return;
+    }
+    state.runItemsByDate[normalizedDate] = checklist;
+  }
+
+  function sortTasksBySortOrder(tasks) {
+    return (tasks || []).slice().sort(function (a, b) {
+      return Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+    });
+  }
+
+  function sortRunItemsByStableOrder(items) {
+    return (items || []).slice();
+  }
+
+  function upsertTask(task) {
+    state.tasks = sortTasksBySortOrder((state.tasks || []).filter(function (candidate) {
+      return candidate.id !== task.id;
+    }).concat([task]));
+    renderTaskSelector();
+  }
+
+  function upsertTemplate(template) {
+    state.templates = (state.templates || []).filter(function (candidate) {
+      return candidate.id !== template.id;
+    }).concat([template]);
+    renderTemplateSelector();
+  }
+
+  function updateCurrentChecklistItems(items) {
+    var baseChecklist = state.checklist || {
+      targetDate: state.selectedDate,
+      status: 'open',
+      items: []
+    };
+    state.checklist = Object.assign({}, baseChecklist, {
+      targetDate: baseChecklist.targetDate || state.selectedDate,
+      items: sortRunItemsByStableOrder(items)
+    });
+    rememberRunItems(state.selectedDate, state.checklist);
+    renderRunItems();
+  }
+
+  function appendCurrentRunItems(items) {
+    var incomingItems = (items || []).filter(function (item) {
+      return item && item.id;
+    });
+    if (incomingItems.length === 0) {
+      return;
+    }
+    var existingItems = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
+    var itemById = {};
+    existingItems.concat(incomingItems).forEach(function (item) {
+      itemById[item.id] = item;
+    });
+    updateCurrentChecklistItems(Object.keys(itemById).map(function (itemId) {
+      return itemById[itemId];
+    }));
+  }
+
+  function removeCurrentRunItem(runItemId) {
+    var existingItems = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
+    updateCurrentChecklistItems(existingItems.filter(function (item) {
+      return item.id !== runItemId;
+    }));
+  }
+
   async function loadTasks() {
     var response = await apiRequest('GET', '/api/admin/tasks', null);
-    state.tasks = Array.isArray(response.tasks) ? response.tasks : [];
+    state.tasks = sortTasksBySortOrder(Array.isArray(response.tasks) ? response.tasks : []);
     renderTaskSelector();
   }
 
@@ -445,12 +547,14 @@
     renderTemplateSelector();
   }
 
-  async function loadRunItems() {
+  async function loadRunItems(options) {
+    var requestOptions = options || {};
     var targetDate = state.selectedDate;
     state.runItemsRequestId += 1;
     var requestId = state.runItemsRequestId;
+    var cachedChecklist = requestOptions.preferCache === false ? null : getCachedRunItems(targetDate);
     state.runItemsLoading = true;
-    state.checklist = null;
+    state.checklist = cachedChecklist || null;
     renderRunItems();
     try {
       var response = await apiRequest('GET', '/api/admin/runs/' + encodeURIComponent(targetDate), null);
@@ -458,6 +562,7 @@
         return;
       }
       state.checklist = response.checklist || null;
+      rememberRunItems(targetDate, state.checklist);
     } catch (error) {
       if (requestId !== state.runItemsRequestId || targetDate !== state.selectedDate) {
         return;
@@ -479,7 +584,7 @@
     if (!title) {
       throw new Error('タスク名を入力してください');
     }
-    await apiRequest('POST', '/api/admin/tasks', {
+    var response = await apiRequest('POST', '/api/admin/tasks', {
       title: title,
       description: description
     });
@@ -489,7 +594,11 @@
     if (elements.taskDescriptionInput) {
       elements.taskDescriptionInput.value = '';
     }
-    await loadTasks();
+    if (response.task) {
+      upsertTask(response.task);
+    } else {
+      await loadTasks();
+    }
     setStatus('タスクを作成しました');
   }
 
@@ -500,14 +609,18 @@
     if (!taskId) {
       throw new Error('挿入するタスクを選択してください');
     }
-    await apiRequest(
+    var response = await apiRequest(
       'POST',
       '/api/admin/runs/' + encodeURIComponent(state.selectedDate) + '/items:insert',
       {
         taskId: taskId
       }
     );
-    await loadRunItems();
+    if (response.item) {
+      appendCurrentRunItems([response.item]);
+    } else {
+      await loadRunItems({ preferCache: false });
+    }
     setStatus('タスクを挿入しました');
   }
 
@@ -522,14 +635,18 @@
     if (taskIds.length === 0) {
       throw new Error('テンプレートへ含めるタスクを1件以上選択してください');
     }
-    await apiRequest('POST', '/api/admin/templates', {
+    var response = await apiRequest('POST', '/api/admin/templates', {
       name: templateName,
       taskIds: taskIds
     });
     if (elements.templateNameInput) {
       elements.templateNameInput.value = '';
     }
-    await loadTemplates();
+    if (response.template) {
+      upsertTemplate(response.template);
+    } else {
+      await loadTemplates();
+    }
     setStatus('テンプレートを作成しました');
   }
 
@@ -540,25 +657,37 @@
     if (!templateId) {
       throw new Error('テンプレートを選択してください');
     }
-    await apiRequest(
+    var response = await apiRequest(
       'POST',
       '/api/admin/runs/' + encodeURIComponent(state.selectedDate) + '/templates/' + encodeURIComponent(templateId) + ':apply',
       {}
     );
-    await loadRunItems();
+    if (Array.isArray(response.items)) {
+      appendCurrentRunItems(response.items);
+    } else {
+      await loadRunItems({ preferCache: false });
+    }
     setStatus('テンプレートを挿入しました');
   }
 
   async function deleteRunItem(runItemId) {
     clearError();
     setStatus('タスクを削除しています...');
-    await apiRequest(
-      'DELETE',
-      '/api/admin/runs/' + encodeURIComponent(state.selectedDate) + '/items/' + encodeURIComponent(runItemId),
-      null
-    );
-    await loadRunItems();
-    setStatus('タスクを削除しました');
+    var previousChecklist = state.checklist;
+    removeCurrentRunItem(runItemId);
+    try {
+      await apiRequest(
+        'DELETE',
+        '/api/admin/runs/' + encodeURIComponent(state.selectedDate) + '/items/' + encodeURIComponent(runItemId),
+        null
+      );
+      setStatus('タスクを削除しました');
+    } catch (error) {
+      state.checklist = previousChecklist;
+      rememberRunItems(state.selectedDate, state.checklist);
+      renderRunItems();
+      throw error;
+    }
   }
 
   async function selectDate(date) {
@@ -573,13 +702,15 @@
     var year = Number(normalized.slice(0, 4));
     var month = Number(normalized.slice(5, 7));
     setCalendarMonth(year, month);
-    await loadRunItems();
+    await loadRunItems({ preferCache: true });
   }
 
   async function initializeAfterLogin() {
-    await loadTasks();
-    await loadTemplates();
-    await loadRunItems();
+    await Promise.all([
+      loadTasks(),
+      loadTemplates(),
+      loadRunItems()
+    ]);
   }
 
   async function login() {
@@ -616,9 +747,11 @@
     }
     state.token = token;
     try {
-      await loadTasks();
-      await loadTemplates();
-      await loadRunItems();
+      await Promise.all([
+        loadTasks(),
+        loadTemplates(),
+        loadRunItems()
+      ]);
       setAuthenticated(true);
       return true;
     } catch (error) {
@@ -644,16 +777,26 @@
       return;
     }
     button.addEventListener('click', function () {
+      button.disabled = true;
       Promise.resolve()
         .then(handler)
         .catch(function (error) {
           setError(error && error.message ? String(error.message) : '操作に失敗しました');
           clearStatus();
+        })
+        .finally(function () {
+          button.disabled = false;
         });
     });
   }
 
   function bindEvents() {
+    elements.flowButtons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        setActiveFlow(button.dataset.adminFlowButton);
+      });
+    });
+
     bindButtonClick(elements.loginButton, login);
     bindButtonClick(elements.logoutButton, function () {
       logout();
@@ -692,6 +835,7 @@
     }
     setCalendarMonth(Number(state.selectedDate.slice(0, 4)), Number(state.selectedDate.slice(5, 7)));
     bindEvents();
+    setActiveFlow(state.activeFlow);
 
     var restored = await restoreSession();
     if (!restored) {

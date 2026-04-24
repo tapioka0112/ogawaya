@@ -121,6 +121,15 @@ textarea:focus {
   min-height: 44px;
 }
 
+.admin-action-grid button[data-active='true'] {
+  background: var(--admin-primary);
+  color: #fff;
+}
+
+.admin-flow-panel {
+  margin-top: 12px;
+}
+
 button {
   border: 0;
   border-radius: 12px;
@@ -139,6 +148,11 @@ button.ghost {
   background: #fff;
   color: var(--admin-primary);
   border: 1px solid var(--admin-primary);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .error-box,
@@ -183,12 +197,40 @@ button.ghost {
   list-style: none;
   display: grid;
   gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 #template-task-list li {
-  display: flex;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
+  min-height: 42px;
+  padding: 8px;
+  border: 1px solid var(--admin-border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+#template-task-list li.template-task-empty {
+  display: block;
+  color: var(--admin-subtext);
+}
+
+#template-task-list input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  justify-self: start;
+}
+
+#template-task-list label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-item-list {
