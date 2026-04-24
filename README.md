@@ -17,6 +17,11 @@
 - 管理者画面: GitHub Pages (`pages/admin.html`)
 - Firestore: `events` / `snapshots/today` のリアルタイム read
 
+## 運用手順
+- 非IT担当者向けの全体運用手順は [docs/operations/non-technical-operations.md](/home/sota411/Documents/project/ogawaya/docs/operations/non-technical-operations.md) を参照してください。
+- 初期構築やScript Propertiesの詳細は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照してください。
+- 通知用LINE公式アカウントの増設・人数調整は [docs/operations/line-notification-scaling.md](/home/sota411/Documents/project/ogawaya/docs/operations/line-notification-scaling.md) を参照してください。
+
 ## ディレクトリ
 - [gas/](/home/sota411/Documents/project/ogawaya/gas)
 - [docs/](/home/sota411/Documents/project/ogawaya/docs)

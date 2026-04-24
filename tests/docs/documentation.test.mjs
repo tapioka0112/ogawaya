@@ -100,3 +100,21 @@ test('LINE公式アカウント分散通知の運用手順が存在する', asyn
   assert.match(scaling, /rebalanceNotificationRecipients/);
   assert.match(scaling, /LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01/);
 });
+
+test('非IT担当者向けの全体運用手順が存在する', async () => {
+  const readme = await readFile('README.md', 'utf8');
+  const bootstrap = await readFile('docs/operations/bootstrap.md', 'utf8');
+  const manual = await readFile('docs/operations/non-technical-operations.md', 'utf8');
+
+  assert.match(readme, /non-technical-operations\.md/);
+  assert.match(bootstrap, /\[non-technical-operations\.md\]\(\.\/non-technical-operations\.md\)/);
+  assert.match(manual, /毎日やること/);
+  assert.match(manual, /Apps Scriptで関数を実行する方法/);
+  assert.match(manual, /管理者画面の使い方/);
+  assert.match(manual, /従業員を追加する/);
+  assert.match(manual, /通知用LINE公式アカウントを増やす/);
+  assert.match(manual, /Googleスプレッドシートで触ってよい場所/);
+  assert.match(manual, /よくあるトラブル/);
+  assert.match(manual, /installReminderTriggers/);
+  assert.match(manual, /LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01/);
+});

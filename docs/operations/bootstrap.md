@@ -3,6 +3,8 @@
 この手順は `LIFF + GAS API + Spreadsheet` を主系として運用する前提です。
 Firestore はリアルタイム同期（read-only）で利用します。
 
+初期構築が終わった後の日々の運用は [non-technical-operations.md](./non-technical-operations.md) を参照してください。
+
 ## 1. Spreadsheet 初期シート
 
 最短は、Apps Script エディタで `bootstrapSpreadsheetTemplates` を1回実行する方法です。
