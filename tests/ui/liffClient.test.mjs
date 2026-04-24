@@ -181,7 +181,21 @@ function createFakeDocument() {
     ['input', 'new-item-description-input'],
     ['input', 'new-item-sort-order-input'],
     ['input', 'new-item-required-input'],
-    ['button', 'add-template-item-button']
+    ['button', 'add-template-item-button'],
+    ['button', 'tab-home'],
+    ['button', 'tab-stats'],
+    ['section', 'stats-content'],
+    ['circle', 'stats-overall-progress'],
+    ['span', 'stats-overall-pct'],
+    ['div', 'stats-overall-info'],
+    ['circle', 'stats-mine-progress'],
+    ['span', 'stats-mine-pct'],
+    ['div', 'stats-mine-info'],
+    ['div', 'stats-calendar'],
+    ['div', 'stats-cal-grid-header'],
+    ['span', 'stats-month-label'],
+    ['button', 'stats-prev-month'],
+    ['button', 'stats-next-month']
   ].forEach(([tagName, id]) => register(tagName, id));
 
   elements['template-item-required-input'].type = 'checkbox';
@@ -298,6 +312,26 @@ function createLogsPayload(action = 'check') {
   };
 }
 
+function createMonthlyStatsPayload(overrides = {}) {
+  return {
+    year: 2026,
+    month: 4,
+    totalDays: 1,
+    achievedDays: 0,
+    totalItems: 2,
+    myCheckedItems: 1,
+    calendar: [
+      {
+        date: '2026-04-21',
+        total: 2,
+        checked: 1,
+        achieved: false
+      }
+    ],
+    ...overrides
+  };
+}
+
 function createTemplatesPayload() {
   return {
     templates: [
@@ -319,6 +353,11 @@ function createTemplatesPayload() {
       }
     ]
   };
+}
+
+async function flushPromises() {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 test('匿名アクセス有効時は LIFF SDK なしでも初期化できる', async () => {
@@ -925,6 +964,92 @@ test('チェック操作で UI と未完了一覧を更新する', async () => {
   assert.ok(checkedItem);
   assert.equal(checkedItem.tagName, 'li');
   assert.equal(checklistCallCount, 1);
+});
+
+test('チェック更新後は統計タブを再取得して月間達成と自分の件数を同期する', async () => {
+  const { client } = await loadClientModule();
+  const documentRef = createFakeDocument();
+  let getMonthlyStatsCallCount = 0;
+  const monthlyStatsResponses = [
+    createMonthlyStatsPayload(),
+    createMonthlyStatsPayload({
+      achievedDays: 1,
+      myCheckedItems: 2,
+      calendar: [
+        {
+          date: '2026-04-21',
+          total: 2,
+          checked: 2,
+          achieved: true
+        }
+      ]
+    })
+  ];
+  const controller = client.createController({
+    document: documentRef,
+    auth: {
+      async initialize() {
+        return { idToken: 'token' };
+      }
+    },
+    api: {
+      async getMe() {
+        return {
+          userId: 'user-pt-001',
+          name: '田中 花子',
+          role: 'part_time',
+          store: { id: 'store-001', name: '青山店' }
+        };
+      },
+      async getTodayChecklist() {
+        return createChecklistPayload();
+      },
+      async getTodayIncomplete() {
+        return createIncompletePayload();
+      },
+      async getMonthlyStats() {
+        getMonthlyStatsCallCount += 1;
+        return monthlyStatsResponses.shift();
+      },
+      async checkItem(idToken, runItemId) {
+        return {
+          item: {
+            id: runItemId,
+            title: '開店準備',
+            status: 'checked',
+            checkedBy: '田中 花子',
+            checkedByUserId: 'user-pt-001',
+            checkedAt: '2026-04-21T10:36:00Z'
+          }
+        };
+      },
+      async uncheckItem() {
+        return { item: { id: 'run-item-001', status: 'unchecked' } };
+      }
+    },
+    mode: 'user'
+  });
+
+  await controller.init();
+  documentRef.elements['tab-stats'].click();
+  await flushPromises();
+
+  assert.equal(getMonthlyStatsCallCount, 1);
+  assert.match(findByClassName(documentRef.elements['stats-overall-info'], 'stats-info-sub').innerHTML, /0\/1日/);
+  assert.equal(findByClassName(documentRef.elements['stats-mine-info'], 'stats-info-main').innerHTML, '1<em>件 / 2件</em>');
+
+  documentRef.elements['tab-home'].click();
+  const checkButton = findByDataset(documentRef.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  await checkButton.click();
+  await flushPromises();
+
+  documentRef.elements['tab-stats'].click();
+  await flushPromises();
+
+  assert.equal(getMonthlyStatsCallCount, 2);
+  assert.match(findByClassName(documentRef.elements['stats-overall-info'], 'stats-info-sub').innerHTML, /1\/1日/);
+  assert.equal(findByClassName(documentRef.elements['stats-mine-info'], 'stats-info-main').innerHTML, '2<em>件 / 2件</em>');
 });
 
 test('ホームのタスクカード押下は詳細を表示しチェック API を呼ばない', async () => {

@@ -364,8 +364,10 @@
         statsYear: new Date().getFullYear(),
         statsMonth: new Date().getMonth() + 1,
         statsData: null,
+        statsLoadRequestId: 0,
         selectedTaskDetailId: '',
-        previousProgressPct: -1
+        previousProgressPct: -1,
+        activeTab: 'home'
       };
       var pendingItemActions = {};
       var documentRef = options.document;
@@ -688,6 +690,7 @@
 
       function switchTab(tab) {
         var isStats = tab === 'stats';
+        state.activeTab = isStats ? 'stats' : 'home';
         if (elements.tabHome) {
           if (isStats) {
             elements.tabHome.classList.remove('tab-btn--active');
@@ -829,14 +832,30 @@
       }
 
       async function loadStats() {
+        var requestId = state.statsLoadRequestId + 1;
+        state.statsLoadRequestId = requestId;
         updateMonthLabel();
         renderCalendar(state.statsYear, state.statsMonth, []);
         try {
           var data = await api.getMonthlyStats(state.idToken, state.statsYear, state.statsMonth);
+          if (requestId !== state.statsLoadRequestId) {
+            return;
+          }
           state.statsData = data;
           renderStats();
         } catch (error) {
+          if (requestId !== state.statsLoadRequestId) {
+            return;
+          }
           setError(error && error.message ? error.message : '統計データの取得に失敗しました');
+        }
+      }
+
+      function invalidateStatsAfterChecklistMutation() {
+        state.statsLoadRequestId += 1;
+        state.statsData = null;
+        if (state.activeTab === 'stats') {
+          loadStats();
         }
       }
 
@@ -918,6 +937,7 @@
         if (state.incomplete) {
           renderIncomplete(state.incomplete);
         }
+        invalidateStatsAfterChecklistMutation();
       }
 
       function buildOptimisticCheckedItem(item) {
