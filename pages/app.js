@@ -664,6 +664,29 @@
     setText(labelEl, safePct + '%');
   }
 
+  function triggerCompletionConfetti() {
+    var layer = document.createElement('div');
+    layer.className = 'completion-confetti-layer';
+    layer.setAttribute('aria-hidden', 'true');
+    var colors = ['#f47a39', '#d4a017', '#214838', '#ffe4d6', '#ffffff'];
+    for (var index = 0; index < 34; index += 1) {
+      var piece = document.createElement('span');
+      piece.className = 'completion-confetti-piece';
+      piece.style.left = String((index * 29) % 100) + '%';
+      piece.style.backgroundColor = colors[index % colors.length];
+      piece.style.animationDelay = String((index % 9) * 28) + 'ms';
+      piece.style.animationDuration = String(820 + (index % 6) * 90) + 'ms';
+      piece.style.borderRadius = index % 3 === 0 ? '999px' : '2px';
+      layer.appendChild(piece);
+    }
+    document.body.appendChild(layer);
+    global.setTimeout(function () {
+      if (layer.parentNode && typeof layer.parentNode.removeChild === 'function') {
+        layer.parentNode.removeChild(layer);
+      }
+    }, 1600);
+  }
+
   function renderStatsInfoContent(infoElement, lines) {
     if (!infoElement) {
       return;
@@ -2179,6 +2202,7 @@
     }
     setText(elements.progressRingLabel, isComplete ? '完了' : pct + '%');
     if (isComplete && !wasComplete) {
+      triggerCompletionConfetti();
       if (global.navigator && typeof global.navigator.vibrate === 'function') {
         global.navigator.vibrate([10, 50, 30]);
       }

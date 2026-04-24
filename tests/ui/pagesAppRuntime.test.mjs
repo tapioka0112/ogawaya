@@ -57,7 +57,14 @@ class FakeElement {
   }
 
   appendChild(child) {
+    child.parentNode = this;
     this.children.push(child);
+    return child;
+  }
+
+  removeChild(child) {
+    this.children = this.children.filter((candidate) => candidate !== child);
+    child.parentNode = null;
     return child;
   }
 
@@ -108,6 +115,7 @@ class FakeElement {
 
 function createFakeDocument() {
   const elements = {};
+  const body = new FakeElement('body');
 
   function register(tagName, id) {
     elements[id] = new FakeElement(tagName, id);
@@ -162,6 +170,7 @@ function createFakeDocument() {
 
   return {
     elements,
+    body,
     readyState: 'complete',
     visibilityState: 'visible',
     getElementById(id) {
@@ -191,6 +200,10 @@ function flattenElements(root) {
 
 function findByDataset(root, key, value) {
   return flattenElements(root).find((node) => node.dataset[key] === value) ?? null;
+}
+
+function findByClassName(root, className) {
+  return flattenElements(root).find((node) => String(node.className || '').split(/\s+/).includes(className)) ?? null;
 }
 
 function datasetValues(root, key) {
@@ -407,6 +420,8 @@ test('GitHub Pages app は全件完了済みでも外部エフェクトに依存
 
   assert.equal(document.elements['error-message'].textContent, '');
   assert.equal(document.elements['progress-ring-label'].textContent, '完了');
+  assert.equal(document.elements['progress-ring-label'].classList.values.has('celebrating'), true);
+  assert.ok(findByClassName(document.body, 'completion-confetti-layer'));
   assert.equal(
     findByDataset(document.elements['checklist-items'], 'status', 'checked')?.dataset.status,
     'checked'

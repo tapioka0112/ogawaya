@@ -364,7 +364,8 @@
         statsYear: new Date().getFullYear(),
         statsMonth: new Date().getMonth() + 1,
         statsData: null,
-        selectedTaskDetailId: ''
+        selectedTaskDetailId: '',
+        previousProgressPct: -1
       };
       var pendingItemActions = {};
       var documentRef = options.document;
@@ -643,7 +644,46 @@
           var offset = CIRCUMFERENCE * (1 - pct / 100);
           elements.progressRingProgress.style.strokeDashoffset = String(offset);
         }
-        setText(elements.progressRingLabel, pct + '%');
+        var isComplete = pct === 100 && total > 0;
+        var wasComplete = state.previousProgressPct === 100;
+        state.previousProgressPct = pct;
+        if (elements.progressRingProgress) {
+          elements.progressRingProgress.style.stroke = isComplete ? '#d4a017' : '';
+        }
+        if (elements.progressRingLabel && elements.progressRingLabel.classList) {
+          if (isComplete) {
+            elements.progressRingLabel.classList.add('celebrating');
+          } else {
+            elements.progressRingLabel.classList.remove('celebrating');
+          }
+        }
+        setText(elements.progressRingLabel, isComplete ? '完了' : pct + '%');
+        if (isComplete && !wasComplete) {
+          triggerCompletionConfetti();
+        }
+      }
+
+      function triggerCompletionConfetti() {
+        var layer = documentRef.createElement('div');
+        layer.className = 'completion-confetti-layer';
+        layer.setAttribute('aria-hidden', 'true');
+        var colors = ['#f47a39', '#d4a017', '#214838', '#ffe4d6', '#ffffff'];
+        for (var index = 0; index < 34; index += 1) {
+          var piece = documentRef.createElement('span');
+          piece.className = 'completion-confetti-piece';
+          piece.style.left = String((index * 29) % 100) + '%';
+          piece.style.backgroundColor = colors[index % colors.length];
+          piece.style.animationDelay = String((index % 9) * 28) + 'ms';
+          piece.style.animationDuration = String(820 + (index % 6) * 90) + 'ms';
+          piece.style.borderRadius = index % 3 === 0 ? '999px' : '2px';
+          layer.appendChild(piece);
+        }
+        documentRef.body.appendChild(layer);
+        global.setTimeout(function () {
+          if (layer.parentNode && typeof layer.parentNode.removeChild === 'function') {
+            layer.parentNode.removeChild(layer);
+          }
+        }, 1600);
       }
 
       function switchTab(tab) {

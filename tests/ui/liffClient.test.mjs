@@ -3,6 +3,20 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
+class FakeClassList {
+  constructor() {
+    this.values = new Set();
+  }
+
+  add(name) {
+    this.values.add(name);
+  }
+
+  remove(name) {
+    this.values.delete(name);
+  }
+}
+
 class FakeElement {
   constructor(tagName, id = '') {
     this.tagName = tagName;
@@ -12,6 +26,7 @@ class FakeElement {
     this.dataset = {};
     this.hidden = false;
     this.className = '';
+    this.classList = new FakeClassList();
     this.listeners = {};
     this.value = '';
     this.disabled = false;
@@ -34,10 +49,17 @@ class FakeElement {
   }
 
   appendChild(child) {
+    child.parentNode = this;
     this.children.push(child);
     if (this.tagName === 'select' && child.tagName === 'option' && !this.value) {
       this.value = child.value;
     }
+    return child;
+  }
+
+  removeChild(child) {
+    this.children = this.children.filter((candidate) => candidate !== child);
+    child.parentNode = null;
     return child;
   }
 
@@ -47,6 +69,9 @@ class FakeElement {
 
   setAttribute(name, value) {
     this._attributes[name] = String(value);
+    if (name === 'class') {
+      this.className = String(value);
+    }
   }
 
   getAttribute(name) {
@@ -102,6 +127,7 @@ class FakeElement {
 
 function createFakeDocument() {
   const elements = {};
+  const body = new FakeElement('body');
 
   function register(tagName, id) {
     elements[id] = new FakeElement(tagName, id);
@@ -114,6 +140,11 @@ function createFakeDocument() {
     ['div', 'store-name'],
     ['div', 'target-date'],
     ['div', 'progress-summary'],
+    ['strong', 'progress-count-checked'],
+    ['span', 'progress-count-total'],
+    ['span', 'progress-bar-fill'],
+    ['circle', 'progress-ring-progress'],
+    ['span', 'progress-ring-label'],
     ['ul', 'checklist-items'],
     ['article', 'task-detail-panel'],
     ['h2', 'task-detail-title'],
@@ -158,6 +189,7 @@ function createFakeDocument() {
 
   return {
     elements,
+    body,
     getElementById(id) {
       return elements[id];
     },
@@ -178,6 +210,10 @@ function flattenElements(root) {
 
 function findByDataset(root, key, value) {
   return flattenElements(root).find((node) => node.dataset[key] === value) ?? null;
+}
+
+function findByClassName(root, className) {
+  return flattenElements(root).find((node) => String(node.className || '').split(/\s+/).includes(className)) ?? null;
 }
 
 function toPlainJson(value) {
@@ -881,6 +917,9 @@ test('チェック操作で UI と未完了一覧を更新する', async () => {
     }
   });
   assert.equal(documentRef.elements['progress-summary'].textContent, '2 / 2');
+  assert.equal(documentRef.elements['progress-ring-label'].textContent, '完了');
+  assert.equal(documentRef.elements['progress-ring-label'].classList.values.has('celebrating'), true);
+  assert.ok(findByClassName(documentRef.body, 'completion-confetti-layer'));
   assert.equal(documentRef.elements['incomplete-summary'].textContent, '未完了 0 件');
   const checkedItem = findByDataset(documentRef.elements['checklist-items'], 'status', 'checked');
   assert.ok(checkedItem);
