@@ -1,6 +1,8 @@
 (function (global) {
   var ADMIN_SESSION_STORAGE_KEY = 'ogawaya:admin:session-token';
   var JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+  var TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS = 5;
+  var TEMPLATE_GAS_SYNC_BASE_DELAY_MS = 1000;
 
   var state = {
     config: null,
@@ -15,7 +17,10 @@
     checklist: null,
     runItemsByDate: {},
     runItemsRequestId: 0,
-    runItemsLoading: false
+    runItemsLoading: false,
+    firebaseApp: null,
+    firestore: null,
+    firebaseAuthPromise: null
   };
 
   var elements = {
@@ -194,8 +199,53 @@
     }
     return {
       gasApiBaseUrl: gasApiBaseUrl,
-      defaultStoreId: defaultStoreId
+      defaultStoreId: defaultStoreId,
+      enableRealtimeSync: config.enableRealtimeSync !== false,
+      clientFirestoreWriteEnabled: config.clientFirestoreWriteEnabled === true,
+      firebase: config.firebase || null
     };
+  }
+
+  function initializeRealtimeClient() {
+    if (!state.config || !state.config.enableRealtimeSync || !state.config.firebase) {
+      return false;
+    }
+    if (!global.firebase || typeof global.firebase.initializeApp !== 'function' || typeof global.firebase.firestore !== 'function') {
+      return false;
+    }
+    if (!state.firebaseApp) {
+      if (Array.isArray(global.firebase.apps) && global.firebase.apps.length > 0) {
+        state.firebaseApp = global.firebase.app();
+      } else {
+        state.firebaseApp = global.firebase.initializeApp(state.config.firebase);
+      }
+    }
+    if (!state.firestore) {
+      state.firestore = global.firebase.firestore();
+    }
+    return true;
+  }
+
+  function ensureFirebaseAuthSession() {
+    if (!initializeRealtimeClient()) {
+      return Promise.reject(new Error('Firebase が初期化されていません'));
+    }
+    if (!global.firebase || typeof global.firebase.auth !== 'function') {
+      return Promise.reject(new Error('Firebase Auth SDK が読み込まれていません'));
+    }
+    var auth = global.firebase.auth();
+    if (auth.currentUser) {
+      return Promise.resolve(auth.currentUser);
+    }
+    if (!state.firebaseAuthPromise) {
+      state.firebaseAuthPromise = auth.signInAnonymously().then(function (result) {
+        return result && result.user ? result.user : auth.currentUser;
+      }).catch(function (error) {
+        state.firebaseAuthPromise = null;
+        throw error;
+      });
+    }
+    return state.firebaseAuthPromise;
   }
 
   function createApiError(message, statusCode, code) {
@@ -345,6 +395,8 @@
       if (item.status === 'checked') {
         var checkedBy = item.checkedBy || 'LINEユーザー';
         meta.textContent = checkedBy + ' が完了';
+      } else if (item.pendingSave) {
+        meta.textContent = '未完了・保存中';
       } else {
         meta.textContent = '未完了';
       }
@@ -497,6 +549,24 @@
     renderTemplateSelector();
   }
 
+  function getSelectedTemplate() {
+    var templateId = elements.templateSelect ? String(elements.templateSelect.value || '') : '';
+    if (!templateId) {
+      return null;
+    }
+    return (state.templates || []).find(function (template) {
+      return template.id === templateId;
+    }) || null;
+  }
+
+  function createClientRunItemId(templateItemId) {
+    var suffix = String(templateItemId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 36);
+    if (global.crypto && typeof global.crypto.randomUUID === 'function') {
+      return 'admin-' + global.crypto.randomUUID();
+    }
+    return 'admin-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12) + '-' + suffix;
+  }
+
   function updateCurrentChecklistItems(items) {
     var baseChecklist = state.checklist || {
       targetDate: state.selectedDate,
@@ -511,21 +581,201 @@
     renderRunItems();
   }
 
-  function appendCurrentRunItems(items) {
+  function appendRunItemsForDate(date, items) {
     var incomingItems = (items || []).filter(function (item) {
       return item && item.id;
     });
     if (incomingItems.length === 0) {
       return;
     }
-    var existingItems = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
-    var itemById = {};
-    existingItems.concat(incomingItems).forEach(function (item) {
-      itemById[item.id] = item;
+    var targetDate = String(date || '');
+    var baseChecklist = targetDate === state.selectedDate
+      ? state.checklist
+      : getCachedRunItems(targetDate);
+    var existingItems = baseChecklist && Array.isArray(baseChecklist.items) ? baseChecklist.items : [];
+    var incomingIds = {};
+    var incomingTemplateItemIds = {};
+    incomingItems.forEach(function (item) {
+      incomingIds[item.id] = true;
+      if (item.templateItemId) {
+        incomingTemplateItemIds[item.templateItemId] = true;
+      }
     });
-    updateCurrentChecklistItems(Object.keys(itemById).map(function (itemId) {
-      return itemById[itemId];
+    var nextItems = existingItems.filter(function (item) {
+      if (incomingIds[item.id]) {
+        return false;
+      }
+      return !(item.templateItemId && incomingTemplateItemIds[item.templateItemId]);
+    }).concat(incomingItems);
+    if (targetDate === state.selectedDate) {
+      updateCurrentChecklistItems(nextItems);
+      return;
+    }
+    rememberRunItems(targetDate, Object.assign({}, baseChecklist || {
+      targetDate: targetDate,
+      status: 'open',
+      items: []
+    }, {
+      items: sortRunItemsByStableOrder(nextItems)
     }));
+  }
+
+  function appendCurrentRunItems(items) {
+    appendRunItemsForDate(state.selectedDate, items);
+  }
+
+  function markRunItemsSavedForDate(date, runItemIds) {
+    var targetDate = String(date || '');
+    var idSet = {};
+    (runItemIds || []).forEach(function (runItemId) {
+      idSet[runItemId] = true;
+    });
+    var baseChecklist = targetDate === state.selectedDate
+      ? state.checklist
+      : getCachedRunItems(targetDate);
+    if (!baseChecklist || !Array.isArray(baseChecklist.items)) {
+      return;
+    }
+    var nextItems = baseChecklist.items.map(function (item) {
+      if (!idSet[item.id]) {
+        return item;
+      }
+      return Object.assign({}, item, {
+        pendingSave: false
+      });
+    });
+    if (targetDate === state.selectedDate) {
+      updateCurrentChecklistItems(nextItems);
+      return;
+    }
+    rememberRunItems(targetDate, Object.assign({}, baseChecklist, {
+      items: nextItems
+    }));
+  }
+
+  function getExistingTemplateItemIdSet() {
+    var result = {};
+    var items = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
+    items.forEach(function (item) {
+      if (item.templateItemId) {
+        result[item.templateItemId] = true;
+      }
+    });
+    return result;
+  }
+
+  function buildOptimisticTemplateRunItems(template) {
+    var templateItems = template && Array.isArray(template.items) ? template.items : [];
+    var existingTemplateItemIds = getExistingTemplateItemIdSet();
+    var existingItems = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
+    var maxSortOrder = existingItems.reduce(function (maxValue, item) {
+      return Math.max(maxValue, Number(item.sortOrder || 0));
+    }, 0);
+    var now = new Date().toISOString();
+    return templateItems.filter(function (item) {
+      return item && item.id && !existingTemplateItemIds[item.id];
+    }).map(function (item, index) {
+      return {
+        id: createClientRunItemId(item.id),
+        templateItemId: String(item.id),
+        title: String(item.title || ''),
+        description: String(item.description || ''),
+        sortOrder: maxSortOrder + index + 1,
+        status: 'unchecked',
+        checkedBy: null,
+        checkedByUserId: null,
+        checkedAt: null,
+        updatedAt: now,
+        pendingSave: true
+      };
+    }).filter(function (item) {
+      return item.title !== '';
+    });
+  }
+
+  function buildTemplateInsertEventPayload(targetDate, templateId, items) {
+    var runId = state.checklist && state.checklist.runId ? String(state.checklist.runId) : '';
+    if (!runId) {
+      throw new Error('Firestore同期用のrunIdが未確定です');
+    }
+    return {
+      type: 'template_insert',
+      storeId: state.storeId,
+      targetDate: targetDate,
+      runId: runId,
+      templateId: templateId,
+      items: items.map(function (item) {
+        return {
+          id: item.id,
+          templateItemId: item.templateItemId,
+          title: item.title,
+          description: item.description || '',
+          sortOrder: Number(item.sortOrder || 0),
+          updatedAt: item.updatedAt || ''
+        };
+      }),
+      sourceUserId: 'admin:' + state.storeId,
+      emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
+    };
+  }
+
+  function writeTemplateInsertEvent(targetDate, templateId, items) {
+    if (!state.config || state.config.clientFirestoreWriteEnabled !== true) {
+      return Promise.reject(new Error('Firestore直接書き込みは無効です'));
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      return Promise.resolve();
+    }
+    return ensureFirebaseAuthSession().then(function () {
+      return state.firestore
+        .collection('stores')
+        .doc(state.storeId)
+        .collection('runs')
+        .doc(targetDate)
+        .collection('events')
+        .add(buildTemplateInsertEventPayload(targetDate, templateId, items));
+    });
+  }
+
+  function buildTemplateClientItems(items) {
+    return (items || []).map(function (item) {
+      return {
+        id: item.id,
+        templateItemId: item.templateItemId
+      };
+    });
+  }
+
+  function syncTemplateInsertViaGasInBackground(targetDate, templateId, items, attempt) {
+    var currentAttempt = Number(attempt || 0);
+    apiRequest(
+      'POST',
+      '/api/admin/runs/' + encodeURIComponent(targetDate) + '/templates/' + encodeURIComponent(templateId) + ':apply',
+      {
+        clientItems: buildTemplateClientItems(items)
+      }
+    ).then(function (response) {
+      if (Array.isArray(response.items) && response.items.length > 0) {
+        appendRunItemsForDate(targetDate, response.items);
+      } else {
+        markRunItemsSavedForDate(targetDate, items.map(function (item) {
+          return item.id;
+        }));
+      }
+      if (targetDate === state.selectedDate) {
+        setStatus('テンプレートを保存しました');
+      }
+    }).catch(function (error) {
+      if (currentAttempt + 1 < TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS) {
+        global.setTimeout(function () {
+          syncTemplateInsertViaGasInBackground(targetDate, templateId, items, currentAttempt + 1);
+        }, TEMPLATE_GAS_SYNC_BASE_DELAY_MS * Math.pow(2, currentAttempt));
+        return;
+      }
+      setError(error && error.message
+        ? 'テンプレートの保存に失敗しました: ' + String(error.message)
+        : 'テンプレートの保存に失敗しました');
+    });
   }
 
   function removeCurrentRunItem(runItemId) {
@@ -653,21 +903,21 @@
   async function applyTemplate() {
     clearError();
     setStatus('テンプレートを挿入しています...');
-    var templateId = elements.templateSelect ? String(elements.templateSelect.value || '') : '';
-    if (!templateId) {
+    var template = getSelectedTemplate();
+    if (!template) {
       throw new Error('テンプレートを選択してください');
     }
-    var response = await apiRequest(
-      'POST',
-      '/api/admin/runs/' + encodeURIComponent(state.selectedDate) + '/templates/' + encodeURIComponent(templateId) + ':apply',
-      {}
-    );
-    if (Array.isArray(response.items)) {
-      appendCurrentRunItems(response.items);
-    } else {
-      await loadRunItems({ preferCache: false });
+    var optimisticItems = buildOptimisticTemplateRunItems(template);
+    if (optimisticItems.length === 0) {
+      setStatus('このテンプレートのタスクはすでに挿入済みです');
+      return;
     }
-    setStatus('テンプレートを挿入しました');
+    appendCurrentRunItems(optimisticItems);
+    setStatus('テンプレートを挿入しました。保存しています...');
+    writeTemplateInsertEvent(state.selectedDate, template.id, optimisticItems).catch(function (error) {
+      console.error('[admin-sync] template_insert realtime write failed', error);
+    });
+    syncTemplateInsertViaGasInBackground(state.selectedDate, template.id, optimisticItems, 0);
   }
 
   async function deleteRunItem(runItemId) {

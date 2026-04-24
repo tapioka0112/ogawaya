@@ -1139,6 +1139,7 @@
   function cloneChecklistItem(item) {
     return {
       id: item.id,
+      templateItemId: item.templateItemId,
       title: item.title,
       description: item.description,
       status: item.status,
@@ -1169,6 +1170,7 @@
     var normalizedItems = rawItems.map(function (item) {
       return {
         id: String(item.id || ''),
+        templateItemId: String(item.templateItemId || ''),
         title: String(item.title || ''),
         description: String(item.description || ''),
         status: item.status === 'checked' ? 'checked' : 'unchecked',
@@ -1299,6 +1301,9 @@
     target.checkedByUserId = updatedItem.checkedByUserId;
     target.checkedAt = updatedItem.checkedAt;
     target.updatedAt = updatedItem.updatedAt;
+    if (Object.prototype.hasOwnProperty.call(updatedItem, 'templateItemId')) {
+      target.templateItemId = updatedItem.templateItemId;
+    }
     if (Object.prototype.hasOwnProperty.call(updatedItem, 'description')) {
       target.description = updatedItem.description;
     }
@@ -1313,6 +1318,7 @@
   function buildOptimisticCheckedItem(item) {
     return {
       id: item.id,
+      templateItemId: item.templateItemId,
       title: item.title,
       description: item.description,
       status: 'checked',
@@ -1326,6 +1332,7 @@
   function buildOptimisticUncheckedItem(item) {
     return {
       id: item.id,
+      templateItemId: item.templateItemId,
       title: item.title,
       description: item.description,
       status: 'unchecked',
@@ -1663,6 +1670,20 @@
     };
   }
 
+  function normalizeTemplateInsertEventItem(item) {
+    return {
+      id: String(item && item.id ? item.id : ''),
+      templateItemId: String(item && item.templateItemId ? item.templateItemId : ''),
+      title: String(item && item.title ? item.title : ''),
+      description: String(item && item.description ? item.description : ''),
+      status: 'unchecked',
+      checkedBy: null,
+      checkedByUserId: null,
+      checkedAt: null,
+      updatedAt: item && item.updatedAt ? String(item.updatedAt) : new Date().toISOString()
+    };
+  }
+
   function writeRealtimeEvent(updatedItem) {
     if (!state.config || state.config.clientFirestoreWriteEnabled !== true) {
       return Promise.reject(new Error('Firestore 直接書き込みは無効です'));
@@ -1700,6 +1721,10 @@
       return;
     }
     if (String(eventPayload.runId || '') !== String(state.checklist.runId || '')) {
+      return;
+    }
+    if (eventPayload.type === 'template_insert') {
+      applyTemplateInsertRealtimeEvent(eventPayload);
       return;
     }
     var currentUserId = state.checklist && state.checklist.currentUser
@@ -1748,6 +1773,41 @@
     }
     applyChecklistItemUpdate(syncedItem);
     actionState.confirmedItem = cloneChecklistItem(syncedItem);
+  }
+
+  function applyTemplateInsertRealtimeEvent(eventPayload) {
+    var incomingItems = Array.isArray(eventPayload.items) ? eventPayload.items.map(normalizeTemplateInsertEventItem) : [];
+    incomingItems = incomingItems.filter(function (item) {
+      return item.id !== '' && item.title !== '';
+    });
+    if (incomingItems.length === 0) {
+      return;
+    }
+    var existingItems = Array.isArray(state.checklist.items) ? state.checklist.items : [];
+    var existingIds = {};
+    var existingTemplateItemIds = {};
+    existingItems.forEach(function (item) {
+      existingIds[item.id] = true;
+      if (item.templateItemId) {
+        existingTemplateItemIds[item.templateItemId] = true;
+      }
+    });
+    var newItems = incomingItems.filter(function (item) {
+      if (existingIds[item.id]) {
+        return false;
+      }
+      return !(item.templateItemId && existingTemplateItemIds[item.templateItemId]);
+    });
+    if (newItems.length === 0) {
+      return;
+    }
+    state.checklist.items = existingItems.concat(newItems);
+    recomputeProgress();
+    renderChecklist();
+    renderSelectedTaskDetail({ focus: false });
+    renderOverview();
+    renderIncomplete();
+    updateStatsFromCurrentChecklist();
   }
 
   function stopRealtimeSync() {

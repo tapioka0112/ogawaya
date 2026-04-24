@@ -435,3 +435,108 @@ test('管理者画面向け API でログイン後にタスク作成・挿入・
   });
   assert.equal(deleteItem.statusCode, 200);
 });
+
+test('管理者テンプレート一覧は挿入用にテンプレート項目を返す', async () => {
+  const app = await createAdminApp();
+  const token = loginAsAdmin(app);
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/admin/templates',
+    query: { adminToken: token },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  const dailyTemplate = response.body.templates.find((template) => template.id === 'tmpl-001');
+  assert.ok(dailyTemplate);
+  assert.equal(dailyTemplate.itemCount, 2);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(dailyTemplate.items.map((item) => item.id))),
+    ['tmpl-item-001', 'tmpl-item-002']
+  );
+});
+
+test('管理者テンプレート作成レスポンスは新規テンプレート項目IDを返す', async () => {
+  const app = await createAdminApp();
+  const token = loginAsAdmin(app);
+
+  const createTask = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/tasks',
+    query: { adminToken: token },
+    body: {
+      title: '厨房床清掃',
+      description: '床全体を清掃する'
+    }
+  });
+  assert.equal(createTask.statusCode, 201);
+  const taskId = createTask.body.task.id;
+
+  const createTemplate = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/templates',
+    query: { adminToken: token },
+    body: {
+      name: '毎日タスク',
+      taskIds: [taskId]
+    }
+  });
+
+  assert.equal(createTemplate.statusCode, 201);
+  assert.equal(createTemplate.body.template.itemCount, 1);
+  assert.equal(createTemplate.body.template.items.length, 1);
+  assert.notEqual(createTemplate.body.template.items[0].id, taskId);
+  assert.equal(createTemplate.body.template.items[0].title, '厨房床清掃');
+});
+
+test('管理者テンプレート挿入はクライアント生成IDで保存して即時反映とGAS保存結果を一致させる', async () => {
+  const app = await createAdminApp();
+  const token = loginAsAdmin(app);
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/runs/2026-04-21/templates/tmpl-001:apply',
+    query: { adminToken: token },
+    body: {
+      clientItems: [
+        {
+          templateItemId: 'tmpl-item-002',
+          id: 'client-run-item-002'
+        }
+      ]
+    }
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.insertedCount, 1);
+  assert.equal(response.body.items[0].id, 'client-run-item-002');
+  assert.equal(response.body.items[0].templateItemId, 'tmpl-item-002');
+  assert.ok(app.repository.findRunItemById('client-run-item-002'));
+});
+
+test('管理者テンプレート挿入は重複したクライアント生成IDを拒否する', async () => {
+  const app = await createAdminApp();
+  const token = loginAsAdmin(app);
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/runs/2026-04-21/templates/tmpl-001:apply',
+    query: { adminToken: token },
+    body: {
+      clientItems: [
+        {
+          templateItemId: 'tmpl-item-001',
+          id: 'client-run-item-dup'
+        },
+        {
+          templateItemId: 'tmpl-item-002',
+          id: 'client-run-item-dup'
+        }
+      ]
+    }
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.code, 'invalid_request');
+});

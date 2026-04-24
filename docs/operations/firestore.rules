@@ -54,9 +54,35 @@ service cloud.firestore {
         );
     }
 
+    function isValidTemplateInsertEvent(storeId, targetDate) {
+      let data = request.resource.data;
+      return isSignedIn()
+        && data.keys().hasOnly([
+          'type',
+          'runId',
+          'targetDate',
+          'storeId',
+          'templateId',
+          'items',
+          'sourceUserId',
+          'emittedAt'
+        ])
+        && data.type == 'template_insert'
+        && data.storeId == storeId
+        && data.targetDate == targetDate
+        && isSafeText(data.runId, 80)
+        && isSafeText(data.templateId, 120)
+        && data.items is list
+        && data.items.size() > 0
+        && data.items.size() <= 30
+        && isSafeText(data.sourceUserId, 128)
+        && data.sourceUserId != ''
+        && data.emittedAt == request.time;
+    }
+
     match /stores/{storeId}/runs/{targetDate}/events/{eventId} {
       allow read: if true;
-      allow create: if isValidChecklistEvent(storeId, targetDate);
+      allow create: if isValidChecklistEvent(storeId, targetDate) || isValidTemplateInsertEvent(storeId, targetDate);
       allow update, delete: if false;
     }
 

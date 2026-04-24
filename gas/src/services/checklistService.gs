@@ -190,6 +190,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var templateItemId = String(item.template_item_id || '').trim();
     return {
       id: item.id,
+      templateItemId: templateItemId,
       title: item.title,
       description: descriptionByTemplateItemId && templateItemId
         ? String(descriptionByTemplateItemId[templateItemId] || '')
@@ -813,6 +814,25 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       };
     }
 
+    function buildClientRunItemIdByTemplateItemId(body) {
+      var result = {};
+      var seenRunItemIds = {};
+      var rawItems = body && Array.isArray(body.clientItems) ? body.clientItems : [];
+      rawItems.forEach(function (entry) {
+        var templateItemId = String(entry && entry.templateItemId ? entry.templateItemId : '').trim();
+        var runItemId = String(entry && entry.id ? entry.id : '').trim();
+        if (!templateItemId && !runItemId) {
+          return;
+        }
+        ns.assert(templateItemId, 'invalid_request', 'clientItems.templateItemId は必須です', 400);
+        ns.assert(/^[A-Za-z0-9_-]{8,120}$/.test(runItemId), 'invalid_request', 'clientItems.id の形式が不正です', 400);
+        ns.assert(!seenRunItemIds[runItemId], 'invalid_request', 'clientItems.id が重複しています', 400);
+        seenRunItemIds[runItemId] = true;
+        result[templateItemId] = runItemId;
+      });
+      return result;
+    }
+
     function ensureRunForDate(storeId, targetDate) {
       var existingRun = repository.findRunByStoreAndDate(storeId, targetDate);
       if (existingRun) {
@@ -1000,7 +1020,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             return {
               id: entry.template.id,
               name: entry.template.name,
-              itemCount: entry.items.length
+              itemCount: entry.items.length,
+              items: entry.items.map(buildTemplateItemResponse)
             };
           })
         };
@@ -1048,8 +1069,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           created_at: now,
           updated_at: now
         });
-        selectedTasks.forEach(function (task, index) {
-          repository.createTemplateItem({
+        var createdItems = selectedTasks.map(function (task, index) {
+          return repository.createTemplateItem({
             id: Utilities.getUuid(),
             template_id: template.id,
             title: task.title,
@@ -1065,7 +1086,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           template: {
             id: template.id,
             name: template.name,
-            itemCount: selectedTasks.length
+            itemCount: createdItems.length,
+            items: createdItems.map(buildTemplateItemResponse)
           }
         };
       },
@@ -1133,6 +1155,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
         var templateItems = repository.listTemplateItems(template.id);
         ns.assert(templateItems.length > 0, 'invalid_request', 'テンプレートに項目がありません', 400);
+        var clientRunItemIdByTemplateItemId = buildClientRunItemIdByTemplateItemId(body);
 
         var run = ensureRunForDate(session.storeId, targetDate);
         var existingRunItems = repository.listRunItems(run.id);
@@ -1149,7 +1172,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var newItems = templateItems.filter(function (templateItem) {
           return !existingTemplateItemIds[templateItem.id];
         }).map(function (templateItem, index) {
-          return {
+          var item = {
             id: Utilities.getUuid(),
             run_id: run.id,
             template_item_id: templateItem.id,
@@ -1161,6 +1184,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             checked_at: '',
             updated_at: now
           };
+          if (clientRunItemIdByTemplateItemId[templateItem.id]) {
+            ns.assert(
+              !repository.findRunItemById(clientRunItemIdByTemplateItemId[templateItem.id]),
+              'invalid_request',
+              'clientItems.id は既に使用されています',
+              400
+            );
+            item.id = clientRunItemIdByTemplateItemId[templateItem.id];
+          }
+          return item;
         });
         var insertedItems = newItems.length > 0 ? repository.createRunItems(newItems) : [];
         var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, insertedItems);
