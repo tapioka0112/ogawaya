@@ -350,3 +350,82 @@ test('GitHub Pages app は古い再取得レスポンスで新しいチェック
   );
   assert.deepEqual(requestedPaths.filter((path) => path === 'api/checklists/today').length, 2);
 });
+
+test('GitHub Pages app は古い再取得レスポンスで新しい未チェック状態を戻さない', async () => {
+  const initialItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'checked',
+    checkedBy: '田中LINE',
+    checkedByUserId: 'line-user-001',
+    checkedAt: '2026-04-24T10:05:00Z',
+    updatedAt: '2026-04-24T10:05:00Z'
+  };
+  const uncheckedItem = {
+    ...initialItem,
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:10:00Z'
+  };
+  const staleRefreshItem = {
+    ...initialItem,
+    updatedAt: ''
+  };
+  const requestedPaths = [];
+  let todayRequestCount = 0;
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      requestedPaths.push(url);
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: false,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: null
+      });
+    }
+    const path = new URL(url).searchParams.get('path');
+    requestedPaths.push(path || url);
+    if (path === 'api/checklists/today') {
+      todayRequestCount += 1;
+      return response(createChecklistPayload(todayRequestCount === 1 ? initialItem : staleRefreshItem));
+    }
+    if (path === 'api/checklist-items/run-item-001/uncheck') {
+      return response({
+        ok: true,
+        statusCode: 200,
+        item: uncheckedItem
+      });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  });
+
+  const uncheckButton = findByDataset(document.elements['checklist-items'], 'action', 'uncheck');
+  assert.ok(uncheckButton);
+  uncheckButton.click();
+  await wait(300);
+
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'status', 'unchecked')?.dataset.status,
+    'unchecked',
+    JSON.stringify({ requestedPaths, statuses: datasetValues(document.elements['checklist-items'], 'status') })
+  );
+
+  document.elements['refresh-button'].click();
+  await wait(30);
+
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'status', 'unchecked')?.dataset.status,
+    'unchecked',
+    JSON.stringify({ requestedPaths, statuses: datasetValues(document.elements['checklist-items'], 'status') })
+  );
+  assert.deepEqual(requestedPaths.filter((path) => path === 'api/checklists/today').length, 2);
+});
