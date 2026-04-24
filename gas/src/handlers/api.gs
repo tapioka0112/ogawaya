@@ -15,26 +15,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   }
 
   function createLineClient(channelAccessToken) {
-    function postLineMessageApi(path, payload) {
-      ns.assert(channelAccessToken, 'config_error', 'LINE_CHANNEL_ACCESS_TOKEN が未設定です', 500);
-      var response = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/' + path, {
-        method: 'post',
-        contentType: 'application/json',
-        headers: {
-          Authorization: 'Bearer ' + channelAccessToken
-        },
-        payload: JSON.stringify(payload)
-      });
-      if (response && typeof response.getResponseCode === 'function') {
-        var statusCode = Number(response.getResponseCode());
-        ns.assert(statusCode >= 200 && statusCode < 300, 'line_api_error', 'LINE API 送信に失敗しました', 502);
-      }
-      return { status: 'sent' };
-    }
-
     return {
       pushMessage: function (lineUserId, message) {
-        return postLineMessageApi('push', {
+        ns.assert(channelAccessToken, 'config_error', 'LINE_CHANNEL_ACCESS_TOKEN が未設定です', 500);
+        var payload = {
           to: lineUserId,
           messages: [
             {
@@ -42,29 +26,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
               text: message
             }
           ]
+        };
+        UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+          method: 'post',
+          contentType: 'application/json',
+          headers: {
+            Authorization: 'Bearer ' + channelAccessToken
+          },
+          payload: JSON.stringify(payload)
         });
-      },
-      replyMessage: function (replyToken, message) {
-        ns.assert(replyToken, 'invalid_request', 'replyToken がありません', 400);
-        return postLineMessageApi('reply', {
-          replyToken: replyToken,
-          messages: [
-            {
-              type: 'text',
-              text: message
-            }
-          ]
-        });
+        return { status: 'sent' };
       }
     };
-  }
-
-  function parseCsvProperty(value) {
-    return String(value || '').split(',').map(function (entry) {
-      return entry.trim();
-    }).filter(function (entry) {
-      return entry !== '';
-    });
   }
 
   function routeApiRequest(service, request) {
@@ -218,13 +191,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
 
     var clock = options.clock || ns.defaultClock();
-    var lineClient = options.lineClient || createLineClient(
-      options.channelAccessToken || scriptProperties.getProperty('LINE_CHANNEL_ACCESS_TOKEN')
-    );
     var notificationService = ns.createNotificationService({
       repository: repository,
       clock: clock,
-      lineClient: lineClient
+      lineClient: options.lineClient || createLineClient(options.channelAccessToken || scriptProperties.getProperty('LINE_CHANNEL_ACCESS_TOKEN'))
     });
     var appBaseUrl = resolveAppBaseUrl(options.appBaseUrl);
     var checklistService = ns.createChecklistService({
@@ -233,7 +203,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       identityClient: options.identityClient,
       notificationService: notificationService,
       appBaseUrl: appBaseUrl,
-      checklistAppUrl: options.checklistAppUrl || scriptProperties.getProperty('CHECKLIST_APP_URL') || appBaseUrl,
       lineChannelId: options.lineChannelId || scriptProperties.getProperty('LINE_CHANNEL_ID'),
       allowAnonymousAccess: allowAnonymousAccess,
       adminLoginId: options.adminLoginId || scriptProperties.getProperty('ADMIN_LOGIN_ID'),
@@ -242,14 +211,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     });
     var webhookHandler = ns.createWebhookHandler({
       appBaseUrl: appBaseUrl,
-      channelSecret: options.channelSecret || scriptProperties.getProperty('LINE_CHANNEL_SECRET'),
-      webhookToken: options.webhookToken || scriptProperties.getProperty('LINE_WEBHOOK_TOKEN'),
-      reminderAllowedSourceIds: options.reminderAllowedSourceIds || parseCsvProperty(
-        scriptProperties.getProperty('LINE_REMINDER_SOURCE_IDS')
-      ),
-      reminderTriggerText: options.reminderTriggerText || scriptProperties.getProperty('LINE_REMINDER_TRIGGER_TEXT'),
-      checklistService: checklistService,
-      lineClient: lineClient
+      channelSecret: options.channelSecret || scriptProperties.getProperty('LINE_CHANNEL_SECRET')
     });
 
     return {

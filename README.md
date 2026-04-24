@@ -41,9 +41,6 @@
    - `LIFF_ID`
    - `ADMIN_LOGIN_ID`
    - `ADMIN_LOGIN_PASSWORD`
-   - `LINE_WEBHOOK_TOKEN`（LINE Webhook URL に付ける静的 token）
-   - `LINE_REMINDER_SOURCE_IDS`（未完了一覧返信を許可する groupId / roomId）
-   - `CHECKLIST_APP_URL`（通知本文に入れる GitHub Pages URL）
 2. `pages/config.json` を設定する。
    - `gasApiBaseUrl`
    - `liffId`
@@ -54,13 +51,6 @@
 3. GitHub Pages を有効化し、`pages/` を公開する。
 4. LINE Developers の LIFF Endpoint URL を `https://<user>.github.io/<repo>/` に設定する。
 5. LIFF URL（`https://liff.line.me/<LIFF_ID>`）をLINEリッチメニューに設定する。
-
-## LINEカレンダー起点の未完了一覧返信
-- LINEカレンダーの予定名は `残りタスク通知` にします。
-- Webhook URL は `GAS_WEB_APP_URL?path=webhook&token=<LINE_WEBHOOK_TOKEN>` を設定します。
-- 初回検証時は `LINE_REMINDER_SOURCE_IDS` を未設定にして、`debug_events` の `webhook.message` から `sourceId` を確認します。
-- 確認した `sourceId` を `LINE_REMINDER_SOURCE_IDS` に設定すると、そのグループ/ルームだけReply APIで未完了一覧を返します。
-- GAS Web App では `X-Line-Signature` ヘッダーを直接読めないため、GAS単体運用では静的 `token` を併用します。
 
 ## リアルタイム同期（Firestore）
 - `enableRealtimeSync=true` かつ `firebase` 設定済みのときだけ有効。

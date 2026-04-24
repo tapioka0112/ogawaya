@@ -234,7 +234,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var identityClient = options.identityClient || buildDefaultIdentityClient(options.lineChannelId);
     var notificationService = options.notificationService;
     var appBaseUrl = options.appBaseUrl || '';
-    var checklistAppUrl = options.checklistAppUrl || appBaseUrl;
     var allowAnonymousAccess = options.allowAnonymousAccess === true;
     function normalizeAdminCredential(value) {
       var normalized = String(value || '').trim();
@@ -435,55 +434,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         '',
         items.map(function (item) { return '・' + item.title; }).join('\n')
       ].join('\n');
-    }
-
-    function buildCalendarReminderMessage(store, run, items) {
-      var lines = [
-        '今日の残りタスクです',
-        '',
-        '店舗：' + store.name,
-        '対象日：' + run.target_date,
-        ''
-      ];
-      if (items.length === 0) {
-        lines.push('今日のタスクはすべて完了しています。');
-      } else {
-        lines.push('未完了項目：');
-        lines = lines.concat(items.map(function (item) {
-          return '・' + item.title;
-        }));
-      }
-      if (checklistAppUrl) {
-        lines.push('', 'チェックはこちら', checklistAppUrl);
-      }
-      return lines.join('\n');
-    }
-
-    function buildNoRunCalendarReminderMessage(store, targetDate) {
-      var lines = [
-        '今日の残りタスクです',
-        '',
-        '店舗：' + store.name,
-        '対象日：' + targetDate,
-        '',
-        '対象日のチェックリストがありません。'
-      ];
-      if (checklistAppUrl) {
-        lines.push('', 'チェックはこちら', checklistAppUrl);
-      }
-      return lines.join('\n');
-    }
-
-    function buildCalendarReminderDedupeKey(sourceId, targetDate) {
-      return ['calendar-reminder', sourceId, targetDate].join(':');
-    }
-
-    function hasSentCalendarReminder(dedupeKey) {
-      return repository.listTable('notifications').some(function (notification) {
-        return notification.type === ns.NOTIFICATION_TYPES.CALENDAR_REMINDER_REPLY
-          && notification.user_id === dedupeKey
-          && notification.status === 'sent';
-      });
     }
 
     function logCheckMutationBreakdown(eventName, startedAt, authMs, storageWriteMs, idempotent) {
@@ -1282,57 +1232,6 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           buildManualReminderMessage(store, run, items)
         );
         return { notifications: notifications };
-      },
-
-      prepareCalendarReminderReply: function (sourceId) {
-        ns.assert(sourceId, 'invalid_request', 'Webhook source ID がありません', 400);
-        var targetDate = resolveBusinessDate(clock.now());
-        var dedupeKey = buildCalendarReminderDedupeKey(sourceId, targetDate);
-        if (hasSentCalendarReminder(dedupeKey)) {
-          return {
-            shouldReply: false,
-            reason: 'already_replied',
-            targetDate: targetDate,
-            dedupeKey: dedupeKey
-          };
-        }
-
-        var store = findCurrentStore();
-        var run = repository.findRunByStoreAndDate(store.id, targetDate);
-        var items = [];
-        var message = '';
-        if (run) {
-          items = repository.listRunItems(run.id).filter(function (item) {
-            return item.status === ns.ITEM_STATUS.UNCHECKED;
-          });
-          message = buildCalendarReminderMessage(store, run, items);
-        } else {
-          message = buildNoRunCalendarReminderMessage(store, targetDate);
-        }
-        return {
-          shouldReply: true,
-          sourceId: sourceId,
-          targetDate: targetDate,
-          storeId: store.id,
-          runId: run ? run.id : '',
-          uncheckedCount: items.length,
-          message: message,
-          dedupeKey: dedupeKey
-        };
-      },
-
-      recordCalendarReminderReply: function (prepared, status, errorMessage) {
-        ns.assert(prepared && prepared.dedupeKey, 'invalid_request', 'リマインダー返信記録の対象がありません', 400);
-        return repository.appendNotification({
-          id: Utilities.getUuid(),
-          store_id: prepared.storeId,
-          user_id: prepared.dedupeKey,
-          type: ns.NOTIFICATION_TYPES.CALENDAR_REMINDER_REPLY,
-          message: prepared.message,
-          status: status,
-          sent_at: ns.toIsoString(clock.now()),
-          error_message: errorMessage || ''
-        });
       },
 
       runDailyStart: function () {

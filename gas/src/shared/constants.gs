@@ -19,8 +19,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   ns.NOTIFICATION_TYPES = {
     DAILY_START: 'daily_start',
     INCOMPLETE: 'incomplete',
-    MANUAL_REMINDER: 'manual_reminder',
-    CALENDAR_REMINDER_REPLY: 'calendar_reminder_reply'
+    MANUAL_REMINDER: 'manual_reminder'
   };
   ns.NOTIFICATION_STATUSES = ['sent', 'failed', 'skipped'];
   ns.MENU_ITEMS = [

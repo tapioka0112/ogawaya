@@ -31,7 +31,6 @@ Firestore はリアルタイム同期（read-only）で利用します。
 - `LIFF_ID`
 - `ADMIN_LOGIN_ID`
 - `ADMIN_LOGIN_PASSWORD`
-- `LINE_WEBHOOK_TOKEN`
 
 任意:
 - `ALLOW_ANONYMOUS_ACCESS`（通常は `false` 推奨）
@@ -40,9 +39,6 @@ Firestore はリアルタイム同期（read-only）で利用します。
 - `SPREADSHEET_STATE_CACHE_TTL_SECONDS`（通常 `300`）
 - `SPREADSHEET_STATE_CACHE_CHUNK_SIZE`（通常 `90000`）
 - `ADMIN_SESSION_TTL_SECONDS`（通常 `43200`）
-- `LINE_REMINDER_SOURCE_IDS`（未完了一覧返信を許可する groupId / roomId。複数の場合はカンマ区切り）
-- `LINE_REMINDER_TRIGGER_TEXT`（通常は `残りタスク通知`）
-- `CHECKLIST_APP_URL`（通知本文に入れる GitHub Pages URL）
 
 テンプレートは [script-properties.example.json](./import/script-properties.example.json) を使用します。
 
@@ -104,21 +100,3 @@ Firestore はリアルタイム同期（read-only）で利用します。
 GAS の時間主導トリガーを設定:
 - `runDailyStart` を毎日 10:30
 - `runDailyClosing` を毎日 0:00
-
-## 9. LINEカレンダー通知起点の未完了一覧返信
-
-この機能は、LINEカレンダー通知がWebhookに届くかを最初に実測してから有効化します。
-
-1. LINE Developers の Messaging API で Webhook を有効にする。
-2. Bot のグループ参加を許可する。
-3. Webhook URL を `GAS_WEB_APP_URL?path=webhook&token=<LINE_WEBHOOK_TOKEN>` にする。
-4. `DEBUG_EVENT_SHEET_ENABLED=true` にして、テスト用グループへBotを追加する。
-5. LINEカレンダーで1分後の予定を作り、予定名を `残りタスク通知` にする。
-6. リマインダー発火後、`debug_events` の `webhook.message` に `sourceId` が出るか確認する。
-7. `sourceId` が出たら、その値を `LINE_REMINDER_SOURCE_IDS` に設定する。
-8. もう一度 `残りタスク通知` を発火させ、グループに未完了一覧が返信されることを確認する。
-
-補足:
-- 返信は Reply API を使うため、Push 通知枠は使いません。
-- 同一営業日・同一 `sourceId` には二重返信しません。
-- GAS Web App は LINE の `X-Line-Signature` ヘッダーを直接読めないため、GAS単体運用では静的 `token` を使います。
