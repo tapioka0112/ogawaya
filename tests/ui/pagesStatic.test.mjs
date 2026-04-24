@@ -182,7 +182,8 @@ test('GitHub Pages のタブUIはホームと統計を切り替えられる', as
   assert.match(appJs, /elements\.statsContent\.hidden = !isStatsTab;/);
   assert.match(appJs, /elements\.tabHome\.addEventListener\('click'/);
   assert.match(appJs, /elements\.tabStats\.addEventListener\('click'/);
-  assert.match(appJs, /if\s*\(isStatsTab\)\s*\{\s*updateMonthLabel\(\);\s*renderCalendar\(state\.statsYear,\s*state\.statsMonth,\s*state\.statsData \? state\.statsData\.calendar : \[\]\);\s*renderStatsDayDetails\(\);/);
+  assert.match(appJs, /if\s*\(state\.statsData\)\s*\{\s*renderStats\(\);/);
+  assert.match(appJs, /else\s*\{\s*renderCalendar\(state\.statsYear,\s*state\.statsMonth,\s*\[\]\);\s*renderStatsDayDetails\(\);\s*loadStats\(\);/);
   assert.match(appJs, /bindStatsCalendarSelection\(\);/);
   assert.match(css, /#stats-content\s*\{\s*display:\s*none;/);
   assert.match(css, /#stats-content:not\(\[hidden\]\)\s*\{\s*display:\s*flex;/);

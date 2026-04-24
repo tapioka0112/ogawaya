@@ -253,6 +253,12 @@ function createFakeFirestore(writes, options = {}) {
     writes.push(payload);
     return Promise.resolve({ id: `event-${writes.length}` });
   });
+  const getImpl = options.getImpl || (() => Promise.resolve({
+    exists: false,
+    data() {
+      return null;
+    }
+  }));
 
   function createRef(pathParts) {
     return {
@@ -272,12 +278,7 @@ function createFakeFirestore(writes, options = {}) {
         return function unsubscribe() {};
       },
       get() {
-        return Promise.resolve({
-          exists: false,
-          data() {
-            return null;
-          }
-        });
+        return getImpl(pathParts);
       },
       add(payload) {
         return addImpl(payload, pathParts);
@@ -337,7 +338,7 @@ async function loadPagesApp(fetchHandler, options = {}) {
         this.values[key] = String(value);
       }
     },
-    liff: {
+    liff: options.liff || {
       async init() {},
       isLoggedIn() {
         return true;
@@ -427,6 +428,92 @@ test('GitHub Pages app は全件完了済みでも外部エフェクトに依存
     'checked'
   );
   assert.equal(confettiCalls, 0);
+});
+
+test('GitHub Pages app は LIFF 認証完了前に Firestore snapshot でホームを描画する', async () => {
+  const snapshotItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'checked',
+    checkedBy: '田中LINE',
+    checkedByUserId: 'line-user-001',
+    checkedAt: '2026-04-24T10:05:00Z',
+    updatedAt: '2026-04-24T10:05:00Z'
+  };
+  let resolveLiffInit;
+  let todayRequestCount = 0;
+  const firebase = createFakeFirebase([], {
+    getImpl(pathParts) {
+      if (pathParts.at(-2) !== 'snapshots' || pathParts.at(-1) !== 'today') {
+        return Promise.resolve({
+          exists: false,
+          data() {
+            return null;
+          }
+        });
+      }
+      return Promise.resolve({
+        exists: true,
+        data() {
+          return createChecklistPayload(snapshotItem);
+        }
+      });
+    }
+  });
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test',
+          appId: 'app'
+        }
+      });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      todayRequestCount += 1;
+      return response(createChecklistPayload(snapshotItem));
+    }
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    firebase,
+    liff: {
+      init() {
+        return new Promise((resolve) => {
+          resolveLiffInit = resolve;
+        });
+      },
+      isLoggedIn() {
+        return true;
+      },
+      getIDToken() {
+        return 'token';
+      }
+    }
+  });
+
+  assert.equal(document.elements['progress-summary'].textContent, '1 / 1');
+  assert.equal(document.elements['progress-ring-label'].textContent, '完了');
+  assert.equal(todayRequestCount, 0);
+
+  resolveLiffInit();
+  await wait(30);
+  assert.equal(todayRequestCount, 1);
 });
 
 test('GitHub Pages app は古い再取得レスポンスで新しいチェック状態を戻さない', async () => {

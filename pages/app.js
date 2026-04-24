@@ -554,11 +554,14 @@
     elements.statsContent.hidden = !isStatsTab;
     if (isStatsTab) {
       updateMonthLabel();
-      renderCalendar(state.statsYear, state.statsMonth, state.statsData ? state.statsData.calendar : []);
-      renderStatsDayDetails();
-      if (!state.statsData) {
+      if (state.statsData) {
+        renderStats();
+      } else {
+        renderCalendar(state.statsYear, state.statsMonth, []);
+        renderStatsDayDetails();
         loadStats();
-      } else if (state.statsSelectedDate) {
+      }
+      if (state.statsData && state.statsSelectedDate) {
         loadDailyStats(state.statsSelectedDate);
       }
     }
@@ -2482,20 +2485,37 @@
       functionsApiBaseUrl: config.functionsApiBaseUrl,
       defaultStoreId: config.defaultStoreId
     });
-    state.idToken = await initializeAuth(config.liffId);
-    state.authUserContext = extractUserContextFromIdToken(state.idToken);
     var loadedFromSnapshot = false;
-    try {
-      var snapshotChecklist = await loadChecklistFromSnapshot();
-      if (snapshotChecklist && snapshotChecklist.runId) {
+    var snapshotLoadPromise = loadChecklistFromSnapshot().then(function (snapshotChecklist) {
+      if (snapshotChecklist && snapshotChecklist.runId && !state.checklist) {
         applyChecklistPayload(snapshotChecklist, {
-          restartSync: true,
-          currentUserOverride: state.authUserContext
+          restartSync: true
         });
         loadedFromSnapshot = true;
       }
-    } catch (snapshotError) {
+      return loadedFromSnapshot;
+    }).catch(function (snapshotError) {
       console.error('[sync] failed to load checklist snapshot', snapshotError);
+      return false;
+    });
+
+    state.idToken = await initializeAuth(config.liffId);
+    state.authUserContext = extractUserContextFromIdToken(state.idToken);
+
+    if (state.checklist) {
+      applyChecklistPayload(state.checklist, {
+        restartSync: false,
+        currentUserOverride: state.authUserContext
+      });
+      loadedFromSnapshot = true;
+    } else {
+      loadedFromSnapshot = await snapshotLoadPromise;
+      if (state.checklist) {
+        applyChecklistPayload(state.checklist, {
+          restartSync: false,
+          currentUserOverride: state.authUserContext
+        });
+      }
     }
 
     if (loadedFromSnapshot) {

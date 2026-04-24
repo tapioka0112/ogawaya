@@ -717,8 +717,10 @@
         }
         if (isStats) {
           updateMonthLabel();
-          renderCalendar(state.statsYear, state.statsMonth, state.statsData ? state.statsData.calendar : []);
-          if (!state.statsData) {
+          if (state.statsData) {
+            renderStats();
+          } else {
+            renderCalendar(state.statsYear, state.statsMonth, []);
             loadStats();
           }
         }
@@ -859,6 +861,83 @@
         }
       }
 
+      function isDateInCurrentStatsMonth(dateString) {
+        var match = String(dateString || '').match(/^(\d{4})-(\d{2})-/);
+        if (!match) {
+          return false;
+        }
+        return Number(match[1]) === state.statsYear && Number(match[2]) === state.statsMonth;
+      }
+
+      function resolveCurrentUserId() {
+        if (state.me && state.me.userId) {
+          return String(state.me.userId);
+        }
+        if (state.checklist && state.checklist.currentUser && state.checklist.currentUser.userId) {
+          return String(state.checklist.currentUser.userId);
+        }
+        return '';
+      }
+
+      function isCheckedItem(item) {
+        return !!(item && item.status === 'checked');
+      }
+
+      function isCheckedByCurrentUser(item, currentUserId) {
+        return !!(currentUserId && isCheckedItem(item) && String(item.checkedByUserId || '') === currentUserId);
+      }
+
+      function updateStatsFromChecklistItemMutation(previousItem, nextItem) {
+        if (!state.statsData || !state.checklist || !Array.isArray(state.statsData.calendar)) {
+          return false;
+        }
+        var targetDate = String(state.checklist.targetDate || '');
+        if (!isDateInCurrentStatsMonth(targetDate)) {
+          return false;
+        }
+        var calendarEntry = null;
+        state.statsData.calendar.forEach(function (entry) {
+          if (entry && entry.date === targetDate) {
+            calendarEntry = entry;
+          }
+        });
+        if (!calendarEntry) {
+          return false;
+        }
+
+        var previousChecked = isCheckedItem(previousItem);
+        var nextChecked = isCheckedItem(nextItem);
+        var checkedDelta = (nextChecked ? 1 : 0) - (previousChecked ? 1 : 0);
+        var total = Number(calendarEntry.total || 0);
+        var checked = Number(calendarEntry.checked || 0) + checkedDelta;
+        calendarEntry.checked = Math.max(0, Math.min(total, checked));
+
+        var wasAchieved = calendarEntry.achieved === true;
+        calendarEntry.achieved = total > 0 && calendarEntry.checked === total;
+        var achievedDelta = (calendarEntry.achieved ? 1 : 0) - (wasAchieved ? 1 : 0);
+        state.statsData.achievedDays = Math.max(0, Number(state.statsData.achievedDays || 0) + achievedDelta);
+
+        var currentUserId = resolveCurrentUserId();
+        var mineDelta = (
+          isCheckedByCurrentUser(nextItem, currentUserId) ? 1 : 0
+        ) - (
+          isCheckedByCurrentUser(previousItem, currentUserId) ? 1 : 0
+        );
+        state.statsData.myCheckedItems = Math.max(0, Number(state.statsData.myCheckedItems || 0) + mineDelta);
+        state.statsLoadRequestId += 1;
+        return true;
+      }
+
+      function syncStatsAfterChecklistMutation(previousItem, nextItem) {
+        if (updateStatsFromChecklistItemMutation(previousItem, nextItem)) {
+          if (state.activeTab === 'stats') {
+            renderStats();
+          }
+          return;
+        }
+        invalidateStatsAfterChecklistMutation();
+      }
+
       function rerenderRoleDependentSections() {
         if (state.checklist) {
           renderOverview(state.checklist);
@@ -922,6 +1001,11 @@
         if (!target) {
           return;
         }
+        var previousItem = {
+          id: target.id,
+          status: target.status,
+          checkedByUserId: target.checkedByUserId
+        };
         target.status = updatedItem.status;
         target.checkedBy = updatedItem.checkedBy;
         target.checkedByUserId = updatedItem.checkedByUserId;
@@ -937,7 +1021,7 @@
         if (state.incomplete) {
           renderIncomplete(state.incomplete);
         }
-        invalidateStatsAfterChecklistMutation();
+        syncStatsAfterChecklistMutation(previousItem, target);
       }
 
       function buildOptimisticCheckedItem(item) {
