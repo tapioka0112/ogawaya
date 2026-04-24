@@ -81,6 +81,10 @@ test('GitHub Pages の API再取得マージは未確定 desiredStatus を維持
 
   assert.match(
     appJs,
+    /if\s*\(localUpdatedAtMs > 0 && serverUpdatedAtMs <= 0\)\s*\{\s*return cloneChecklistItem\(localItem\);\s*\}/
+  );
+  assert.match(
+    appJs,
     /if\s*\(\s*actionState\.confirmedItem &&\s*actionState\.desiredStatus &&\s*actionState\.desiredStatus !== actionState\.confirmedItem\.status\s*\)\s*\{\s*return cloneChecklistItem\(localItem\);\s*\}/
   );
 });

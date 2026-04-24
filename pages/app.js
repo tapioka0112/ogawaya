@@ -1818,6 +1818,9 @@
       }
       var localUpdatedAtMs = resolveItemUpdatedAtMs(localItem);
       var serverUpdatedAtMs = resolveItemUpdatedAtMs(serverItem);
+      if (localUpdatedAtMs > 0 && serverUpdatedAtMs <= 0) {
+        return cloneChecklistItem(localItem);
+      }
       if (localUpdatedAtMs > 0 && serverUpdatedAtMs > 0 && localUpdatedAtMs > serverUpdatedAtMs) {
         return cloneChecklistItem(localItem);
       }
