@@ -49,11 +49,11 @@
             <textarea id="task-description-input" rows="3" placeholder="例: 開店前にフロアと客席を清掃"></textarea>
           </label>
         </div>
-        <div class="button-row wrap">
+        <div class="admin-action-grid">
           <button id="create-task-button" type="button" class="primary">タスクを作成</button>
           <button id="insert-task-button" type="button" class="ghost">タスクを挿入</button>
           <button id="create-template-button" type="button" class="ghost">テンプレートを作成</button>
-          <button id="apply-template-button" type="button" class="ghost">テンプレートを読み込む</button>
+          <button id="apply-template-button" type="button" class="ghost">テンプレートを挿入</button>
         </div>
         <div class="form-grid">
           <label class="field">
@@ -65,7 +65,7 @@
             <input id="template-name-input" type="text" placeholder="例: 開店テンプレート" />
           </label>
           <label class="field">
-            <span>読み込むテンプレート</span>
+            <span>挿入するテンプレート</span>
             <select id="template-select"></select>
           </label>
         </div>
@@ -101,6 +101,6 @@
       </section>
     </main>
 
-    <script src="./admin.js?v=4130645"></script>
+    <script src="./admin.js?v=admin-ui-fixes-20260424"></script>
   </body>
 </html>

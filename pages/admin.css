@@ -108,6 +108,19 @@ textarea:focus {
   flex-wrap: wrap;
 }
 
+.admin-action-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.admin-action-grid button {
+  width: 100%;
+  min-height: 44px;
+}
+
 button {
   border: 0;
   border-radius: 12px;
@@ -201,6 +214,10 @@ button.ghost {
   border-bottom: 0;
 }
 
+.run-item-list .run-item-empty {
+  color: var(--admin-subtext);
+}
+
 .run-item-main {
   display: grid;
   gap: 2px;
@@ -273,6 +290,12 @@ button.ghost {
   background: transparent;
 }
 
+@media (max-width: 840px) {
+  .admin-action-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 640px) {
   .admin-header h1 {
     font-size: 28px;
@@ -280,5 +303,11 @@ button.ghost {
 
   .admin-header p {
     font-size: 14px;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-action-grid {
+    grid-template-columns: 1fr;
   }
 }

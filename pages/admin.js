@@ -11,7 +11,9 @@
     calendarMonth: 0,
     tasks: [],
     templates: [],
-    checklist: null
+    checklist: null,
+    runItemsRequestId: 0,
+    runItemsLoading: false
   };
 
   var elements = {
@@ -293,8 +295,16 @@
     }
     elements.runItems.innerHTML = '';
     var items = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
+    if (state.runItemsLoading) {
+      var loading = document.createElement('li');
+      loading.className = 'run-item-empty';
+      loading.textContent = 'タスクを読み込み中です。';
+      elements.runItems.appendChild(loading);
+      return;
+    }
     if (items.length === 0) {
       var empty = document.createElement('li');
+      empty.className = 'run-item-empty';
       empty.textContent = 'この日のタスクはありません。';
       elements.runItems.appendChild(empty);
       return;
@@ -436,9 +446,29 @@
   }
 
   async function loadRunItems() {
-    var response = await apiRequest('GET', '/api/admin/runs/' + encodeURIComponent(state.selectedDate), null);
-    state.checklist = response.checklist || null;
+    var targetDate = state.selectedDate;
+    state.runItemsRequestId += 1;
+    var requestId = state.runItemsRequestId;
+    state.runItemsLoading = true;
+    state.checklist = null;
     renderRunItems();
+    try {
+      var response = await apiRequest('GET', '/api/admin/runs/' + encodeURIComponent(targetDate), null);
+      if (requestId !== state.runItemsRequestId || targetDate !== state.selectedDate) {
+        return;
+      }
+      state.checklist = response.checklist || null;
+    } catch (error) {
+      if (requestId !== state.runItemsRequestId || targetDate !== state.selectedDate) {
+        return;
+      }
+      throw error;
+    } finally {
+      if (requestId === state.runItemsRequestId && targetDate === state.selectedDate) {
+        state.runItemsLoading = false;
+        renderRunItems();
+      }
+    }
   }
 
   async function createTask() {
@@ -505,7 +535,7 @@
 
   async function applyTemplate() {
     clearError();
-    setStatus('テンプレートを適用しています...');
+    setStatus('テンプレートを挿入しています...');
     var templateId = elements.templateSelect ? String(elements.templateSelect.value || '') : '';
     if (!templateId) {
       throw new Error('テンプレートを選択してください');
@@ -516,7 +546,7 @@
       {}
     );
     await loadRunItems();
-    setStatus('テンプレートを適用しました');
+    setStatus('テンプレートを挿入しました');
   }
 
   async function deleteRunItem(runItemId) {
