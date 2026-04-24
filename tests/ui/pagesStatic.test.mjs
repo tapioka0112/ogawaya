@@ -167,7 +167,9 @@ test('GitHub Pages のタスク詳細は別モーダルで表示する', async (
 
   assert.match(appJs, /setText\(\s*elements\.taskDetailDescription,\s*item\.description \? String\(item\.description\) : 'このタスクには詳細が登録されていません。'\s*\);/);
   assert.match(appJs, /bindTaskDetailModal\(\);/);
+  assert.match(css, /\.user-mode \.task-detail-modal\s*\{[\s\S]*place-items:\s*center;/);
   assert.match(css, /\.user-mode \.task-detail-card\s*\{[\s\S]*background:\s*var\(--u-surface\);/);
+  assert.match(css, /\.user-mode \.task-detail-card\s*\{[\s\S]*max-height:\s*min\(calc\(100dvh - 36px\), 560px\);/);
   assert.doesNotMatch(css, /\.user-mode \.task-detail-card\s*\{[^}]*linear-gradient/);
 });
 

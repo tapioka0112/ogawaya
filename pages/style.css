@@ -816,8 +816,8 @@
     inset: 0;
     z-index: 30;
     display: grid;
-    place-items: end center;
-    padding: 18px;
+    place-items: center;
+    padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
   }
 
   .user-mode .task-detail-modal[hidden] {
@@ -836,7 +836,8 @@
     position: relative;
     z-index: 1;
     width: min(100%, 520px);
-    max-height: min(72vh, 560px);
+    max-height: min(calc(100vh - 36px), 560px);
+    max-height: min(calc(100dvh - 36px), 560px);
     overflow: auto;
     padding: 20px;
     background: var(--u-surface);
