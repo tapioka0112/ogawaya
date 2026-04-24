@@ -131,6 +131,32 @@ test('管理者ログインは Script Properties の前後空白を無視する'
   assert.ok(response.body.session.token);
 });
 
+test('管理者ログインは Script Properties の引用符付き値を正規化する', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      ADMIN_LOGIN_ID: '"admin-login"',
+      ADMIN_LOGIN_PASSWORD: "'admin-password'"
+    },
+    enableCacheService: true
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/login',
+    query: {},
+    body: {
+      loginId: 'admin-login',
+      password: 'admin-password'
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(response.body.session.token);
+});
+
 test('ロール制限なしでテンプレート項目を追加できる', async () => {
   const app = await createAdminApp();
 

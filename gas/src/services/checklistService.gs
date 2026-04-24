@@ -235,8 +235,20 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var notificationService = options.notificationService;
     var appBaseUrl = options.appBaseUrl || '';
     var allowAnonymousAccess = options.allowAnonymousAccess === true;
-    var adminLoginId = String(options.adminLoginId || '').trim();
-    var adminLoginPassword = String(options.adminLoginPassword || '').trim();
+    function normalizeAdminCredential(value) {
+      var normalized = String(value || '').trim();
+      if (normalized.length >= 2) {
+        var first = normalized.charAt(0);
+        var last = normalized.charAt(normalized.length - 1);
+        if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+          normalized = normalized.slice(1, -1).trim();
+        }
+      }
+      return normalized;
+    }
+
+    var adminLoginId = normalizeAdminCredential(options.adminLoginId);
+    var adminLoginPassword = normalizeAdminCredential(options.adminLoginPassword);
     var adminSessionTtlSeconds = Number(options.adminSessionTtlSeconds || 12 * 60 * 60);
     var adminSessionMemory = {};
     var ADMIN_SESSION_KEY_PREFIX = 'ogawaya:admin:session:v1:';
@@ -774,8 +786,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var safeBody = body || {};
         var loginId = ns.requireString(safeBody.loginId, 'loginId');
         var password = ns.requireString(safeBody.password, 'password');
+        var isMatched = loginId === adminLoginId && password === adminLoginPassword;
+        if (!isMatched) {
+          ns.logEvent('warn', 'admin.login.failed', {
+            loginIdMatched: loginId === adminLoginId,
+            loginIdLength: loginId.length,
+            configuredLoginIdLength: adminLoginId.length,
+            passwordLength: password.length,
+            configuredPasswordLength: adminLoginPassword.length
+          });
+        }
         ns.assert(
-          loginId === adminLoginId && password === adminLoginPassword,
+          isMatched,
           'unauthorized',
           '管理者IDまたはパスワードが正しくありません',
           401
