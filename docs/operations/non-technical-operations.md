@@ -334,8 +334,9 @@ Apps Scriptの「トリガー」画面で確認します。
 
 1. Firebase Consoleを開く。
 2. Firestore Databaseが作成済みか確認する。
-3. Firestore Rulesに `docs/operations/firestore.rules` の内容が公開されているか確認する。
-4. `pages/config.json` のFirebase設定が現在のFirebaseプロジェクトと一致しているか開発者に確認する。
+3. Firebase Authenticationの匿名ログインが有効か確認する。
+4. Firestore Rulesに `docs/operations/firestore.rules` の内容が公開されているか確認する。
+5. `pages/config.json` のFirebase設定が現在のFirebaseプロジェクトと一致しているか開発者に確認する。
 
 ## 触らない方がよいもの
 

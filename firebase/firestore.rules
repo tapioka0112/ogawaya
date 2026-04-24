@@ -2,9 +2,62 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSafeText(value, maxLength) {
+      return value is string && value.size() <= maxLength;
+    }
+
+    function isValidItemStatus(value) {
+      return value == 'checked' || value == 'unchecked';
+    }
+
+    function isValidChecklistEvent(storeId, targetDate) {
+      let data = request.resource.data;
+      return isSignedIn()
+        && data.keys().hasOnly([
+          'runId',
+          'targetDate',
+          'storeId',
+          'itemId',
+          'status',
+          'checkedBy',
+          'checkedByUserId',
+          'checkedAt',
+          'updatedAt',
+          'sourceUserId',
+          'emittedAt'
+        ])
+        && data.storeId == storeId
+        && data.targetDate == targetDate
+        && isSafeText(data.runId, 80)
+        && isSafeText(data.itemId, 120)
+        && isValidItemStatus(data.status)
+        && isSafeText(data.checkedBy, 80)
+        && isSafeText(data.checkedByUserId, 128)
+        && isSafeText(data.checkedAt, 40)
+        && data.updatedAt == request.time
+        && isSafeText(data.sourceUserId, 128)
+        && data.sourceUserId != ''
+        && data.emittedAt == request.time
+        && (
+          (data.status == 'checked'
+            && data.checkedBy != ''
+            && data.checkedByUserId == data.sourceUserId
+            && data.checkedAt != '')
+          || (data.status == 'unchecked'
+            && data.checkedBy == ''
+            && data.checkedByUserId == ''
+            && data.checkedAt == '')
+        );
+    }
+
     match /stores/{storeId}/runs/{targetDate}/events/{eventId} {
       allow read: if true;
-      allow create, update, delete: if false;
+      allow create: if isValidChecklistEvent(storeId, targetDate);
+      allow update, delete: if false;
     }
 
     match /stores/{storeId}/runs/{targetDate}/snapshots/{snapshotId} {

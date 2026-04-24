@@ -6,7 +6,7 @@
   "allowAnonymousAccess": false,
   "tryLiffAuthInAnonymous": false,
   "enableRealtimeSync": true,
-  "clientFirestoreWriteEnabled": false,
+  "clientFirestoreWriteEnabled": true,
   "consistencyRefreshSeconds": 30,
   "firebase": {
     "apiKey": "AIzaSyAshS2kxP1B8WR_4CvdLtkZG6bG7CpwKUw",

@@ -85,7 +85,10 @@ test('Firestore 同期用 rules の実体と適用手順が存在する', async 
   assert.match(firestoreRules, /match \/stores\/\{storeId\}\/runs\/\{targetDate\}\/snapshots\/\{snapshotId\}/);
   assert.match(bootstrap, /snapshots\/today/);
   assert.match(readme, /正本データ: Spreadsheet/);
-  assert.match(firestoreRules, /allow create, update, delete: if false/);
+  assert.match(readme, /clientFirestoreWriteEnabled/);
+  assert.match(bootstrap, /Anonymous/);
+  assert.match(firestoreRules, /allow create: if isValidChecklistEvent\(storeId, targetDate\)/);
+  assert.match(firestoreRules, /allow update, delete: if false/);
   assert.match(firestoreRules, /match \/\{document=\*\*\}/);
 });
 

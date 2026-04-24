@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="./style.css" />
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
   </head>
   <body class="user-mode">
@@ -99,12 +100,6 @@
 
       <section class="todo-list-wrap" id="main-content">
         <ul class="todo-list" id="checklist-items"></ul>
-        <article class="task-detail-card" id="task-detail-panel" hidden tabindex="-1" aria-live="polite">
-          <div class="task-detail-label">タスク詳細</div>
-          <h2 class="task-detail-title" id="task-detail-title">タスク詳細</h2>
-          <p class="task-detail-description" id="task-detail-description"></p>
-          <div class="task-detail-meta" id="task-detail-meta"></div>
-        </article>
       </section>
 
       <section id="stats-content" hidden>
@@ -147,7 +142,7 @@
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
             </svg>
-            <span>達成したタスク数</span>
+            <span>自分が完了させたタスク数</span>
           </div>
           <div class="stats-donut-row">
             <div class="stats-donut-wrap">
@@ -215,6 +210,21 @@
       <span id="progress-summary">-</span>
       <span id="incomplete-summary">未完了 0 件</span>
       <ul id="incomplete-items"></ul>
+    </div>
+
+    <div class="task-detail-modal" id="task-detail-panel" hidden role="dialog" aria-modal="true" aria-labelledby="task-detail-title">
+      <button class="task-detail-backdrop" id="task-detail-backdrop" type="button" aria-label="タスク詳細を閉じる"></button>
+      <article class="task-detail-card" tabindex="-1" aria-live="polite">
+        <div class="task-detail-header">
+          <div>
+            <div class="task-detail-label">タスク詳細</div>
+            <h2 class="task-detail-title" id="task-detail-title">タスク詳細</h2>
+          </div>
+          <button class="task-detail-close" id="task-detail-close" type="button" aria-label="タスク詳細を閉じる">×</button>
+        </div>
+        <p class="task-detail-description" id="task-detail-description"></p>
+        <div class="task-detail-meta" id="task-detail-meta"></div>
+      </article>
     </div>
 
     <script src="./app.js"></script>

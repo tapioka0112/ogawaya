@@ -1,7 +1,7 @@
 # 初期データ投入と運用手順（GAS 主系）
 
 この手順は `LIFF + GAS API + Spreadsheet` を主系として運用する前提です。
-Firestore はリアルタイム同期（read-only）で利用します。
+Firestore はチェック操作の高速反映とリアルタイム同期に利用します。
 
 初期構築が終わった後の日々の運用は [non-technical-operations.md](./non-technical-operations.md) を参照してください。
 
@@ -73,6 +73,7 @@ Firestore はリアルタイム同期（read-only）で利用します。
 - `defaultStoreId`
 - `allowAnonymousAccess`
 - `enableRealtimeSync`
+- `clientFirestoreWriteEnabled`
 - `consistencyRefreshSeconds`
 - `firebase.apiKey`
 - `firebase.authDomain`
@@ -95,12 +96,14 @@ Firestore はリアルタイム同期（read-only）で利用します。
 
 ## 7. Firestore Rules（リアルタイム同期を使う場合）
 
-1. Firestore Database > ルールを開く
-2. [docs/operations/firestore.rules](./firestore.rules) を貼り付ける
-3. 公開する
+1. Firebase Authentication > Sign-in method で `Anonymous` を有効にする
+2. Firestore Database > ルールを開く
+3. [docs/operations/firestore.rules](./firestore.rules) を貼り付ける
+4. 公開する
 
 このルールは以下のみ許可します。
 - `stores/{storeId}/runs/{targetDate}/events/*` の read
+- `stores/{storeId}/runs/{targetDate}/events/*` の認証済み create
 - `stores/{storeId}/runs/{targetDate}/snapshots/today` の read
 
 上記以外の read/write は拒否します。

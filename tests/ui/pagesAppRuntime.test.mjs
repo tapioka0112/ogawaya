@@ -116,6 +116,8 @@ function createFakeDocument() {
     ['span', 'progress-ring-label'],
     ['ul', 'checklist-items'],
     ['article', 'task-detail-panel'],
+    ['button', 'task-detail-backdrop'],
+    ['button', 'task-detail-close'],
     ['h2', 'task-detail-title'],
     ['p', 'task-detail-description'],
     ['div', 'task-detail-meta'],
@@ -219,7 +221,80 @@ function wait(ms) {
   });
 }
 
-async function loadPagesApp(fetchHandler) {
+function createFakeFirestore(writes, options = {}) {
+  const addImpl = options.addImpl || ((payload) => {
+    writes.push(payload);
+    return Promise.resolve({ id: `event-${writes.length}` });
+  });
+
+  function createRef(pathParts) {
+    return {
+      collection(name) {
+        return createRef([...pathParts, name]);
+      },
+      doc(id) {
+        return createRef([...pathParts, id]);
+      },
+      orderBy() {
+        return this;
+      },
+      limit() {
+        return this;
+      },
+      onSnapshot() {
+        return function unsubscribe() {};
+      },
+      get() {
+        return Promise.resolve({
+          exists: false,
+          data() {
+            return null;
+          }
+        });
+      },
+      add(payload) {
+        return addImpl(payload, pathParts);
+      }
+    };
+  }
+
+  return createRef([]);
+}
+
+function createFakeFirebase(writes, options = {}) {
+  const firestore = createFakeFirestore(writes, options);
+  const auth = {
+    currentUser: null,
+    signInAnonymously() {
+      this.currentUser = { uid: 'anonymous-user-001' };
+      return Promise.resolve({ user: this.currentUser });
+    }
+  };
+  function firestoreFactory() {
+    return firestore;
+  }
+  firestoreFactory.FieldValue = {
+    serverTimestamp() {
+      return { __type: 'serverTimestamp' };
+    }
+  };
+  return {
+    apps: [],
+    initializeApp() {
+      this.apps.push({});
+      return {};
+    },
+    app() {
+      return this.apps[0] || {};
+    },
+    firestore: firestoreFactory,
+    auth() {
+      return auth;
+    }
+  };
+}
+
+async function loadPagesApp(fetchHandler, options = {}) {
   const documentRef = createFakeDocument();
   const appJs = await readFile('pages/app.js', 'utf8');
   const context = {
@@ -244,6 +319,7 @@ async function loadPagesApp(fetchHandler) {
         return 'token';
       }
     },
+    firebase: options.firebase,
     fetch: fetchHandler,
     setTimeout(handler, ms) {
       const timer = setTimeout(handler, ms);
@@ -349,6 +425,153 @@ test('GitHub Pages app は古い再取得レスポンスで新しいチェック
     JSON.stringify({ requestedPaths, statuses: datasetValues(document.elements['checklist-items'], 'status') })
   );
   assert.deepEqual(requestedPaths.filter((path) => path === 'api/checklists/today').length, 2);
+});
+
+test('GitHub Pages app は Firestore 直接書き込み成功時にGAS保存完了を待たずに表示を確定する', async () => {
+  const initialItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const firestoreWrites = [];
+  const requestedPaths = [];
+  const firebase = createFakeFirebase(firestoreWrites);
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      requestedPaths.push(url);
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: true,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'test-app'
+        }
+      });
+    }
+    const path = new URL(url).searchParams.get('path');
+    requestedPaths.push(path || url);
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    if (path === 'api/checklists/today') {
+      return response(createChecklistPayload(initialItem));
+    }
+    if (path === 'api/checklist-items/run-item-001/check') {
+      throw new Error('GAS保存は即時UI確定の前に呼ばれない');
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, { firebase });
+
+  const checkButton = findByDataset(document.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  checkButton.click();
+  await wait(300);
+
+  assert.equal(firestoreWrites.length, 1);
+  assert.equal(firestoreWrites[0].itemId, 'run-item-001');
+  assert.equal(firestoreWrites[0].status, 'checked');
+  assert.equal(firestoreWrites[0].checkedBy, '田中LINE');
+  assert.deepEqual(firestoreWrites[0].updatedAt, { __type: 'serverTimestamp' });
+  assert.deepEqual(firestoreWrites[0].emittedAt, { __type: 'serverTimestamp' });
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'status', 'checked')?.dataset.status,
+    'checked',
+    JSON.stringify({ requestedPaths, statuses: datasetValues(document.elements['checklist-items'], 'status') })
+  );
+  assert.equal(requestedPaths.includes('api/checklist-items/run-item-001/check'), false);
+});
+
+test('GitHub Pages app は Firestore 直接書き込み失敗時にGAS同期へfallbackする', async () => {
+  const initialItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const checkedItem = {
+    ...initialItem,
+    status: 'checked',
+    checkedBy: '田中LINE',
+    checkedByUserId: 'line-user-001',
+    checkedAt: '2026-04-24T10:05:00Z',
+    updatedAt: '2026-04-24T10:05:00Z'
+  };
+  const requestedPaths = [];
+  const firebase = createFakeFirebase([], {
+    addImpl() {
+      const error = new Error('quota exceeded');
+      error.code = 'resource-exhausted';
+      return Promise.reject(error);
+    }
+  });
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      requestedPaths.push(url);
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: true,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'test-app'
+        }
+      });
+    }
+    const path = new URL(url).searchParams.get('path');
+    requestedPaths.push(path || url);
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    if (path === 'api/checklists/today') {
+      return response(createChecklistPayload(initialItem));
+    }
+    if (path === 'api/checklist-items/run-item-001/check') {
+      return response({
+        ok: true,
+        statusCode: 200,
+        item: checkedItem
+      });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, { firebase });
+
+  const checkButton = findByDataset(document.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  checkButton.click();
+  await wait(400);
+
+  assert.equal(requestedPaths.includes('api/checklist-items/run-item-001/check'), true);
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'status', 'checked')?.dataset.status,
+    'checked',
+    JSON.stringify({ requestedPaths, statuses: datasetValues(document.elements['checklist-items'], 'status') })
+  );
 });
 
 test('GitHub Pages app は古い再取得レスポンスで新しい未チェック状態を戻さない', async () => {

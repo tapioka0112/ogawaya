@@ -117,7 +117,9 @@
   var ITEM_ACTION_DISPATCH_DEBOUNCE_MS = 120;
   var ITEM_ACTION_REQUEST_TIMEOUT_MS = 2500;
   var ITEM_ACTION_RETRY_MAX_ATTEMPTS = 6;
-  var SNAPSHOT_PERSIST_DEBOUNCE_MS = 1500;
+  var BACKGROUND_GAS_SYNC_TIMEOUT_MS = 8000;
+  var BACKGROUND_GAS_SYNC_RETRY_MAX_ATTEMPTS = 5;
+  var FIRESTORE_WRITE_SUSPEND_MS = 5 * 60 * 1000;
   var JST_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric',
@@ -362,11 +364,11 @@
     itemActions: {},
     firebaseApp: null,
     firestore: null,
+    firebaseAuthPromise: null,
+    firestoreWriteSuspendedUntilMs: 0,
     realtimeEnabled: false,
     syncUnsubscribe: null,
-    syncSessionStartedAtMs: 0,
     consistencyTimerId: null,
-    snapshotPersistTimerId: null,
     visibilityHandlerBound: false,
     statsYear: new Date().getFullYear(),
     statsMonth: new Date().getMonth() + 1,
@@ -401,6 +403,8 @@
     progressRingLabel: document.getElementById('progress-ring-label'),
     checklistItems: document.getElementById('checklist-items'),
     taskDetailPanel: document.getElementById('task-detail-panel'),
+    taskDetailBackdrop: document.getElementById('task-detail-backdrop'),
+    taskDetailClose: document.getElementById('task-detail-close'),
     taskDetailTitle: document.getElementById('task-detail-title'),
     taskDetailDescription: document.getElementById('task-detail-description'),
     taskDetailMeta: document.getElementById('task-detail-meta'),
@@ -460,6 +464,38 @@
 
   function clearStatus() {
     setStatus('');
+  }
+
+  function emitClientEvent(name, details) {
+    if (!state.config || !state.config.gasApiBaseUrl || !global.fetch) {
+      return;
+    }
+    var eventDetails = details || {};
+    var query = {
+      path: 'api/client-events',
+      name: String(name || ''),
+      mode: 'user',
+      message: eventDetails.message ? String(eventDetails.message) : JSON.stringify(eventDetails),
+      code: eventDetails.code ? String(eventDetails.code) : '',
+      statusCode: eventDetails.statusCode ? String(eventDetails.statusCode) : ''
+    };
+    if (typeof eventDetails.elapsedMs === 'number') {
+      query.elapsedMs = String(eventDetails.elapsedMs);
+    }
+    if (eventDetails.runItemId) {
+      query.runItemId = String(eventDetails.runItemId);
+    }
+    if (eventDetails.desiredStatus) {
+      query.desiredStatus = String(eventDetails.desiredStatus);
+    }
+    if (eventDetails.source) {
+      query.source = String(eventDetails.source);
+    }
+    global.fetch(appendQuery(state.config.gasApiBaseUrl, query), {
+      method: 'GET',
+      mode: 'no-cors',
+      keepalive: true
+    }).catch(function () {});
   }
 
   function setMenuOpen(open) {
@@ -1187,7 +1223,7 @@
     recomputeProgress();
     renderOverview();
     renderChecklist();
-    renderSelectedTaskDetail({ scroll: false });
+    renderSelectedTaskDetail({ focus: false });
     renderIncomplete();
     rememberStoreIdFromChecklist(state.checklist);
     if (applyOptions.restartSync !== false) {
@@ -1252,30 +1288,6 @@
     actionState.retryTimerId = null;
   }
 
-  function clearSnapshotPersistTimer() {
-    if (!state.snapshotPersistTimerId) {
-      return;
-    }
-    global.clearTimeout(state.snapshotPersistTimerId);
-    state.snapshotPersistTimerId = null;
-  }
-
-  function scheduleChecklistSnapshotPersist() {
-    if (!state.checklist) {
-      return;
-    }
-    clearSnapshotPersistTimer();
-    state.snapshotPersistTimerId = global.setTimeout(function () {
-      state.snapshotPersistTimerId = null;
-      persistChecklistSnapshot();
-    }, SNAPSHOT_PERSIST_DEBOUNCE_MS);
-  }
-
-  function emitRealtimeSideEffects(updatedItem) {
-    emitRealtimeEvent(updatedItem);
-    scheduleChecklistSnapshotPersist();
-  }
-
   function applyChecklistItemUpdate(updatedItem) {
     var target = findChecklistItemById(updatedItem.id);
     if (!target) {
@@ -1292,7 +1304,7 @@
     }
     recomputeProgress();
     renderChecklist();
-    renderSelectedTaskDetail({ scroll: false });
+    renderSelectedTaskDetail({ focus: false });
     renderOverview();
     renderIncomplete();
     onChecklistMutation(previousItem, cloneChecklistItem(target));
@@ -1418,6 +1430,28 @@
       console.error('[sync] failed to initialize firebase client', error);
       return false;
     }
+  }
+
+  function ensureFirebaseAuthSession() {
+    if (!initializeRealtimeClient()) {
+      return Promise.reject(new Error('Firebase が初期化されていません'));
+    }
+    if (!global.firebase || typeof global.firebase.auth !== 'function') {
+      return Promise.reject(new Error('Firebase Auth SDK が読み込まれていません'));
+    }
+    var auth = global.firebase.auth();
+    if (auth.currentUser) {
+      return Promise.resolve(auth.currentUser);
+    }
+    if (!state.firebaseAuthPromise) {
+      state.firebaseAuthPromise = auth.signInAnonymously().then(function (result) {
+        return result && result.user ? result.user : auth.currentUser;
+      }).catch(function (error) {
+        state.firebaseAuthPromise = null;
+        throw error;
+      });
+    }
+    return state.firebaseAuthPromise;
   }
 
   function buildSnapshotDocRef(storeId, targetDate) {
@@ -1568,60 +1602,6 @@
     };
   }
 
-  function buildChecklistSnapshotPayload(checklist) {
-    return {
-      runId: String(checklist.runId || ''),
-      templateId: String(checklist.templateId || ''),
-      storeName: String(checklist.storeName || ''),
-      targetDate: String(checklist.targetDate || ''),
-      status: String(checklist.status || ''),
-      currentUser: {
-        userId: String(checklist.currentUser && checklist.currentUser.userId ? checklist.currentUser.userId : ''),
-        name: String(checklist.currentUser && checklist.currentUser.name ? checklist.currentUser.name : ''),
-        role: String(checklist.currentUser && checklist.currentUser.role ? checklist.currentUser.role : ''),
-        store: {
-          id: String(checklist.currentUser && checklist.currentUser.store && checklist.currentUser.store.id ? checklist.currentUser.store.id : ''),
-          name: String(checklist.currentUser && checklist.currentUser.store && checklist.currentUser.store.name ? checklist.currentUser.store.name : '')
-        }
-      },
-      progress: {
-        checked: Number(checklist.progress && checklist.progress.checked ? checklist.progress.checked : 0),
-        total: Number(checklist.progress && checklist.progress.total ? checklist.progress.total : 0)
-      },
-      items: (Array.isArray(checklist.items) ? checklist.items : []).map(function (item) {
-        return {
-          id: String(item.id || ''),
-          title: String(item.title || ''),
-          description: String(item.description || ''),
-          status: String(item.status || 'unchecked'),
-          checkedBy: item.checkedBy ? String(item.checkedBy) : '',
-          checkedByUserId: item.checkedByUserId ? String(item.checkedByUserId) : '',
-          checkedAt: item.checkedAt ? String(item.checkedAt) : '',
-          updatedAt: item.updatedAt ? String(item.updatedAt) : ''
-        };
-      }),
-      updatedAt: global.firebase.firestore.FieldValue.serverTimestamp()
-    };
-  }
-
-  function persistChecklistSnapshot() {
-    if (!state.config || state.config.clientFirestoreWriteEnabled !== true) {
-      return Promise.resolve();
-    }
-    if (!state.checklist || !initializeRealtimeClient()) {
-      return Promise.resolve();
-    }
-    var targetInfo = ensureSyncTargetInfo();
-    if (!targetInfo) {
-      return Promise.resolve();
-    }
-    return buildSnapshotDocRef(targetInfo.storeId, targetInfo.targetDate)
-      .set(buildChecklistSnapshotPayload(state.checklist), { merge: true })
-      .catch(function (error) {
-        console.error('[sync] failed to persist checklist snapshot', error);
-      });
-  }
-
   async function loadChecklistFromSnapshot() {
     if (!initializeRealtimeClient()) {
       return null;
@@ -1642,22 +1622,33 @@
     return normalizeChecklistPayload(doc.data() || {});
   }
 
-  function emitRealtimeEvent(updatedItem) {
-    if (!state.config || state.config.clientFirestoreWriteEnabled !== true) {
-      return Promise.resolve();
+  function isFirestoreWriteSuspended() {
+    return state.firestoreWriteSuspendedUntilMs > Date.now();
+  }
+
+  function suspendFirestoreWrites(error) {
+    var code = error && error.code ? String(error.code) : '';
+    if (
+      code === 'permission-denied' ||
+      code === 'resource-exhausted' ||
+      code === 'auth/operation-not-allowed' ||
+      code === 'auth/admin-restricted-operation' ||
+      code === 'auth/configuration-not-found'
+    ) {
+      state.firestoreWriteSuspendedUntilMs = Date.now() + FIRESTORE_WRITE_SUSPEND_MS;
     }
-    if (!state.realtimeEnabled || !state.firestore || !updatedItem) {
-      return Promise.resolve();
-    }
+  }
+
+  function buildRealtimeEventPayload(updatedItem) {
     var targetInfo = ensureSyncTargetInfo();
     if (!targetInfo) {
-      return Promise.resolve();
+      throw new Error('Firestore 同期対象が未確定です');
     }
     var sourceUserId = state.checklist && state.checklist.currentUser
       ? String(state.checklist.currentUser.userId || '')
       : '';
 
-    var payload = {
+    return {
       runId: targetInfo.runId,
       targetDate: targetInfo.targetDate,
       storeId: targetInfo.storeId,
@@ -1666,21 +1657,38 @@
       checkedBy: updatedItem.checkedBy || '',
       checkedByUserId: updatedItem.checkedByUserId || '',
       checkedAt: updatedItem.checkedAt || '',
-      updatedAt: updatedItem.updatedAt || '',
+      updatedAt: global.firebase.firestore.FieldValue.serverTimestamp(),
       sourceUserId: sourceUserId,
       emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
     };
+  }
 
-    return state.firestore
-      .collection('stores')
-      .doc(targetInfo.storeId)
-      .collection('runs')
-      .doc(targetInfo.targetDate)
-      .collection('events')
-      .add(payload)
-      .catch(function (error) {
-        console.error('[sync] failed to emit realtime event', error);
-      });
+  function writeRealtimeEvent(updatedItem) {
+    if (!state.config || state.config.clientFirestoreWriteEnabled !== true) {
+      return Promise.reject(new Error('Firestore 直接書き込みは無効です'));
+    }
+    if (isFirestoreWriteSuspended()) {
+      return Promise.reject(new Error('Firestore 直接書き込みを一時停止しています'));
+    }
+    if (!updatedItem) {
+      return Promise.reject(new Error('Firestore event payload が空です'));
+    }
+    return ensureFirebaseAuthSession().then(function () {
+      var targetInfo = ensureSyncTargetInfo();
+      if (!targetInfo) {
+        throw new Error('Firestore 同期対象が未確定です');
+      }
+      return state.firestore
+        .collection('stores')
+        .doc(targetInfo.storeId)
+        .collection('runs')
+        .doc(targetInfo.targetDate)
+        .collection('events')
+        .add(buildRealtimeEventPayload(updatedItem));
+    }).catch(function (error) {
+      suspendFirestoreWrites(error);
+      throw error;
+    });
   }
 
   function applyRealtimeEvent(eventPayload, emittedAtMs) {
@@ -1740,7 +1748,6 @@
     }
     applyChecklistItemUpdate(syncedItem);
     actionState.confirmedItem = cloneChecklistItem(syncedItem);
-    scheduleChecklistSnapshotPersist();
   }
 
   function stopRealtimeSync() {
@@ -1763,8 +1770,6 @@
     }
 
     try {
-      state.syncSessionStartedAtMs = Date.now();
-
       var query = state.firestore
         .collection('stores')
         .doc(targetInfo.storeId)
@@ -1781,9 +1786,6 @@
           }
           var payload = change.doc.data() || {};
           var emittedAtMs = parseTimestampMillis(payload.emittedAt);
-          if (emittedAtMs > 0 && emittedAtMs < state.syncSessionStartedAtMs - 5000) {
-            return;
-          }
           applyRealtimeEvent(payload, emittedAtMs);
         });
       }, function (error) {
@@ -1892,6 +1894,54 @@
     setStatus('通信遅延のため保存を再試行しています...');
   }
 
+  function syncItemStatusViaGas(runItemId, desiredStatus, timeoutMs) {
+    var requestPromise = desiredStatus === 'checked'
+      ? state.api.checkItem(state.idToken, runItemId)
+      : state.api.uncheckItem(state.idToken, runItemId);
+    return withTimeout(
+      requestPromise,
+      timeoutMs,
+      'API 同期がタイムアウトしました'
+    );
+  }
+
+  function syncItemStatusViaGasInBackground(runItemId, desiredStatus, expectedUpdatedAt, attempt) {
+    var currentAttempt = Number(attempt || 1);
+    global.setTimeout(function () {
+      var latestItem = findChecklistItemById(runItemId);
+      if (
+        !latestItem ||
+        latestItem.status !== desiredStatus ||
+        String(latestItem.updatedAt || '') !== String(expectedUpdatedAt || '')
+      ) {
+        return;
+      }
+      var startedAtMs = Date.now();
+      syncItemStatusViaGas(runItemId, desiredStatus, BACKGROUND_GAS_SYNC_TIMEOUT_MS).then(function () {
+        emitClientEvent('item.sync.background_gas.success', {
+          source: 'gas',
+          runItemId: runItemId,
+          desiredStatus: desiredStatus,
+          elapsedMs: Date.now() - startedAtMs
+        });
+      }).catch(function (error) {
+        emitClientEvent('item.sync.background_gas.failed', {
+          source: 'gas',
+          runItemId: runItemId,
+          desiredStatus: desiredStatus,
+          code: error && error.code ? String(error.code) : '',
+          statusCode: error && typeof error.statusCode === 'number' ? error.statusCode : 0,
+          message: error && error.message ? String(error.message) : 'background gas sync failed',
+          elapsedMs: Date.now() - startedAtMs
+        });
+        console.error('[sync] background GAS sync failed', error);
+        if (currentAttempt < BACKGROUND_GAS_SYNC_RETRY_MAX_ATTEMPTS) {
+          syncItemStatusViaGasInBackground(runItemId, desiredStatus, expectedUpdatedAt, currentAttempt + 1);
+        }
+      });
+    }, Math.min(15000, 1000 * currentAttempt));
+  }
+
   function processItemStatusChange(runItemId) {
     var actionState = getItemActionState(runItemId);
     if (actionState.dispatchTimerId) {
@@ -1917,22 +1967,46 @@
     var optimisticItemForDispatch = desiredStatus === 'checked'
       ? buildOptimisticCheckedItem(currentItem)
       : buildOptimisticUncheckedItem(currentItem);
-    emitRealtimeSideEffects(optimisticItemForDispatch);
 
     actionState.inFlight = true;
     var requestFailed = false;
     var requestError = null;
+    var syncStartedAtMs = Date.now();
+    var syncSource = 'firestore';
 
-    var requestPromise = desiredStatus === 'checked'
-      ? state.api.checkItem(state.idToken, runItemId)
-      : state.api.uncheckItem(state.idToken, runItemId);
-    var requestPromiseWithTimeout = withTimeout(
-      requestPromise,
-      ITEM_ACTION_REQUEST_TIMEOUT_MS,
-      'API 同期がタイムアウトしました'
-    );
+    emitClientEvent('item.sync.start', {
+      source: syncSource,
+      runItemId: runItemId,
+      desiredStatus: desiredStatus
+    });
 
-    requestPromiseWithTimeout.then(function (response) {
+    var requestPromiseWithFallback = writeRealtimeEvent(optimisticItemForDispatch).then(function () {
+      actionState.confirmedItem = cloneChecklistItem(optimisticItemForDispatch);
+      syncItemStatusViaGasInBackground(runItemId, desiredStatus, optimisticItemForDispatch.updatedAt);
+      emitClientEvent('item.sync.firestore.success', {
+        source: 'firestore',
+        runItemId: runItemId,
+        desiredStatus: desiredStatus,
+        elapsedMs: Date.now() - syncStartedAtMs
+      });
+      return {
+        item: optimisticItemForDispatch
+      };
+    }).catch(function (firestoreError) {
+      syncSource = 'gas';
+      emitClientEvent('item.sync.firestore.fallback', {
+        source: 'firestore',
+        runItemId: runItemId,
+        desiredStatus: desiredStatus,
+        code: firestoreError && firestoreError.code ? String(firestoreError.code) : '',
+        message: firestoreError && firestoreError.message ? String(firestoreError.message) : 'Firestore sync failed',
+        elapsedMs: Date.now() - syncStartedAtMs
+      });
+      setStatus('高速同期に失敗したため通常保存に切り替えます');
+      return syncItemStatusViaGas(runItemId, desiredStatus, ITEM_ACTION_REQUEST_TIMEOUT_MS);
+    });
+
+    requestPromiseWithFallback.then(function (response) {
       if (!response || !response.item) {
         requestFailed = true;
         return Promise.resolve();
@@ -1951,7 +2025,12 @@
         return Promise.resolve();
       }
       applyChecklistItemUpdate(response.item);
-      scheduleChecklistSnapshotPersist();
+      emitClientEvent('item.sync.success', {
+        source: syncSource,
+        runItemId: runItemId,
+        desiredStatus: desiredStatus,
+        elapsedMs: Date.now() - syncStartedAtMs
+      });
       return Promise.resolve();
     }).catch(function (error) {
       requestFailed = true;
@@ -1959,6 +2038,15 @@
         error.statusCode = 0;
       }
       requestError = error;
+      emitClientEvent('item.sync.failed', {
+        source: syncSource,
+        runItemId: runItemId,
+        desiredStatus: desiredStatus,
+        code: error && error.code ? String(error.code) : '',
+        statusCode: error && typeof error.statusCode === 'number' ? error.statusCode : 0,
+        message: error && error.message ? String(error.message) : 'sync failed',
+        elapsedMs: Date.now() - syncStartedAtMs
+      });
       setError(buildApiErrorMessage(error, 'チェック更新に失敗しました'));
     }).finally(function () {
       actionState.inFlight = false;
@@ -2046,11 +2134,8 @@
     setText(elements.taskDetailMeta, buildTaskDetailMetaText(item));
     elements.taskDetailPanel.dataset.status = item.status;
     elements.taskDetailPanel.hidden = false;
-    if (renderOptions.scroll !== false && typeof elements.taskDetailPanel.scrollIntoView === 'function') {
-      elements.taskDetailPanel.scrollIntoView({
-        block: 'start',
-        behavior: 'smooth'
-      });
+    if (renderOptions.focus !== false && elements.taskDetailClose && typeof elements.taskDetailClose.focus === 'function') {
+      elements.taskDetailClose.focus();
     }
   }
 
@@ -2075,6 +2160,20 @@
     renderTaskDetail(item);
   }
 
+  function bindTaskDetailModal() {
+    if (elements.taskDetailClose) {
+      elements.taskDetailClose.addEventListener('click', hideTaskDetail);
+    }
+    if (elements.taskDetailBackdrop) {
+      elements.taskDetailBackdrop.addEventListener('click', hideTaskDetail);
+    }
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && elements.taskDetailPanel && !elements.taskDetailPanel.hidden) {
+        hideTaskDetail();
+      }
+    });
+  }
+
   function renderChecklist() {
     var checklist = state.checklist;
     clearList(elements.checklistItems);
@@ -2095,16 +2194,13 @@
       if (actionState.inFlight) {
         listItem.dataset.pending = 'true';
       }
-      listItem.setAttribute('role', 'button');
-      listItem.setAttribute('tabindex', '0');
-      listItem.setAttribute('aria-label', item.title + ' の詳細を表示');
 
-      var checkButton = document.createElement('button');
-      checkButton.type = 'button';
-      checkButton.className = 'todo-check-button';
-      checkButton.dataset.itemId = item.id;
-      checkButton.dataset.action = item.status === 'checked' ? 'uncheck' : 'check';
-      checkButton.setAttribute(
+      var toggleButton = document.createElement('button');
+      toggleButton.type = 'button';
+      toggleButton.className = 'todo-toggle-button';
+      toggleButton.dataset.itemId = item.id;
+      toggleButton.dataset.action = item.status === 'checked' ? 'uncheck' : 'check';
+      toggleButton.setAttribute(
         'aria-label',
         item.status === 'checked'
           ? item.title + ' を未完了に戻す'
@@ -2113,7 +2209,7 @@
       var bullet = document.createElement('span');
       bullet.className = 'todo-bullet';
       bullet.dataset.status = item.status;
-      checkButton.appendChild(bullet);
+      toggleButton.appendChild(bullet);
 
       var main = document.createElement('div');
       main.className = 'todo-main';
@@ -2131,19 +2227,20 @@
         meta.textContent = checkedAtText ? checkedBy + ' ・ ' + checkedAtText : checkedBy;
         main.appendChild(meta);
       }
+      toggleButton.appendChild(main);
 
-      var chevron = document.createElement('span');
-      chevron.className = 'todo-chevron';
-      chevron.setAttribute('aria-hidden', 'true');
-      chevron.textContent = '›';
+      var detailButton = document.createElement('button');
+      detailButton.type = 'button';
+      detailButton.className = 'todo-detail-button';
+      detailButton.dataset.itemId = item.id;
+      detailButton.dataset.action = 'detail';
+      detailButton.setAttribute('aria-label', item.title + ' の詳細を表示');
+      detailButton.textContent = '›';
 
       var openDetailHandler = function () {
         openTaskDetail(item.id);
       };
       var toggleHandler = function (event) {
-        if (event && typeof event.stopPropagation === 'function') {
-          event.stopPropagation();
-        }
         clearError();
         clearStatus();
         var latestItem = findChecklistItemById(item.id);
@@ -2153,18 +2250,11 @@
         var nextStatus = latestItem.status === 'unchecked' ? 'checked' : 'unchecked';
         requestItemStatusChange(item.id, nextStatus);
       };
-      checkButton.addEventListener('click', toggleHandler);
-      listItem.addEventListener('click', openDetailHandler);
-      listItem.addEventListener('keydown', function (event) {
-        if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
-          event.preventDefault();
-          openDetailHandler();
-        }
-      });
+      toggleButton.addEventListener('click', toggleHandler);
+      detailButton.addEventListener('click', openDetailHandler);
 
-      listItem.appendChild(checkButton);
-      listItem.appendChild(main);
-      listItem.appendChild(chevron);
+      listItem.appendChild(toggleButton);
+      listItem.appendChild(detailButton);
       elements.checklistItems.appendChild(listItem);
     });
   }
@@ -2192,7 +2282,6 @@
     var refreshOptions = options || {};
     var checklist = await state.api.getTodayChecklist(state.idToken);
     applyChecklistPayload(checklist, { restartSync: refreshOptions.restartSync !== false });
-    scheduleChecklistSnapshotPersist();
   }
 
   function startConsistencyRefresh() {
@@ -2278,6 +2367,7 @@
     bindTabNavigation();
     bindStatsNavigation();
     bindStatsCalendarSelection();
+    bindTaskDetailModal();
     setActiveTab('home');
     setMenuOpen(false);
 
@@ -2303,7 +2393,6 @@
       stopRealtimeSync();
       stopConsistencyRefresh();
       stopStatsSubscriptions();
-      clearSnapshotPersistTimer();
     });
 
     boot().catch(function (error) {

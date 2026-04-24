@@ -1,7 +1,7 @@
 # 会社共有チェックリスト LINE Bot（GAS + Firestore 同期）
 
 `tasks.md` を正として実装を進めるリポジトリです。  
-現行運用は `LIFF (GitHub Pages) + GAS API + Spreadsheet` を主系にし、Firestore はリアルタイム同期の read に使います。
+現行運用は `LIFF (GitHub Pages) + GAS API + Spreadsheet` を主系にし、Firestore はチェック操作の高速反映とリアルタイム同期に使います。
 
 ## 確定仕様（tasks.md 準拠）
 - 初期版は `1ユーザー = 1店舗` 前提。
@@ -15,7 +15,7 @@
 - 正本データ: Spreadsheet
 - LIFF フロント: GitHub Pages (`pages/`)
 - 管理者画面: GitHub Pages (`pages/admin.html`)
-- Firestore: `events` / `snapshots/today` のリアルタイム read
+- Firestore: `events` の create/read、`snapshots/today` の read
 
 ## 運用手順
 - 非IT担当者向けの全体運用手順は [docs/operations/non-technical-operations.md](/home/sota411/Documents/project/ogawaya/docs/operations/non-technical-operations.md) を参照してください。
@@ -53,6 +53,7 @@
    - `liffId`
    - `defaultStoreId`
    - `enableRealtimeSync`
+   - `clientFirestoreWriteEnabled`
    - `firebase.apiKey` / `firebase.authDomain` / `firebase.projectId` / `firebase.appId`
    - `functionsApiBaseUrl` は空文字で運用可能
 3. GitHub Pages を有効化し、`pages/` を公開する。
@@ -61,9 +62,11 @@
 
 ## リアルタイム同期（Firestore）
 - `enableRealtimeSync=true` かつ `firebase` 設定済みのときだけ有効。
-- イベント読取: `stores/{storeId}/runs/{targetDate}/events/*`
+- `clientFirestoreWriteEnabled=true` のとき、チェック操作は Firestore `events` へ先に書き込み、GAS API は保存用にバックグラウンド同期する。
+- イベント作成・読取: `stores/{storeId}/runs/{targetDate}/events/*`
 - スナップショット読取: `stores/{storeId}/runs/{targetDate}/snapshots/today`
 - 統計タブは `snapshots/today` をクライアント集計する。
+- Firestore 直接書き込みには Firebase Authentication の匿名ログインを使う。
 - Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。
 
 ## 0:30 未完了通知
