@@ -1353,7 +1353,9 @@
     }
     if (desiredStatus === 'checked') {
       recentlyCheckedIds.add(runItemId);
-      if (navigator.vibrate) { navigator.vibrate(10); }
+      if (global.navigator && typeof global.navigator.vibrate === 'function') {
+        global.navigator.vibrate(10);
+      }
       applyChecklistItemUpdate(buildOptimisticCheckedItem(currentItem));
       setStatus('チェックを更新しました');
       return;
@@ -2177,20 +2179,9 @@
     }
     setText(elements.progressRingLabel, isComplete ? '完了' : pct + '%');
     if (isComplete && !wasComplete) {
-      if (typeof confetti === 'function') {
-        var ringWrap = elements.progressRingProgress && elements.progressRingProgress.closest('.progress-ring-wrap');
-        var rect = ringWrap ? ringWrap.getBoundingClientRect() : null;
-        confetti({
-          particleCount: 80,
-          spread: 60,
-          useWorker: true,
-          origin: rect
-            ? { x: (rect.left + rect.width / 2) / window.innerWidth, y: (rect.top + rect.height / 2) / window.innerHeight }
-            : { x: 0.5, y: 0.3 },
-          colors: ['#f47a39', '#d4a017', '#ffe4d6', '#ffffff']
-        });
+      if (global.navigator && typeof global.navigator.vibrate === 'function') {
+        global.navigator.vibrate([10, 50, 30]);
       }
-      if (navigator.vibrate) { navigator.vibrate([10, 50, 30]); }
     }
   }
 

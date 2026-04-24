@@ -8,6 +8,14 @@ class FakeClassList {
     this.values = new Set();
   }
 
+  add(name) {
+    this.values.add(name);
+  }
+
+  remove(name) {
+    this.values.delete(name);
+  }
+
   toggle(name, force) {
     if (force) {
       this.values.add(name);
@@ -59,6 +67,9 @@ class FakeElement {
 
   setAttribute(name, value) {
     this._attributes[name] = String(value);
+    if (name === 'class') {
+      this.className = String(value);
+    }
   }
 
   getAttribute(name) {
@@ -157,6 +168,9 @@ function createFakeDocument() {
       return elements[id] || null;
     },
     createElement(tagName) {
+      return new FakeElement(tagName);
+    },
+    createElementNS(_namespace, tagName) {
       return new FakeElement(tagName);
     },
     querySelector(selector) {
@@ -327,12 +341,16 @@ async function loadPagesApp(fetchHandler, options = {}) {
       return timer;
     },
     clearTimeout,
+    requestAnimationFrame(handler) {
+      return setTimeout(handler, 0);
+    },
     setInterval(handler, ms) {
       const timer = setInterval(handler, ms);
       timer.unref();
       return timer;
     },
     clearInterval,
+    confetti: options.confetti,
     addEventListener() {},
     console,
     Intl,
@@ -347,6 +365,54 @@ async function loadPagesApp(fetchHandler, options = {}) {
     document: documentRef
   };
 }
+
+test('GitHub Pages app は全件完了済みでも外部エフェクトに依存せず描画する', async () => {
+  const checkedItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'checked',
+    checkedBy: '田中LINE',
+    checkedByUserId: 'line-user-001',
+    checkedAt: '2026-04-24T10:05:00Z',
+    updatedAt: '2026-04-24T10:05:00Z'
+  };
+  let confettiCalls = 0;
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: false,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: null
+      });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      return response(createChecklistPayload(checkedItem));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    confetti() {
+      confettiCalls += 1;
+      throw new Error('confetti should not be required for completion rendering');
+    }
+  });
+
+  assert.equal(document.elements['error-message'].textContent, '');
+  assert.equal(document.elements['progress-ring-label'].textContent, '完了');
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'status', 'checked')?.dataset.status,
+    'checked'
+  );
+  assert.equal(confettiCalls, 0);
+});
 
 test('GitHub Pages app は古い再取得レスポンスで新しいチェック状態を戻さない', async () => {
   const initialItem = {
