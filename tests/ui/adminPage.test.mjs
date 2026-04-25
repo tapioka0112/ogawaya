@@ -37,6 +37,7 @@ test('管理者ページはログイン導線と管理UIの主要要素を持つ
   assert.match(html, /https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-auth-compat\.js/);
   assert.match(html, /https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-firestore-compat\.js/);
   assert.match(html, /<script src="\.\/admin\.js\?v=[^"]+"><\/script>/);
+  assert.match(html, /<script src="\.\/admin\.js\?v=admin-store-session-fix-20260426"><\/script>/);
 });
 
 test('管理者ページのタスク挿入はタグごとに対象日を算出する', async () => {
@@ -72,6 +73,13 @@ test('管理者ページの GAS API 呼び出しは CORS preflight を避ける'
   assert.match(js, /method: 'GET'/);
   assert.match(js, /query\._payload = JSON\.stringify\(body\);/);
   assert.match(js, /query\._method = method;/);
+});
+
+test('管理者ログインは設定ファイルの店舗IDでGASセッションを作成する', async () => {
+  const js = await readFile('pages/admin.js', 'utf8');
+
+  assert.match(js, /ADMIN_SESSION_STORAGE_KEY = 'ogawaya:admin:session-token:v2'/);
+  assert.match(js, /storeId:\s*state\.config\.defaultStoreId/);
 });
 
 test('管理者ページの4操作ボタンはレスポンシブグリッドで同じ幅に揃える', async () => {

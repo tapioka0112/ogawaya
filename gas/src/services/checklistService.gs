@@ -803,7 +803,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var adminLoginPassword = normalizeAdminCredential(options.adminLoginPassword);
     var adminSessionTtlSeconds = Number(options.adminSessionTtlSeconds || 12 * 60 * 60);
     var adminSessionMemory = {};
-    var ADMIN_SESSION_KEY_PREFIX = 'ogawaya:admin:session:v1:';
+    var ADMIN_SESSION_KEY_PREFIX = 'ogawaya:admin:session:v2:';
     var TASK_CATALOG_TEMPLATE_PREFIX = 'task-catalog-';
 
     if (!isFinite(adminSessionTtlSeconds) || adminSessionTtlSeconds < 300) {
@@ -833,6 +833,18 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       }) || null;
       ns.assert(activeStore || stores[0], 'config_error', '有効な store がありません', 500);
       return activeStore || stores[0];
+    }
+
+    function findAdminSessionStore(body) {
+      var storeId = String((body && body.storeId) || '').trim();
+      if (!storeId) {
+        return findCurrentStore();
+      }
+
+      var store = repository.findStoreById(storeId);
+      ns.assert(store, 'invalid_request', 'storeId の店舗が見つかりません', 400);
+      ns.assert(String(store.status || '') === 'active', 'invalid_request', 'storeId の店舗が有効ではありません', 400);
+      return store;
     }
 
     function buildCurrentUserContext(identity) {
@@ -1593,7 +1605,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           '管理者IDまたはパスワードが正しくありません',
           401
         );
-        var store = findCurrentStore();
+        var store = findAdminSessionStore(safeBody);
         var token = createAdminSessionToken();
         var issuedAtMs = nowMillis();
         var expiresAtMs = issuedAtMs + (adminSessionTtlSeconds * 1000);

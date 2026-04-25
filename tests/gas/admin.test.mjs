@@ -105,6 +105,114 @@ function loginAsAdmin(app) {
   return response.body.session.token;
 }
 
+test('管理者ログインは指定店舗のセッションを作成し日付別タスクを同じ店舗から返す', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      ADMIN_LOGIN_ID: 'admin-login',
+      ADMIN_LOGIN_PASSWORD: 'admin-password'
+    },
+    enableCacheService: true
+  });
+  const seed = createBaseDataset();
+  seed.stores.push({
+    id: 'store-hashimoto',
+    name: '橋本店',
+    status: 'active',
+    created_at: '2026-04-20T00:00:00Z'
+  });
+  seed.checklist_templates.push({
+    id: 'tmpl-hashimoto',
+    store_id: 'store-hashimoto',
+    name: '橋本店日次チェックリスト',
+    notify_time: '10:30',
+    closing_time: '00:00',
+    is_active: 'true',
+    created_by: 'user-mg-hashimoto',
+    created_at: '2026-04-20T00:00:00Z',
+    updated_at: '2026-04-20T00:00:00Z'
+  });
+  seed.checklist_template_items.push({
+    id: 'tmpl-item-hashimoto',
+    template_id: 'tmpl-hashimoto',
+    title: '厨房内床清掃',
+    description: '',
+    period: 'daily',
+    sort_order: '1',
+    is_required: 'true',
+    is_active: 'true',
+    created_at: '2026-04-20T00:00:00Z',
+    updated_at: '2026-04-20T00:00:00Z'
+  });
+  seed.checklist_runs = [
+    {
+      id: 'run-hashimoto-20260425',
+      template_id: 'tmpl-hashimoto',
+      store_id: 'store-hashimoto',
+      target_date: '2026-04-25',
+      status: 'open',
+      notified_at: '2026-04-25T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-25T01:30:00Z'
+    }
+  ];
+  seed.checklist_run_items = [
+    {
+      id: 'run-item-hashimoto-daily',
+      run_id: 'run-hashimoto-20260425',
+      template_item_id: 'tmpl-item-hashimoto',
+      title: '厨房内床清掃',
+      period: 'daily',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-25T01:30:00Z'
+    }
+  ];
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    clock: {
+      now() {
+        return new Date('2026-04-25T03:00:00Z');
+      },
+      today() {
+        return '2026-04-25';
+      },
+      yesterday() {
+        return '2026-04-24';
+      }
+    }
+  });
+
+  const login = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/admin/login',
+    query: {},
+    body: {
+      loginId: 'admin-login',
+      password: 'admin-password',
+      storeId: 'store-hashimoto'
+    }
+  });
+
+  assert.equal(login.statusCode, 200);
+  assert.equal(login.body.session.storeId, 'store-hashimoto');
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/admin/runs/2026-04-25',
+    query: { adminToken: login.body.session.token },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.checklist.storeName, '橋本店');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(response.body.checklist.items.map((item) => item.title))),
+    ['厨房内床清掃']
+  );
+});
+
 test('管理者ログインは Script Properties の前後空白を無視する', async () => {
   const runtime = await loadGasRuntime({
     scriptProperties: {

@@ -1,5 +1,5 @@
 (function (global) {
-  var ADMIN_SESSION_STORAGE_KEY = 'ogawaya:admin:session-token';
+  var ADMIN_SESSION_STORAGE_KEY = 'ogawaya:admin:session-token:v2';
   var CLIENT_ID_STORAGE_KEY = 'ogawaya:client-id';
   var JST_OFFSET_MS = 9 * 60 * 60 * 1000;
   var TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS = 5;
@@ -1173,7 +1173,8 @@
       '/api/admin/login',
       {
         loginId: loginId,
-        password: password
+        password: password,
+        storeId: state.config.defaultStoreId
       },
       { auth: false }
     );
