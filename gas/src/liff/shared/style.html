@@ -409,6 +409,11 @@
     --u-accent: #36a18b;
     --u-accent-strong: #2a8670;
     --u-accent-soft: #e4f3ee;
+    --period-accent: #f47a39;
+    --period-accent-strong: #d96528;
+    --period-accent-soft: #ffe4d6;
+    --period-accent-line: rgba(244, 122, 57, 0.28);
+    --period-accent-faint: rgba(244, 122, 57, 0.14);
     --u-surface: #ffffff;
     --u-page-bg: #f5f7f6;
     --u-ink: #1f2b25;
@@ -420,6 +425,22 @@
       radial-gradient(circle at top left, rgba(54, 161, 139, 0.08), transparent 40%),
       var(--u-page-bg);
     color: var(--u-ink);
+  }
+
+  body.user-mode[data-task-period='weekly'] {
+    --period-accent: #36a18b;
+    --period-accent-strong: #2a8670;
+    --period-accent-soft: #e4f3ee;
+    --period-accent-line: rgba(54, 161, 139, 0.28);
+    --period-accent-faint: rgba(54, 161, 139, 0.14);
+  }
+
+  body.user-mode[data-task-period='monthly'] {
+    --period-accent: #7c5ac7;
+    --period-accent-strong: #5b3da8;
+    --period-accent-soft: #ede7ff;
+    --period-accent-line: rgba(124, 90, 199, 0.28);
+    --period-accent-faint: rgba(124, 90, 199, 0.14);
   }
 
   body.user-mode::before {
@@ -716,6 +737,42 @@
     margin-top: 16px;
   }
 
+  .user-mode .period-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 6px;
+    margin-bottom: 12px;
+    background: var(--u-surface);
+    border-radius: 16px;
+    box-shadow: var(--u-shadow);
+  }
+
+  .user-mode .period-tab-btn {
+    min-height: 40px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--u-muted);
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 160ms ease, color 160ms ease, transform 120ms ease;
+  }
+
+  .user-mode .period-tab-btn:active {
+    transform: scale(0.98);
+  }
+
+  .user-mode .period-tab-btn:focus-visible {
+    outline: 3px solid var(--period-accent-line);
+    outline-offset: 2px;
+  }
+
+  .user-mode .period-tab-btn--active {
+    background: var(--period-accent-soft);
+    color: var(--period-accent-strong);
+  }
+
   .user-mode .todo-list {
     list-style: none;
     margin: 0;
@@ -747,7 +804,7 @@
 
   .user-mode .todo-item:focus-visible,
   .user-mode .todo-check-button:focus-visible {
-    outline: 3px solid rgba(244, 122, 57, 0.28);
+    outline: 3px solid var(--period-accent-line);
     outline-offset: 3px;
   }
 
@@ -784,8 +841,8 @@
   }
 
   .user-mode .todo-bullet[data-status='checked'] {
-    background: var(--u-accent);
-    border-color: var(--u-accent);
+    background: var(--period-accent);
+    border-color: var(--period-accent);
   }
 
   .user-mode .todo-bullet[data-status='checked']::after {
@@ -811,6 +868,19 @@
     color: var(--u-ink);
     line-height: 1.45;
     word-break: break-word;
+  }
+
+  .user-mode .todo-period-badge {
+    display: inline-flex;
+    width: fit-content;
+    margin-bottom: 5px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--period-accent-soft);
+    color: var(--period-accent-strong);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.2;
   }
 
   .user-mode .todo-item[data-status='checked'] .todo-title-text {
@@ -845,9 +915,9 @@
     margin-top: 14px;
     padding: 18px;
     background:
-      linear-gradient(135deg, rgba(244, 122, 57, 0.14), rgba(255, 255, 255, 0) 52%),
+      linear-gradient(135deg, var(--period-accent-faint), rgba(255, 255, 255, 0) 52%),
       var(--u-surface);
-    border: 1px solid rgba(244, 122, 57, 0.18);
+    border: 1px solid var(--period-accent-line);
     border-radius: var(--u-radius);
     box-shadow: var(--u-shadow);
   }
@@ -857,7 +927,7 @@
   }
 
   .user-mode .task-detail-label {
-    color: var(--u-accent-strong);
+    color: var(--period-accent-strong);
     font-size: 12px;
     font-weight: 800;
     letter-spacing: 0.08em;

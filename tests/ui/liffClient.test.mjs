@@ -146,6 +146,10 @@ function createFakeDocument() {
     ['circle', 'progress-ring-progress'],
     ['span', 'progress-ring-label'],
     ['ul', 'checklist-items'],
+    ['div', 'period-tabs'],
+    ['button', 'period-tab-daily'],
+    ['button', 'period-tab-weekly'],
+    ['button', 'period-tab-monthly'],
     ['article', 'task-detail-panel'],
     ['h2', 'task-detail-title'],
     ['p', 'task-detail-description'],
@@ -173,12 +177,14 @@ function createFakeDocument() {
     ['select', 'template-item-select'],
     ['input', 'template-item-title-input'],
     ['input', 'template-item-description-input'],
+    ['select', 'template-item-period-input'],
     ['input', 'template-item-sort-order-input'],
     ['input', 'template-item-required-input'],
     ['button', 'update-template-item-button'],
     ['button', 'delete-template-item-button'],
     ['input', 'new-item-title-input'],
     ['input', 'new-item-description-input'],
+    ['select', 'new-item-period-input'],
     ['input', 'new-item-sort-order-input'],
     ['input', 'new-item-required-input'],
     ['button', 'add-template-item-button'],
@@ -200,6 +206,11 @@ function createFakeDocument() {
 
   elements['template-item-required-input'].type = 'checkbox';
   elements['new-item-required-input'].type = 'checkbox';
+  elements['template-item-period-input'].value = 'daily';
+  elements['new-item-period-input'].value = 'daily';
+  elements['period-tab-daily'].dataset.period = 'daily';
+  elements['period-tab-weekly'].dataset.period = 'weekly';
+  elements['period-tab-monthly'].dataset.period = 'monthly';
 
   return {
     elements,
@@ -1087,7 +1098,82 @@ test('ホームのタスクカード押下は詳細を表示しチェック API 
   assert.equal(documentRef.elements['task-detail-panel'].hidden, false);
   assert.equal(documentRef.elements['task-detail-title'].textContent, '開店準備');
   assert.equal(documentRef.elements['task-detail-description'].textContent, '券売機と入口を確認する');
-  assert.equal(documentRef.elements['task-detail-meta'].textContent, '未完了');
+  assert.equal(documentRef.elements['task-detail-meta'].textContent, '日間 ・ 未完了');
+});
+
+test('ホームは期間タブで表示タスクとテーマを切り替える', async () => {
+  const { client } = await loadClientModule();
+  const documentRef = createFakeDocument();
+  const controller = client.createController({
+    document: documentRef,
+    auth: {
+      async initialize() {
+        return { idToken: 'token' };
+      }
+    },
+    api: {
+      async getMe() {
+        return {
+          userId: 'user-pt-001',
+          role: 'part_time',
+          store: { id: 'store-001', name: '青山店' }
+        };
+      },
+      async getTodayChecklist() {
+        return createChecklistPayload({
+          progress: {
+            checked: 1,
+            total: 2
+          },
+          items: [
+            {
+              id: 'run-item-daily',
+              title: '毎日の確認',
+              description: '',
+              period: 'daily',
+              status: 'unchecked',
+              checkedBy: null,
+              checkedByUserId: null,
+              checkedAt: null
+            },
+            {
+              id: 'run-item-weekly',
+              title: '週間の確認',
+              description: '',
+              period: 'weekly',
+              status: 'checked',
+              checkedBy: '田中 花子',
+              checkedByUserId: 'user-pt-001',
+              checkedAt: '2026-04-21T10:35:00Z'
+            }
+          ]
+        });
+      },
+      async getTodayIncomplete() {
+        return createIncompletePayload();
+      }
+    },
+    mode: 'user'
+  });
+
+  await controller.init();
+
+  assert.equal(documentRef.body.dataset.taskPeriod, 'daily');
+  assert.equal(documentRef.elements['progress-summary'].textContent, '1 / 2');
+  assert.ok(findByDataset(documentRef.elements['checklist-items'], 'period', 'daily'));
+  assert.equal(findByDataset(documentRef.elements['checklist-items'], 'period', 'weekly'), null);
+
+  documentRef.elements['period-tab-weekly'].click();
+
+  assert.equal(documentRef.body.dataset.taskPeriod, 'weekly');
+  assert.ok(findByDataset(documentRef.elements['checklist-items'], 'period', 'weekly'));
+  assert.equal(findByDataset(documentRef.elements['checklist-items'], 'period', 'daily'), null);
+
+  documentRef.elements['period-tab-monthly'].click();
+
+  assert.equal(documentRef.body.dataset.taskPeriod, 'monthly');
+  assert.equal(documentRef.elements['checklist-items'].children[0].textContent, '月間タスクはありません。');
+  assert.equal(documentRef.elements['progress-summary'].textContent, '1 / 2');
 });
 
 test('チェック操作は API 応答前でも UI を即時反映する', async () => {

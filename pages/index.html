@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>従業員画面</title>
-    <link rel="stylesheet" href="./style.css?v=stats-calendar-state-ui-20260425" />
+    <link rel="stylesheet" href="./style.css?v=task-period-tabs-20260425" />
     <link rel="preconnect" href="https://firestore.googleapis.com" />
     <link rel="preconnect" href="https://static.line-scdn.net" />
-    <script src="./app.js?v=stats-calendar-state-ui-20260425" defer></script>
+    <script src="./app.js?v=task-period-tabs-20260425" defer></script>
   </head>
   <body class="user-mode">
     <main class="todo-shell">
@@ -98,6 +98,11 @@
       </section>
 
       <section class="todo-list-wrap" id="main-content">
+        <div class="period-tabs" id="period-tabs" role="tablist" aria-label="タスク期間">
+          <button class="period-tab-btn period-tab-btn--active" id="period-tab-daily" type="button" data-period="daily" role="tab" aria-selected="true">日間</button>
+          <button class="period-tab-btn" id="period-tab-weekly" type="button" data-period="weekly" role="tab" aria-selected="false">週間</button>
+          <button class="period-tab-btn" id="period-tab-monthly" type="button" data-period="monthly" role="tab" aria-selected="false">月間</button>
+        </div>
         <ul class="todo-list" id="checklist-items"></ul>
       </section>
 

@@ -20,6 +20,14 @@ const ITEM_STATUS = {
   UNCHECKED: 'unchecked'
 };
 
+const TASK_PERIODS = {
+  DAILY: 'daily',
+  WEEKLY: 'weekly',
+  MONTHLY: 'monthly'
+};
+
+const TASK_PERIOD_VALUES = new Set(Object.values(TASK_PERIODS));
+
 const RUN_STATUS = {
   OPEN: 'open',
   CLOSED: 'closed'
@@ -57,6 +65,15 @@ function assert(condition, statusCode, code, message) {
   if (!condition) {
     fail(statusCode, code, message);
   }
+}
+
+function normalizeTaskPeriod(value) {
+  const period = String(value || '').trim();
+  if (!period) {
+    return TASK_PERIODS.DAILY;
+  }
+  assert(TASK_PERIOD_VALUES.has(period), 400, 'invalid_request', 'period が不正です');
+  return period;
 }
 
 function sendOk(res, statusCode, payload) {
@@ -265,6 +282,7 @@ function normalizeTask(docSnapshot) {
     id: docSnapshot.id,
     title: String(data.title || ''),
     description: String(data.description || ''),
+    period: normalizeTaskPeriod(data.period),
     isActive: data.isActive !== false,
     createdAt: toIsoString(data.createdAt),
     updatedAt: toIsoString(data.updatedAt)
@@ -278,6 +296,7 @@ function normalizeRunItem(docSnapshot) {
     taskId: String(data.taskId || ''),
     title: String(data.title || ''),
     description: String(data.description || ''),
+    period: normalizeTaskPeriod(data.period),
     sortOrder: Number(data.sortOrder || 0),
     status: data.status === ITEM_STATUS.CHECKED ? ITEM_STATUS.CHECKED : ITEM_STATUS.UNCHECKED,
     checkedBy: data.checkedByName ? String(data.checkedByName) : null,
@@ -582,12 +601,14 @@ async function handleAdminCreateTask(req, body) {
   const storeId = resolveStoreId(req, body);
   const title = normalizeString(body.title, 'title');
   const description = String(body.description || '').trim();
+  const period = normalizeTaskPeriod(body.period);
   const taskRef = getTaskCatalogCollection(storeId).doc();
   await taskRef.set(
     {
       id: taskRef.id,
       title,
       description,
+      period,
       isActive: true,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp()
@@ -690,6 +711,7 @@ async function handleAdminListTemplates(req, body) {
           taskId: item.taskId,
           title: task ? task.title : '',
           description: task ? task.description : '',
+          period: task ? task.period : TASK_PERIODS.DAILY,
           sortOrder: item.sortOrder
         };
       })
@@ -724,6 +746,7 @@ async function insertTaskIntoRun(storeId, businessDate, task) {
     taskId: task.id,
     title: task.title,
     description: task.description || '',
+    period: normalizeTaskPeriod(task.period),
     sortOrder: nextSortOrder,
     status: ITEM_STATUS.UNCHECKED,
     checkedByName: '',

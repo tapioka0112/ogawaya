@@ -10,9 +10,9 @@ const importCsvHeaders = {
   'docs/operations/import/notification_recipients.csv': 'id,store_id,line_user_id,display_name,channel_id,status,last_seen_at,created_at,updated_at',
   'docs/operations/import/notification_channel_usage.csv': 'id,channel_id,year_month,monthly_limit,official_sent_count,local_sent_count,remaining_count,last_synced_at,error_message',
   'docs/operations/import/checklist_templates.csv': 'id,store_id,name,notify_time,closing_time,is_active,created_by,created_at,updated_at',
-  'docs/operations/import/checklist_template_items.csv': 'id,template_id,title,description,sort_order,is_required,is_active,created_at,updated_at',
+  'docs/operations/import/checklist_template_items.csv': 'id,template_id,title,description,period,sort_order,is_required,is_active,created_at,updated_at',
   'docs/operations/import/checklist_runs.csv': 'id,template_id,store_id,target_date,status,notified_at,closed_at,created_at',
-  'docs/operations/import/checklist_run_items.csv': 'id,run_id,template_item_id,title,sort_order,status,checked_by,checked_by_name,checked_at,updated_at',
+  'docs/operations/import/checklist_run_items.csv': 'id,run_id,template_item_id,title,period,sort_order,status,checked_by,checked_by_name,checked_at,updated_at',
   'docs/operations/import/checklist_item_logs.csv': 'id,run_item_id,action,user_id,before_value,after_value,is_after_close,created_at',
   'docs/operations/import/notifications.csv': 'id,store_id,user_id,type,channel_id,dedupe_key,message,status,sent_at,error_message'
 };

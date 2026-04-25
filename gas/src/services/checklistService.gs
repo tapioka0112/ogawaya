@@ -500,7 +500,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   }
 
-  function buildTemplateItemDescriptionMap(repository, items) {
+  function buildTemplateItemMetadataMap(repository, items) {
     var neededIds = {};
     (items || []).forEach(function (item) {
       var templateItemId = String(item.template_item_id || '').trim();
@@ -512,26 +512,33 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return {};
     }
 
-    var descriptions = {};
+    var metadata = {};
     repository.listTable('checklist_template_items').forEach(function (templateItem) {
       if (neededIds[templateItem.id]) {
-        descriptions[templateItem.id] = String(templateItem.description || '');
+        metadata[templateItem.id] = {
+          description: String(templateItem.description || ''),
+          period: ns.normalizeTaskPeriod(templateItem.period)
+        };
       }
     });
-    return descriptions;
+    return metadata;
   }
 
-  function buildRunItemResponse(item, descriptionByTemplateItemId) {
+  function buildRunItemResponse(item, metadataByTemplateItemId) {
     var checkedByName = String(item.checked_by_name || '').trim();
     var checkedByUserId = String(item.checked_by || '').trim();
     var templateItemId = String(item.template_item_id || '').trim();
+    var templateMetadata = metadataByTemplateItemId && templateItemId
+      ? metadataByTemplateItemId[templateItemId]
+      : null;
     return {
       id: item.id,
       templateItemId: templateItemId,
       title: item.title,
-      description: descriptionByTemplateItemId && templateItemId
-        ? String(descriptionByTemplateItemId[templateItemId] || '')
+      description: templateMetadata
+        ? String(templateMetadata.description || '')
         : '',
+      period: ns.normalizeTaskPeriod(item.period || (templateMetadata && templateMetadata.period)),
       status: item.status,
       checkedBy: checkedByName || null,
       checkedByUserId: checkedByUserId || null,
@@ -541,14 +548,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   }
 
   function buildSingleRunItemResponse(repository, item) {
-    return buildRunItemResponse(item, buildTemplateItemDescriptionMap(repository, [item]));
+    return buildRunItemResponse(item, buildTemplateItemMetadataMap(repository, [item]));
   }
 
   function buildChecklistResponse(repository, currentUser, run, items) {
     var checkedCount = items.filter(function (item) {
       return item.status === ns.ITEM_STATUS.CHECKED;
     }).length;
-    var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, items);
+    var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, items);
 
     return {
       runId: run.id,
@@ -562,7 +569,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         checked: checkedCount
       },
       items: items.map(function (item) {
-        return buildRunItemResponse(item, descriptionByTemplateItemId);
+        return buildRunItemResponse(item, metadataByTemplateItemId);
       })
     };
   }
@@ -572,6 +579,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       id: item.id,
       title: item.title,
       description: item.description,
+      period: ns.normalizeTaskPeriod(item.period),
       sortOrder: Number(item.sort_order),
       isRequired: ns.parseBoolean(item.is_required)
     };
@@ -585,6 +593,60 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       closingTime: template.closing_time,
       isActive: ns.parseBoolean(template.is_active),
       items: items.map(buildTemplateItemResponse)
+    };
+  }
+
+  function parseTargetDateParts(targetDate) {
+    var match = String(targetDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    ns.assert(match, 'invalid_data', 'target_date の形式が不正です', 400);
+    return {
+      year: Number(match[1]),
+      month: Number(match[2]),
+      day: Number(match[3])
+    };
+  }
+
+  function calculateDayOfWeek(targetDate) {
+    var parts = parseTargetDateParts(targetDate);
+    var month = parts.month;
+    var year = parts.year;
+    if (month < 3) {
+      month += 12;
+      year -= 1;
+    }
+    return (parts.day + Math.floor((13 * (month + 1)) / 5) + year + Math.floor(year / 4) - Math.floor(year / 100) + Math.floor(year / 400)) % 7;
+  }
+
+  function shouldCreateTemplateItemOnDate(templateItem, targetDate) {
+    var period = ns.normalizeTaskPeriod(templateItem.period);
+    if (period === ns.TASK_PERIODS.DAILY) {
+      return true;
+    }
+    if (period === ns.TASK_PERIODS.WEEKLY) {
+      return calculateDayOfWeek(targetDate) === 1;
+    }
+    return parseTargetDateParts(targetDate).day === 1;
+  }
+
+  function listScheduledTemplateItems(templateItems, targetDate) {
+    return templateItems.filter(function (templateItem) {
+      return shouldCreateTemplateItemOnDate(templateItem, targetDate);
+    });
+  }
+
+  function buildRunItemPayloadFromTemplateItem(templateItem, runId, runItemId, sortOrder, now) {
+    return {
+      id: runItemId,
+      run_id: runId,
+      template_item_id: templateItem.id,
+      title: templateItem.title,
+      period: ns.normalizeTaskPeriod(templateItem.period),
+      sort_order: String(sortOrder),
+      status: ns.ITEM_STATUS.UNCHECKED,
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: now
     };
   }
 
@@ -845,20 +907,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           closed_at: '',
           created_at: now
         };
-        var templateItems = repository.listTemplateItems(template.id);
+        var templateItems = listScheduledTemplateItems(repository.listTemplateItems(template.id), targetDate);
         var runItems = templateItems.map(function (templateItem) {
-          return {
-            id: Utilities.getUuid(),
-            run_id: runId,
-            template_item_id: templateItem.id,
-            title: templateItem.title,
-            sort_order: templateItem.sort_order,
-            status: ns.ITEM_STATUS.UNCHECKED,
-            checked_by: '',
-            checked_by_name: '',
-            checked_at: '',
-            updated_at: now
-          };
+          return buildRunItemPayloadFromTemplateItem(templateItem, runId, Utilities.getUuid(), templateItem.sort_order, now);
         });
         var createdRun = repository.createChecklistRunWithItems(runPayload, runItems);
         return createdRun;
@@ -1111,7 +1162,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       var checkedItems = runItems.filter(function (item) {
         return item.status === ns.ITEM_STATUS.CHECKED;
       }).length;
-      var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, runItems);
+      var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, runItems);
       return {
         date: targetDate,
         runCount: runs.length,
@@ -1119,7 +1170,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         checked: checkedItems,
         achieved: runItems.length > 0 && checkedItems === runItems.length,
         items: runItems.map(function (item) {
-          return buildRunItemResponse(item, descriptionByTemplateItemId);
+          return buildRunItemResponse(item, metadataByTemplateItemId);
         })
       };
     }
@@ -1242,6 +1293,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         id: item.id,
         title: item.title,
         description: item.description,
+        period: ns.normalizeTaskPeriod(item.period),
         sortOrder: Number(item.sort_order)
       };
     }
@@ -1289,14 +1341,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
     function buildAdminRunResponse(store, targetDate, run, items) {
       var runItems = items || [];
-      var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, runItems);
+      var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, runItems);
       return {
         runId: run ? run.id : '',
         targetDate: targetDate,
         status: run ? run.status : ns.RUN_STATUS.OPEN,
         storeName: store.name,
         items: runItems.map(function (item) {
-          return buildRunItemResponse(item, descriptionByTemplateItemId);
+          return buildRunItemResponse(item, metadataByTemplateItemId);
         })
       };
     }
@@ -1439,6 +1491,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           template_id: catalogTemplate.id,
           title: title,
           description: description,
+          period: ns.normalizeTaskPeriod(safeBody.period, 'invalid_request'),
           sort_order: String(maxSortOrder + 1),
           is_required: 'true',
           is_active: 'true',
@@ -1512,6 +1565,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             template_id: template.id,
             title: task.title,
             description: task.description,
+            period: ns.normalizeTaskPeriod(task.period),
             sort_order: String(index + 1),
             is_required: 'true',
             is_active: 'true',
@@ -1568,6 +1622,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             run_id: run.id,
             template_item_id: task.id,
             title: task.title,
+            period: ns.normalizeTaskPeriod(task.period),
             sort_order: String(maxSortOrder + 1),
             status: ns.ITEM_STATUS.UNCHECKED,
             checked_by: '',
@@ -1578,7 +1633,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         ])[0];
         writeChecklistSnapshot(run, repository.listRunItems(run.id));
         return {
-          item: buildRunItemResponse(createdItem, buildTemplateItemDescriptionMap(repository, [createdItem]))
+          item: buildRunItemResponse(createdItem, buildTemplateItemMetadataMap(repository, [createdItem]))
         };
       },
 
@@ -1615,6 +1670,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             run_id: run.id,
             template_item_id: templateItem.id,
             title: templateItem.title,
+            period: ns.normalizeTaskPeriod(templateItem.period),
             sort_order: String(maxSortOrder + index + 1),
             status: ns.ITEM_STATUS.UNCHECKED,
             checked_by: '',
@@ -1634,12 +1690,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           return item;
         });
         var insertedItems = newItems.length > 0 ? repository.createRunItems(newItems) : [];
-        var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, insertedItems);
+        var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, insertedItems);
         writeChecklistSnapshot(run, repository.listRunItems(run.id));
         return {
           insertedCount: insertedItems.length,
           items: insertedItems.map(function (item) {
-            return buildRunItemResponse(item, descriptionByTemplateItemId);
+            return buildRunItemResponse(item, metadataByTemplateItemId);
           })
         };
       },
@@ -1792,6 +1848,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           template_id: templateId,
           title: ns.requireString(body.title, 'title'),
           description: body.description || '',
+          period: ns.normalizeTaskPeriod(body.period, 'invalid_request'),
           sort_order: String(body.sortOrder),
           is_required: ns.boolToString(body.isRequired),
           is_active: 'true',
@@ -1811,6 +1868,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var updatedItem = repository.updateTemplateItem(itemId, {
           title: ns.requireString(body.title, 'title'),
           description: body.description || '',
+          period: ns.normalizeTaskPeriod(body.period, 'invalid_request'),
           sort_order: String(body.sortOrder),
           is_required: ns.boolToString(body.isRequired),
           updated_at: ns.toIsoString(clock.now())
@@ -1986,8 +2044,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           var existingRun = repository.findRunByStoreAndDate(template.store_id, targetDate);
           var run = existingRun;
           var created = false;
+          var now = ns.toIsoString(clock.now());
           if (!run) {
-            var now = ns.toIsoString(clock.now());
             var runId = Utilities.getUuid();
             var runPayload = {
               id: runId,
@@ -1999,20 +2057,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
               closed_at: '',
               created_at: now
             };
-            var templateItems = repository.listTemplateItems(template.id);
+            var templateItems = listScheduledTemplateItems(repository.listTemplateItems(template.id), targetDate);
             run = repository.createChecklistRunWithItems(runPayload, templateItems.map(function (templateItem) {
-              return {
-                id: Utilities.getUuid(),
-                run_id: runId,
-                template_item_id: templateItem.id,
-                title: templateItem.title,
-                sort_order: templateItem.sort_order,
-                status: ns.ITEM_STATUS.UNCHECKED,
-                checked_by: '',
-                checked_by_name: '',
-                checked_at: '',
-                updated_at: now
-              };
+              return buildRunItemPayloadFromTemplateItem(templateItem, runId, Utilities.getUuid(), templateItem.sort_order, now);
             }));
             created = true;
 
@@ -2023,6 +2070,33 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
               buildDailyStartMessage(repository.findStoreById(template.store_id), run)
             );
             createdRuns.push(run);
+          } else {
+            var existingItems = repository.listRunItems(run.id);
+            var existingTemplateItemIds = {};
+            existingItems.forEach(function (runItem) {
+              if (runItem.template_item_id) {
+                existingTemplateItemIds[runItem.template_item_id] = true;
+              }
+            });
+            var maxSortOrder = existingItems.reduce(function (maxValue, runItem) {
+              return Math.max(maxValue, Number(runItem.sort_order || 0));
+            }, 0);
+            var missingItems = listScheduledTemplateItems(repository.listTemplateItems(template.id), targetDate)
+              .filter(function (templateItem) {
+                return !existingTemplateItemIds[templateItem.id];
+              })
+              .map(function (templateItem, index) {
+                return buildRunItemPayloadFromTemplateItem(
+                  templateItem,
+                  run.id,
+                  Utilities.getUuid(),
+                  maxSortOrder + index + 1,
+                  now
+                );
+              });
+            if (missingItems.length > 0) {
+              repository.createRunItems(missingItems);
+            }
           }
 
           var snapshotSync = writeChecklistSnapshot(run, repository.listRunItems(run.id));

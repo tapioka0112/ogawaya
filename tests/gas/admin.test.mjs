@@ -370,10 +370,12 @@ test('管理者画面向け API でログイン後にタスク作成・挿入・
     query: { adminToken: token },
     body: {
       title: '追加タスク',
-      description: 'テスト用'
+      description: 'テスト用',
+      period: 'weekly'
     }
   });
   assert.equal(createTask.statusCode, 201);
+  assert.equal(createTask.body.task.period, 'weekly');
   const taskId = createTask.body.task.id;
 
   const listTasks = app.handleApiRequest({
@@ -384,6 +386,7 @@ test('管理者画面向け API でログイン後にタスク作成・挿入・
   });
   assert.equal(listTasks.statusCode, 200);
   assert.ok(listTasks.body.tasks.some((task) => task.id === taskId));
+  assert.equal(listTasks.body.tasks.find((task) => task.id === taskId).period, 'weekly');
 
   const insertTask = app.handleApiRequest({
     method: 'POST',
@@ -394,6 +397,7 @@ test('管理者画面向け API でログイン後にタスク作成・挿入・
     }
   });
   assert.equal(insertTask.statusCode, 201);
+  assert.equal(insertTask.body.item.period, 'weekly');
   const insertedRunItemId = insertTask.body.item.id;
 
   const createTemplate = app.handleApiRequest({
@@ -406,6 +410,7 @@ test('管理者画面向け API でログイン後にタスク作成・挿入・
     }
   });
   assert.equal(createTemplate.statusCode, 201);
+  assert.equal(createTemplate.body.template.items[0].period, 'weekly');
   const templateId = createTemplate.body.template.id;
 
   const applyTemplate = app.handleApiRequest({

@@ -372,6 +372,7 @@
         statsLoadRequestId: 0,
         selectedTaskDetailId: '',
         previousProgressPct: -1,
+        activePeriod: 'daily',
         activeTab: 'home'
       };
       var pendingItemActions = {};
@@ -382,11 +383,16 @@
       var appBaseUrl = normalizeBaseUrl(options.appBaseUrl || global.OGAWAYA_APP_BASE_URL || '');
       var elements = {
         errorBox: documentRef.getElementById('error-message'),
+        body: documentRef.body || null,
         statusBox: documentRef.getElementById('status-message'),
         storeName: documentRef.getElementById('store-name'),
         targetDate: documentRef.getElementById('target-date'),
         progressSummary: documentRef.getElementById('progress-summary'),
         checklistItems: documentRef.getElementById('checklist-items'),
+        periodTabs: documentRef.getElementById('period-tabs'),
+        periodTabDaily: documentRef.getElementById('period-tab-daily'),
+        periodTabWeekly: documentRef.getElementById('period-tab-weekly'),
+        periodTabMonthly: documentRef.getElementById('period-tab-monthly'),
         taskDetailPanel: documentRef.getElementById('task-detail-panel'),
         taskDetailTitle: documentRef.getElementById('task-detail-title'),
         taskDetailDescription: documentRef.getElementById('task-detail-description'),
@@ -410,12 +416,14 @@
         templateItemSelect: documentRef.getElementById('template-item-select'),
         templateItemTitleInput: documentRef.getElementById('template-item-title-input'),
         templateItemDescriptionInput: documentRef.getElementById('template-item-description-input'),
+        templateItemPeriodInput: documentRef.getElementById('template-item-period-input'),
         templateItemSortOrderInput: documentRef.getElementById('template-item-sort-order-input'),
         templateItemRequiredInput: documentRef.getElementById('template-item-required-input'),
         updateTemplateItemButton: documentRef.getElementById('update-template-item-button'),
         deleteTemplateItemButton: documentRef.getElementById('delete-template-item-button'),
         newItemTitleInput: documentRef.getElementById('new-item-title-input'),
         newItemDescriptionInput: documentRef.getElementById('new-item-description-input'),
+        newItemPeriodInput: documentRef.getElementById('new-item-period-input'),
         newItemSortOrderInput: documentRef.getElementById('new-item-sort-order-input'),
         newItemRequiredInput: documentRef.getElementById('new-item-required-input'),
         addTemplateItemButton: documentRef.getElementById('add-template-item-button'),
@@ -444,6 +452,53 @@
 
       function normalizeArray(value) {
         return Array.isArray(value) ? value : [];
+      }
+
+      var TASK_PERIOD_LABELS = {
+        daily: '日間',
+        weekly: '週間',
+        monthly: '月間'
+      };
+
+      function normalizeTaskPeriod(value) {
+        var normalized = String(value || '').trim();
+        return Object.prototype.hasOwnProperty.call(TASK_PERIOD_LABELS, normalized) ? normalized : 'daily';
+      }
+
+      function getTaskPeriodLabel(period) {
+        return TASK_PERIOD_LABELS[normalizeTaskPeriod(period)];
+      }
+
+      function getPeriodButtons() {
+        return [
+          elements.periodTabDaily,
+          elements.periodTabWeekly,
+          elements.periodTabMonthly
+        ].filter(function (button) {
+          return !!button;
+        });
+      }
+
+      function updatePeriodTheme() {
+        if (elements.body) {
+          elements.body.dataset.taskPeriod = state.activePeriod;
+        }
+        getPeriodButtons().forEach(function (button) {
+          var period = normalizeTaskPeriod(button.dataset.period);
+          var active = period === state.activePeriod;
+          if (active) {
+            button.classList.add('period-tab-btn--active');
+          } else {
+            button.classList.remove('period-tab-btn--active');
+          }
+          button.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+      }
+
+      function getVisibleChecklistItems(checklist) {
+        return normalizeArray(checklist && checklist.items).filter(function (item) {
+          return normalizeTaskPeriod(item.period) === state.activePeriod;
+        });
       }
 
       function canManageTemplates() {
@@ -691,6 +746,15 @@
             layer.parentNode.removeChild(layer);
           }
         }, 1600);
+      }
+
+      function switchPeriod(period) {
+        state.activePeriod = normalizeTaskPeriod(period);
+        updatePeriodTheme();
+        if (state.checklist) {
+          renderChecklist(state.checklist);
+        }
+        renderSelectedTaskDetail({ scroll: false });
       }
 
       function switchTab(tab) {
@@ -1018,6 +1082,9 @@
         if (Object.prototype.hasOwnProperty.call(updatedItem, 'description')) {
           target.description = updatedItem.description;
         }
+        if (Object.prototype.hasOwnProperty.call(updatedItem, 'period')) {
+          target.period = normalizeTaskPeriod(updatedItem.period);
+        }
         recomputeProgress();
         upsertIncompleteItemFromChecklistItem(target);
         renderOverview(state.checklist);
@@ -1035,6 +1102,7 @@
           id: item.id,
           title: item.title,
           description: item.description,
+          period: normalizeTaskPeriod(item.period),
           status: 'checked',
           checkedBy: state.me && state.me.name ? state.me.name : '自分',
           checkedByUserId: state.me && state.me.userId ? state.me.userId : '',
@@ -1047,6 +1115,7 @@
           id: item.id,
           title: item.title,
           description: item.description,
+          period: normalizeTaskPeriod(item.period),
           status: 'unchecked',
           checkedBy: null,
           checkedByUserId: null,
@@ -1151,12 +1220,13 @@
         if (!item) {
           return '';
         }
+        var periodLabel = getTaskPeriodLabel(item.period);
         if (item.status !== 'checked') {
-          return '未完了';
+          return periodLabel + ' ・ 未完了';
         }
         var checkedBy = item.checkedBy || 'LINEユーザー';
         var checkedAtText = formatCheckedAtJst(item.checkedAt);
-        return checkedAtText ? checkedBy + ' ・ ' + checkedAtText : checkedBy;
+        return periodLabel + ' ・ ' + (checkedAtText ? checkedBy + ' ・ ' + checkedAtText : checkedBy);
       }
 
       function hideTaskDetail() {
@@ -1166,6 +1236,7 @@
         }
         elements.taskDetailPanel.hidden = true;
         delete elements.taskDetailPanel.dataset.status;
+        delete elements.taskDetailPanel.dataset.period;
       }
 
       function renderTaskDetail(item, options) {
@@ -1180,6 +1251,7 @@
         );
         setText(elements.taskDetailMeta, buildTaskDetailMetaText(item));
         elements.taskDetailPanel.dataset.status = item.status;
+        elements.taskDetailPanel.dataset.period = normalizeTaskPeriod(item.period);
         elements.taskDetailPanel.hidden = false;
         if (renderOptions.scroll !== false && typeof elements.taskDetailPanel.scrollIntoView === 'function') {
           elements.taskDetailPanel.scrollIntoView({
@@ -1194,7 +1266,7 @@
           return;
         }
         var selectedItem = findChecklistItemById(state.selectedTaskDetailId);
-        if (!selectedItem) {
+        if (!selectedItem || normalizeTaskPeriod(selectedItem.period) !== state.activePeriod) {
           hideTaskDetail();
           return;
         }
@@ -1282,7 +1354,9 @@
           return;
         }
         clearList(elements.checklistItems);
-        var items = checklist ? normalizeArray(checklist.items) : [];
+        updatePeriodTheme();
+        var allItems = checklist ? normalizeArray(checklist.items) : [];
+        var items = checklist ? getVisibleChecklistItems(checklist) : [];
         if (items.length === 0) {
           hideTaskDetail();
         }
@@ -1290,6 +1364,7 @@
           var listItem = documentRef.createElement('li');
           listItem.className = 'todo-item';
           listItem.dataset.status = item.status;
+          listItem.dataset.period = normalizeTaskPeriod(item.period);
           if (pendingItemActions[item.id]) {
             listItem.dataset.pending = 'true';
           }
@@ -1315,6 +1390,11 @@
 
           var main = documentRef.createElement('div');
           main.className = 'todo-main';
+
+          var periodBadge = documentRef.createElement('span');
+          periodBadge.className = 'todo-period-badge';
+          periodBadge.textContent = getTaskPeriodLabel(item.period);
+          main.appendChild(periodBadge);
 
           var titleEl = documentRef.createElement('div');
           titleEl.className = 'todo-title-text';
@@ -1376,7 +1456,10 @@
         if (elements.checklistItems.children.length === 0) {
           var empty = documentRef.createElement('li');
           empty.className = 'todo-empty';
-          empty.textContent = '当日の項目はありません。';
+          empty.dataset.period = state.activePeriod;
+          empty.textContent = allItems.length === 0
+            ? '当日の項目はありません。'
+            : getTaskPeriodLabel(state.activePeriod) + 'タスクはありません。';
           elements.checklistItems.appendChild(empty);
         }
       }
@@ -1458,6 +1541,9 @@
         if (elements.templateItemDescriptionInput) {
           elements.templateItemDescriptionInput.value = '';
         }
+        if (elements.templateItemPeriodInput) {
+          elements.templateItemPeriodInput.value = 'daily';
+        }
         if (elements.templateItemSortOrderInput) {
           elements.templateItemSortOrderInput.value = '';
         }
@@ -1492,6 +1578,9 @@
 
         elements.templateItemTitleInput.value = selectedItem.title;
         elements.templateItemDescriptionInput.value = selectedItem.description || '';
+        if (elements.templateItemPeriodInput) {
+          elements.templateItemPeriodInput.value = normalizeTaskPeriod(selectedItem.period);
+        }
         elements.templateItemSortOrderInput.value = String(selectedItem.sortOrder);
         elements.templateItemRequiredInput.checked = !!selectedItem.isRequired;
         elements.updateTemplateItemButton.disabled = false;
@@ -1533,7 +1622,7 @@
         }
         normalizeArray(template.items).forEach(function (item) {
           elements.templateItems.appendChild(createMessageListItem(
-            item.sortOrder + '. ' + item.title,
+            item.sortOrder + '. [' + getTaskPeriodLabel(item.period) + '] ' + item.title,
             'plain-item'
           ));
         });
@@ -1687,6 +1776,7 @@
         await api.createTemplateItem(state.idToken, template.id, {
           title: requireStringValue(elements.newItemTitleInput, '新規項目名'),
           description: String((elements.newItemDescriptionInput && elements.newItemDescriptionInput.value) || '').trim(),
+          period: normalizeTaskPeriod(elements.newItemPeriodInput && elements.newItemPeriodInput.value),
           sortOrder: requirePositiveInteger(elements.newItemSortOrderInput, '並び順'),
           isRequired: !!(elements.newItemRequiredInput && elements.newItemRequiredInput.checked)
         });
@@ -1695,6 +1785,9 @@
         }
         if (elements.newItemDescriptionInput) {
           elements.newItemDescriptionInput.value = '';
+        }
+        if (elements.newItemPeriodInput) {
+          elements.newItemPeriodInput.value = 'daily';
         }
         if (elements.newItemSortOrderInput) {
           elements.newItemSortOrderInput.value = '';
@@ -1715,6 +1808,7 @@
         await api.updateTemplateItem(state.idToken, template.id, item.id, {
           title: requireStringValue(elements.templateItemTitleInput, '項目名'),
           description: String((elements.templateItemDescriptionInput && elements.templateItemDescriptionInput.value) || '').trim(),
+          period: normalizeTaskPeriod(elements.templateItemPeriodInput && elements.templateItemPeriodInput.value),
           sortOrder: requirePositiveInteger(elements.templateItemSortOrderInput, '並び順'),
           isRequired: !!(elements.templateItemRequiredInput && elements.templateItemRequiredInput.checked)
         });
@@ -1817,6 +1911,11 @@
           renderTemplateItemEditor(getSelectedTemplate());
         });
         bindHamburgerMenu();
+        getPeriodButtons().forEach(function (button) {
+          bindButton(button, function () {
+            switchPeriod(button.dataset.period);
+          });
+        });
         bindButton(elements.tabHome, function () { switchTab('home'); });
         bindButton(elements.tabStats, function () { switchTab('stats'); });
         bindButton(elements.statsPrevMonth, function () {

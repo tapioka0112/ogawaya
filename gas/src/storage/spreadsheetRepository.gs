@@ -96,6 +96,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       validateTimestamp(row.created_at, 'checklist_template_items.created_at');
       validateTimestamp(row.updated_at, 'checklist_template_items.updated_at');
       ns.requireString(row.title, 'title');
+      ns.normalizeTaskPeriod(row.period);
     }
     if (sheetName === 'checklist_runs') {
       validateDate(row.target_date, 'target_date');
@@ -111,6 +112,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       if (row.checked_at) {
         validateTimestamp(row.checked_at, 'checked_at');
       }
+      ns.normalizeTaskPeriod(row.period);
       ns.assert([ns.ITEM_STATUS.UNCHECKED, ns.ITEM_STATUS.CHECKED].indexOf(row.status) !== -1, 'invalid_data', 'checklist_run_items.status が不正です', 400);
     }
     if (sheetName === 'checklist_item_logs') {
@@ -835,14 +837,25 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       });
     }
 
-    function readTableFromMatrix(sheetName, rows) {
+    function readTableFromMatrix(sheetName, rows, sourceHeaders) {
       var headers = ns.SHEET_DEFINITIONS[sheetName];
+      var hasSourceHeaders = Array.isArray(sourceHeaders) && sourceHeaders.indexOf('id') !== -1;
+      var headerIndexByName = {};
+      (sourceHeaders || []).forEach(function (header, index) {
+        headerIndexByName[String(header == null ? '' : header)] = index;
+      });
       return rows.filter(function (row) {
         return row.join('') !== '';
       }).map(function (row) {
         var record = {};
         headers.forEach(function (header, index) {
-          record[header] = row[index] == null ? '' : String(row[index]);
+          var sourceIndex = index;
+          if (hasSourceHeaders) {
+            sourceIndex = Object.prototype.hasOwnProperty.call(headerIndexByName, header)
+              ? headerIndexByName[header]
+              : -1;
+          }
+          record[header] = sourceIndex < 0 || row[sourceIndex] == null ? '' : String(row[sourceIndex]);
         });
         return record;
       });
@@ -874,8 +887,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         return [];
       }
       var headers = ns.SHEET_DEFINITIONS[sheetName];
+      var sourceHeaders = sheet.getRange(1, 1, 1, headers.length).getDisplayValues()[0];
       var rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getDisplayValues();
-      var records = readTableFromMatrix(sheetName, rows);
+      var records = readTableFromMatrix(sheetName, rows, sourceHeaders);
       logSlowSheetRead(sheetName, records.length, sheetReadStartedAt);
       return records;
     }
@@ -1214,6 +1228,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         return String(headerValues[index] == null ? '' : headerValues[index]) === header;
       });
       if (!isSameHeader) {
+        if (headerValues.indexOf('id') !== -1 && lastRow >= 2) {
+          var sourceRows = sheet.getRange(2, 1, lastRow - 1, headers.length).getDisplayValues();
+          var migratedRows = readTableFromMatrix(sheetName, sourceRows, headerValues);
+          var nextValues = [headers].concat(migratedRows.map(function (row) {
+            return buildRowValues(sheetName, row);
+          }));
+          sheet.getRange(1, 1, nextValues.length, headers.length).setValues(nextValues);
+          return;
+        }
         sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       }
     }

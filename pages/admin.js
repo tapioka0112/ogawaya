@@ -38,6 +38,7 @@
     logoutButton: document.getElementById('admin-logout-button'),
     taskTitleInput: document.getElementById('task-title-input'),
     taskDescriptionInput: document.getElementById('task-description-input'),
+    taskPeriodInput: document.getElementById('task-period-input'),
     createTaskButton: document.getElementById('create-task-button'),
     taskSelect: document.getElementById('task-select'),
     insertTaskButton: document.getElementById('insert-task-button'),
@@ -55,6 +56,21 @@
     flowButtons: document.querySelectorAll('[data-admin-flow-button]'),
     flowPanels: document.querySelectorAll('[data-admin-flow-panel]')
   };
+
+  var TASK_PERIOD_LABELS = {
+    daily: '日間',
+    weekly: '週間',
+    monthly: '月間'
+  };
+
+  function normalizeTaskPeriod(value) {
+    var normalized = String(value || '').trim();
+    return Object.prototype.hasOwnProperty.call(TASK_PERIOD_LABELS, normalized) ? normalized : 'daily';
+  }
+
+  function getTaskPeriodLabel(period) {
+    return TASK_PERIOD_LABELS[normalizeTaskPeriod(period)];
+  }
 
   function normalizeBaseUrl(value) {
     return String(value || '').replace(/\/+$/, '');
@@ -355,8 +371,8 @@
       checkbox.id = 'template-task-' + task.id;
       var label = document.createElement('label');
       label.setAttribute('for', checkbox.id);
-      label.textContent = task.title;
-      label.title = task.title;
+      label.textContent = '[' + getTaskPeriodLabel(task.period) + '] ' + task.title;
+      label.title = label.textContent;
       li.appendChild(checkbox);
       li.appendChild(label);
       elements.templateTaskList.appendChild(li);
@@ -369,7 +385,7 @@
       (state.tasks || []).map(function (task) {
         return {
           value: task.id,
-          label: task.title + (task.description ? ' - ' + task.description : '')
+          label: '[' + getTaskPeriodLabel(task.period) + '] ' + task.title + (task.description ? ' - ' + task.description : '')
         };
       })
     );
@@ -707,6 +723,7 @@
         templateItemId: String(item.id),
         title: String(item.title || ''),
         description: String(item.description || ''),
+        period: normalizeTaskPeriod(item.period),
         sortOrder: maxSortOrder + index + 1,
         status: 'unchecked',
         checkedBy: null,
@@ -737,6 +754,7 @@
           templateItemId: item.templateItemId,
           title: item.title,
           description: item.description || '',
+          period: normalizeTaskPeriod(item.period),
           sortOrder: Number(item.sortOrder || 0),
           updatedAt: item.updatedAt || ''
         };
@@ -859,18 +877,23 @@
     setStatus('タスクを作成しています...');
     var title = String((elements.taskTitleInput && elements.taskTitleInput.value) || '').trim();
     var description = String((elements.taskDescriptionInput && elements.taskDescriptionInput.value) || '').trim();
+    var period = normalizeTaskPeriod(elements.taskPeriodInput && elements.taskPeriodInput.value);
     if (!title) {
       throw new Error('タスク名を入力してください');
     }
     var response = await apiRequest('POST', '/api/admin/tasks', {
       title: title,
-      description: description
+      description: description,
+      period: period
     });
     if (elements.taskTitleInput) {
       elements.taskTitleInput.value = '';
     }
     if (elements.taskDescriptionInput) {
       elements.taskDescriptionInput.value = '';
+    }
+    if (elements.taskPeriodInput) {
+      elements.taskPeriodInput.value = 'daily';
     }
     if (response.task) {
       upsertTask(response.task);

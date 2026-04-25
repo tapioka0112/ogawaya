@@ -644,6 +644,7 @@
     statsMonthStoreId: '',
     statsMonthlySnapshots: {},
     activeTab: 'home',
+    activePeriod: 'daily',
     selectedTaskDetailId: '',
     authUserContext: {
       userId: '',
@@ -664,6 +665,7 @@
 
   var elements = {
     errorBox: document.getElementById('error-message'),
+    body: document.body,
     statusBox: document.getElementById('status-message'),
     screenMode: document.getElementById('screen-mode'),
     storeName: document.getElementById('store-name'),
@@ -675,6 +677,10 @@
     progressRingProgress: document.getElementById('progress-ring-progress'),
     progressRingLabel: document.getElementById('progress-ring-label'),
     checklistItems: document.getElementById('checklist-items'),
+    periodTabs: document.getElementById('period-tabs'),
+    periodTabDaily: document.getElementById('period-tab-daily'),
+    periodTabWeekly: document.getElementById('period-tab-weekly'),
+    periodTabMonthly: document.getElementById('period-tab-monthly'),
     taskDetailPanel: document.getElementById('task-detail-panel'),
     taskDetailBackdrop: document.getElementById('task-detail-backdrop'),
     taskDetailClose: document.getElementById('task-detail-close'),
@@ -707,6 +713,49 @@
     statsDayDetailSummary: document.getElementById('stats-day-detail-summary'),
     statsDayDetailItems: document.getElementById('stats-day-detail-items')
   };
+
+  var TASK_PERIOD_LABELS = {
+    daily: '日間',
+    weekly: '週間',
+    monthly: '月間'
+  };
+
+  function normalizeTaskPeriod(value) {
+    var normalized = String(value || '').trim();
+    return Object.prototype.hasOwnProperty.call(TASK_PERIOD_LABELS, normalized) ? normalized : 'daily';
+  }
+
+  function getTaskPeriodLabel(period) {
+    return TASK_PERIOD_LABELS[normalizeTaskPeriod(period)];
+  }
+
+  function getPeriodButtons() {
+    return [
+      elements.periodTabDaily,
+      elements.periodTabWeekly,
+      elements.periodTabMonthly
+    ].filter(function (button) {
+      return !!button;
+    });
+  }
+
+  function updatePeriodTheme() {
+    if (elements.body) {
+      elements.body.dataset.taskPeriod = state.activePeriod;
+    }
+    getPeriodButtons().forEach(function (button) {
+      var period = normalizeTaskPeriod(button.dataset.period);
+      var active = period === state.activePeriod;
+      button.classList.toggle('period-tab-btn--active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function getVisibleChecklistItems(checklist) {
+    return (Array.isArray(checklist && checklist.items) ? checklist.items : []).filter(function (item) {
+      return normalizeTaskPeriod(item.period) === state.activePeriod;
+    });
+  }
 
   function getNowMs() {
     if (global.performance && typeof global.performance.now === 'function') {
@@ -1074,6 +1123,25 @@
         loadDailyStats(state.statsSelectedDate);
       }
     }
+  }
+
+  function switchPeriod(period) {
+    state.activePeriod = normalizeTaskPeriod(period);
+    updatePeriodTheme();
+    renderChecklist();
+    renderSelectedTaskDetail({ focus: false });
+  }
+
+  function bindPeriodNavigation() {
+    getPeriodButtons().forEach(function (button) {
+      if (button.__boundPeriodNavigation) {
+        return;
+      }
+      button.__boundPeriodNavigation = true;
+      button.addEventListener('click', function () {
+        switchPeriod(button.dataset.period);
+      });
+    });
   }
 
   function bindTabNavigation() {
@@ -1770,6 +1838,7 @@
       templateItemId: item.templateItemId,
       title: item.title,
       description: item.description,
+      period: normalizeTaskPeriod(item.period),
       status: item.status,
       checkedBy: item.checkedBy,
       checkedByUserId: item.checkedByUserId,
@@ -1801,6 +1870,7 @@
         templateItemId: String(item.templateItemId || ''),
         title: String(item.title || ''),
         description: String(item.description || ''),
+        period: normalizeTaskPeriod(item.period),
         status: item.status === 'checked' ? 'checked' : 'unchecked',
         checkedBy: item.checkedBy ? String(item.checkedBy) : null,
         checkedByUserId: item.checkedByUserId ? String(item.checkedByUserId) : null,
@@ -1986,6 +2056,9 @@
     if (Object.prototype.hasOwnProperty.call(updatedItem, 'description')) {
       target.description = updatedItem.description;
     }
+    if (Object.prototype.hasOwnProperty.call(updatedItem, 'period')) {
+      target.period = normalizeTaskPeriod(updatedItem.period);
+    }
     recomputeProgress();
     renderChecklist();
     renderSelectedTaskDetail({ focus: false });
@@ -2001,6 +2074,7 @@
       templateItemId: item.templateItemId,
       title: item.title,
       description: item.description,
+      period: normalizeTaskPeriod(item.period),
       status: 'checked',
       checkedBy: state.checklist && state.checklist.currentUser ? state.checklist.currentUser.name : 'LINEユーザー',
       checkedByUserId: state.checklist && state.checklist.currentUser ? state.checklist.currentUser.userId : '',
@@ -2015,6 +2089,7 @@
       templateItemId: item.templateItemId,
       title: item.title,
       description: item.description,
+      period: normalizeTaskPeriod(item.period),
       status: 'unchecked',
       checkedBy: null,
       checkedByUserId: null,
@@ -2215,6 +2290,7 @@
       id: String(item && item.id ? item.id : ''),
       title: String(item && item.title ? item.title : ''),
       description: String(item && item.description ? item.description : ''),
+      period: normalizeTaskPeriod(item && item.period),
       status: String(item && item.status ? item.status : 'unchecked') === 'checked' ? 'checked' : 'unchecked',
       checkedBy: item && item.checkedBy ? String(item.checkedBy) : null,
       checkedByUserId: item && item.checkedByUserId ? String(item.checkedByUserId) : null,
@@ -2607,6 +2683,7 @@
       templateItemId: String(item && item.templateItemId ? item.templateItemId : ''),
       title: String(item && item.title ? item.title : ''),
       description: String(item && item.description ? item.description : ''),
+      period: normalizeTaskPeriod(item && item.period),
       status: 'unchecked',
       checkedBy: null,
       checkedByUserId: null,
@@ -3141,12 +3218,13 @@
     if (!item) {
       return '';
     }
+    var periodLabel = getTaskPeriodLabel(item.period);
     if (item.status !== 'checked') {
-      return '未完了';
+      return periodLabel + ' ・ 未完了';
     }
     var checkedBy = item.checkedBy || 'LINEユーザー';
     var checkedAtText = formatCheckedAtJst(item.checkedAt);
-    return checkedAtText ? checkedBy + ' ・ ' + checkedAtText : checkedBy;
+    return periodLabel + ' ・ ' + (checkedAtText ? checkedBy + ' ・ ' + checkedAtText : checkedBy);
   }
 
   function hideTaskDetail() {
@@ -3156,6 +3234,7 @@
     }
     elements.taskDetailPanel.hidden = true;
     delete elements.taskDetailPanel.dataset.status;
+    delete elements.taskDetailPanel.dataset.period;
   }
 
   function renderTaskDetail(item, options) {
@@ -3170,6 +3249,7 @@
     );
     setText(elements.taskDetailMeta, buildTaskDetailMetaText(item));
     elements.taskDetailPanel.dataset.status = item.status;
+    elements.taskDetailPanel.dataset.period = normalizeTaskPeriod(item.period);
     elements.taskDetailPanel.hidden = false;
     if (renderOptions.focus !== false && elements.taskDetailClose && typeof elements.taskDetailClose.focus === 'function') {
       elements.taskDetailClose.focus();
@@ -3181,7 +3261,7 @@
       return;
     }
     var selectedItem = findChecklistItemById(state.selectedTaskDetailId);
-    if (!selectedItem) {
+    if (!selectedItem || normalizeTaskPeriod(selectedItem.period) !== state.activePeriod) {
       hideTaskDetail();
       return;
     }
@@ -3213,17 +3293,23 @@
 
   function renderChecklist() {
     var checklist = state.checklist;
+    updatePeriodTheme();
     clearList(elements.checklistItems);
-    if (!checklist || !Array.isArray(checklist.items) || checklist.items.length === 0) {
+    var allItems = checklist && Array.isArray(checklist.items) ? checklist.items : [];
+    var visibleItems = checklist ? getVisibleChecklistItems(checklist) : [];
+    if (!checklist || allItems.length === 0 || visibleItems.length === 0) {
       hideTaskDetail();
       var empty = document.createElement('li');
       empty.className = 'todo-empty';
-      empty.textContent = '当日の項目はありません。';
+      empty.dataset.period = state.activePeriod;
+      empty.textContent = allItems.length === 0
+        ? '当日の項目はありません。'
+        : getTaskPeriodLabel(state.activePeriod) + 'タスクはありません。';
       elements.checklistItems.appendChild(empty);
       return;
     }
 
-    var sortedItems = checklist.items.slice().sort(function (a, b) {
+    var sortedItems = visibleItems.slice().sort(function (a, b) {
       if (a.status === 'checked' && b.status !== 'checked') { return 1; }
       if (a.status !== 'checked' && b.status === 'checked') { return -1; }
       return 0;
@@ -3233,6 +3319,7 @@
       var listItem = document.createElement('li');
       listItem.className = 'todo-item';
       listItem.dataset.status = item.status;
+      listItem.dataset.period = normalizeTaskPeriod(item.period);
       var actionState = getItemActionState(item.id);
       if (actionState.inFlight) {
         listItem.dataset.pending = 'true';
@@ -3291,6 +3378,10 @@
       var title = document.createElement('div');
       title.className = 'todo-title-text';
       title.textContent = item.title;
+      var periodBadge = document.createElement('span');
+      periodBadge.className = 'todo-period-badge';
+      periodBadge.textContent = getTaskPeriodLabel(item.period);
+      main.appendChild(periodBadge);
       main.appendChild(title);
 
       if (item.status === 'checked') {
@@ -3519,10 +3610,12 @@
 
   function start() {
     bindHamburgerMenu();
+    bindPeriodNavigation();
     bindTabNavigation();
     bindStatsNavigation();
     bindStatsCalendarSelection();
     bindTaskDetailModal();
+    updatePeriodTheme();
     setActiveTab('home');
     setMenuOpen(false);
 

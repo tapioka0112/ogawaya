@@ -22,6 +22,9 @@ async function createSchedulerApp(lineClient, options = {}) {
       linked_at: '2026-04-20T00:00:00Z'
     }
   ];
+  if (typeof options.configureSeed === 'function') {
+    options.configureSeed(seed);
+  }
 
   return runtime.Ogawaya.createApplication({
     storage: runtime.Ogawaya.createArrayStorage(seed),
@@ -138,7 +141,53 @@ test('daily start は既存 run でも Firestore snapshot を補完する', asyn
   assert.equal(snapshotWrites.length, 1);
   assert.equal(snapshotWrites[0].storeId, 'store-001');
   assert.equal(snapshotWrites[0].targetDate, '2026-04-21');
-  assert.equal(snapshotWrites[0].payload.items.length, 1);
+  assert.equal(snapshotWrites[0].payload.items.length, 2);
+});
+
+test('daily start は期間タグに応じて日間・週間・月間タスクを作成する', async () => {
+  const app = await createSchedulerApp({
+    pushMessage() {
+      return { status: 'sent' };
+    }
+  }, {
+    configureSeed(seed) {
+      seed.checklist_template_items[0].period = 'daily';
+      seed.checklist_template_items[1].period = 'weekly';
+      seed.checklist_template_items.push({
+        id: 'tmpl-item-003',
+        template_id: 'tmpl-001',
+        title: '月次棚卸',
+        description: '',
+        period: 'monthly',
+        sort_order: '3',
+        is_required: 'true',
+        is_active: 'true',
+        created_at: '2026-04-20T00:00:00Z',
+        updated_at: '2026-04-20T00:00:00Z'
+      });
+    }
+  });
+
+  app.clock.now = () => new Date('2026-04-21T01:40:00Z');
+  const weekday = app.runDailyStart();
+  assert.deepEqual(
+    app.repository.listRunItems(weekday.createdRuns[0].id).map((item) => item.period),
+    ['daily']
+  );
+
+  app.clock.now = () => new Date('2026-04-26T01:40:00Z');
+  const sunday = app.runDailyStart();
+  assert.deepEqual(
+    app.repository.listRunItems(sunday.createdRuns[0].id).map((item) => item.period),
+    ['daily', 'weekly']
+  );
+
+  app.clock.now = () => new Date('2026-05-01T01:40:00Z');
+  const firstDay = app.runDailyStart();
+  assert.deepEqual(
+    app.repository.listRunItems(firstDay.createdRuns[0].id).map((item) => item.period),
+    ['daily', 'monthly']
+  );
 });
 
 test('daily start は 10:30 境界で運用日の target_date を切り替える', async () => {

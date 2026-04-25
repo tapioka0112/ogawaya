@@ -152,6 +152,10 @@ function createFakeDocument() {
     ['circle', 'progress-ring-progress'],
     ['span', 'progress-ring-label'],
     ['ul', 'checklist-items'],
+    ['div', 'period-tabs'],
+    ['button', 'period-tab-daily'],
+    ['button', 'period-tab-weekly'],
+    ['button', 'period-tab-monthly'],
     ['article', 'task-detail-panel'],
     ['button', 'task-detail-backdrop'],
     ['button', 'task-detail-close'],
@@ -185,6 +189,9 @@ function createFakeDocument() {
     ['ul', 'stats-day-detail-items'],
     ['section', 'progress-card']
   ].forEach(([tagName, id]) => register(tagName, id));
+  elements['period-tab-daily'].dataset.period = 'daily';
+  elements['period-tab-weekly'].dataset.period = 'weekly';
+  elements['period-tab-monthly'].dataset.period = 'monthly';
 
   return {
     elements,

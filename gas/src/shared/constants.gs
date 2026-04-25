@@ -15,6 +15,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     UNCHECKED: 'unchecked',
     CHECKED: 'checked'
   };
+  ns.TASK_PERIODS = {
+    DAILY: 'daily',
+    WEEKLY: 'weekly',
+    MONTHLY: 'monthly'
+  };
+  ns.TASK_PERIOD_VALUES = [
+    ns.TASK_PERIODS.DAILY,
+    ns.TASK_PERIODS.WEEKLY,
+    ns.TASK_PERIODS.MONTHLY
+  ];
   ns.LOG_ACTIONS = ['check', 'uncheck', 'edit', 'delete'];
   ns.NOTIFICATION_TYPES = {
     DAILY_START: 'daily_start',
@@ -90,6 +100,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       'template_id',
       'title',
       'description',
+      'period',
       'sort_order',
       'is_required',
       'is_active',
@@ -111,6 +122,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       'run_id',
       'template_item_id',
       'title',
+      'period',
       'sort_order',
       'status',
       'checked_by',
@@ -191,6 +203,20 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return value.toLowerCase() === 'true';
     }
     return false;
+  };
+
+  ns.normalizeTaskPeriod = function (value, errorCode) {
+    var normalized = String(value || '').trim();
+    if (!normalized) {
+      return ns.TASK_PERIODS.DAILY;
+    }
+    ns.assert(
+      ns.TASK_PERIOD_VALUES.indexOf(normalized) !== -1,
+      errorCode || 'invalid_data',
+      'period が不正です',
+      400
+    );
+    return normalized;
   };
 
   ns.requireString = function (value, fieldName) {

@@ -94,6 +94,11 @@
       </section>
 
       <section class="todo-list-wrap" id="main-content">
+        <div class="period-tabs" id="period-tabs" role="tablist" aria-label="タスク期間">
+          <button class="period-tab-btn period-tab-btn--active" id="period-tab-daily" type="button" data-period="daily" role="tab" aria-selected="true">日間</button>
+          <button class="period-tab-btn" id="period-tab-weekly" type="button" data-period="weekly" role="tab" aria-selected="false">週間</button>
+          <button class="period-tab-btn" id="period-tab-monthly" type="button" data-period="monthly" role="tab" aria-selected="false">月間</button>
+        </div>
         <ul class="todo-list" id="checklist-items"></ul>
         <article class="task-detail-card" id="task-detail-panel" hidden tabindex="-1" aria-live="polite">
           <div class="task-detail-label">タスク詳細</div>

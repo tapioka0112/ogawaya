@@ -408,6 +408,11 @@
     --u-accent: #f47a39;
     --u-accent-strong: #d96528;
     --u-accent-soft: #ffe4d6;
+    --period-accent: #f47a39;
+    --period-accent-strong: #d96528;
+    --period-accent-soft: #ffe4d6;
+    --period-accent-line: rgba(244, 122, 57, 0.28);
+    --period-accent-hover: rgba(244, 122, 57, 0.08);
     --u-surface: #ffffff;
     --u-page-bg: #f5f7f6;
     --u-ink: #1f2b25;
@@ -423,6 +428,22 @@
       radial-gradient(circle at top left, rgba(244, 122, 57, 0.1), transparent 40%),
       var(--u-page-bg);
     color: var(--u-ink);
+  }
+
+  body.user-mode[data-task-period='weekly'] {
+    --period-accent: #36a18b;
+    --period-accent-strong: #2a8670;
+    --period-accent-soft: #e4f3ee;
+    --period-accent-line: rgba(54, 161, 139, 0.28);
+    --period-accent-hover: rgba(54, 161, 139, 0.08);
+  }
+
+  body.user-mode[data-task-period='monthly'] {
+    --period-accent: #7c5ac7;
+    --period-accent-strong: #5b3da8;
+    --period-accent-soft: #ede7ff;
+    --period-accent-line: rgba(124, 90, 199, 0.28);
+    --period-accent-hover: rgba(124, 90, 199, 0.08);
   }
 
   body.user-mode::before {
@@ -719,6 +740,42 @@
     margin-top: 16px;
   }
 
+  .user-mode .period-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 6px;
+    margin-bottom: 12px;
+    background: var(--u-surface);
+    border-radius: 16px;
+    box-shadow: var(--u-shadow);
+  }
+
+  .user-mode .period-tab-btn {
+    min-height: 40px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--u-muted);
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 160ms ease, color 160ms ease, transform 120ms ease;
+  }
+
+  .user-mode .period-tab-btn:active {
+    transform: scale(0.98);
+  }
+
+  .user-mode .period-tab-btn:focus-visible {
+    outline: 3px solid var(--period-accent-line);
+    outline-offset: 2px;
+  }
+
+  .user-mode .period-tab-btn--active {
+    background: var(--period-accent-soft);
+    color: var(--period-accent-strong);
+  }
+
   .user-mode .todo-list {
     list-style: none;
     margin: 0;
@@ -748,7 +805,7 @@
 
   .user-mode .todo-toggle-button:focus-visible,
   .user-mode .todo-detail-button:focus-visible {
-    outline: 3px solid rgba(244, 122, 57, 0.28);
+    outline: 3px solid var(--period-accent-line);
     outline-offset: 3px;
   }
 
@@ -776,7 +833,7 @@
 
   .user-mode .todo-toggle-button:hover,
   .user-mode .todo-detail-button:hover {
-    background: rgba(244, 122, 57, 0.06);
+    background: var(--period-accent-hover);
   }
 
   /* ── SVG draw-in bullet ── */
@@ -796,8 +853,8 @@
   }
 
   .user-mode .todo-bullet-svg[data-status='checked'] .todo-bullet-circle {
-    fill: var(--u-accent);
-    stroke: var(--u-accent);
+    fill: var(--period-accent);
+    stroke: var(--period-accent);
   }
 
   .user-mode .todo-bullet-check {
@@ -823,8 +880,8 @@
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    border: 2px solid var(--u-accent-soft);
-    border-top-color: var(--u-accent);
+    border: 2px solid var(--period-accent-soft);
+    border-top-color: var(--period-accent);
     animation: todoSpinnerRotate 700ms linear infinite;
   }
 
@@ -843,6 +900,19 @@
     color: var(--u-ink);
     line-height: 1.45;
     word-break: break-word;
+  }
+
+  .user-mode .todo-period-badge {
+    display: inline-flex;
+    width: fit-content;
+    margin-bottom: 5px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--period-accent-soft);
+    color: var(--period-accent-strong);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.2;
   }
 
   .user-mode .todo-item[data-status='checked'] .todo-title-text {
@@ -873,7 +943,7 @@
   }
 
   .user-mode .todo-detail-button:hover {
-    color: var(--u-accent-strong);
+    color: var(--period-accent-strong);
   }
 
   .user-mode .todo-empty {
@@ -951,7 +1021,7 @@
   }
 
   .user-mode .task-detail-label {
-    color: var(--u-accent-strong);
+    color: var(--period-accent-strong);
     font-size: 12px;
     font-weight: 800;
     letter-spacing: 0.08em;

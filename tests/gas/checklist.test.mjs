@@ -303,6 +303,8 @@ test('同日チェックリストを返す', async () => {
   assert.equal(response.body.items.length, 2);
   assert.equal(response.body.items[0].description, '券売機と入口を確認する');
   assert.equal(response.body.items[1].description, '客席と厨房の床を確認する');
+  assert.equal(response.body.items[0].period, 'daily');
+  assert.equal(response.body.items[1].period, 'daily');
   assert.equal(response.body.currentUser.userId, 'line-user-001');
   assert.equal(response.body.currentUser.name, '田中LINE');
 });

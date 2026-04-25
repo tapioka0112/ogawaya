@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>管理者画面</title>
-    <link rel="stylesheet" href="./admin.css?v=run-delete-button-20260425" />
+    <link rel="stylesheet" href="./admin.css?v=task-period-tabs-20260425" />
   </head>
   <body>
     <main class="admin-shell">
@@ -55,6 +55,14 @@
             <label class="field">
               <span>詳細 (任意)</span>
               <textarea id="task-description-input" rows="3" placeholder="例: 開店前にフロアと客席を清掃"></textarea>
+            </label>
+            <label class="field">
+              <span>タグ</span>
+              <select id="task-period-input">
+                <option value="daily">日間</option>
+                <option value="weekly">週間</option>
+                <option value="monthly">月間</option>
+              </select>
             </label>
           </div>
           <div class="button-row">
@@ -132,6 +140,6 @@
     <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
-    <script src="./admin.js?v=template-insert-realtime-20260424"></script>
+    <script src="./admin.js?v=task-period-tabs-20260425"></script>
   </body>
 </html>

@@ -1,3 +1,3 @@
-id,template_id,title,description,sort_order,is_required,is_active,created_at,updated_at
-tmpl-item-001,tmpl-001,開店準備,,1,true,true,2026-04-22T00:00:00Z,2026-04-22T00:00:00Z
-tmpl-item-002,tmpl-001,清掃確認,,2,true,true,2026-04-22T00:00:00Z,2026-04-22T00:00:00Z
+id,template_id,title,description,period,sort_order,is_required,is_active,created_at,updated_at
+tmpl-item-001,tmpl-001,開店準備,,daily,1,true,true,2026-04-22T00:00:00Z,2026-04-22T00:00:00Z
+tmpl-item-002,tmpl-001,清掃確認,,daily,2,true,true,2026-04-22T00:00:00Z,2026-04-22T00:00:00Z
