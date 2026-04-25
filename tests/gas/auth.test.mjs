@@ -156,6 +156,145 @@ test('LIFF verify が 401 を返した場合は 401 を維持する', async () =
   assert.equal(response.body.code, 'unauthorized');
 });
 
+test('ID token が期限切れでも access token が有効なら認証できる', async () => {
+  const fetchUrls = [];
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      LIFF_ID: '2009859108-sJ31BCFx'
+    },
+    fetch(url, requestOptions) {
+      fetchUrls.push(url);
+      if (url === 'https://api.line.me/oauth2/v2.1/verify' && requestOptions.method === 'post') {
+        const payload = parseVerifyPayload(requestOptions);
+        assert.equal(payload.id_token, 'expired-id-token');
+        assert.equal(payload.client_id, '2009859108');
+        return createVerifyResponse(400, {
+          error: 'invalid_request',
+          error_description: 'IdToken expired.'
+        });
+      }
+      if (url === 'https://api.line.me/oauth2/v2.1/verify?access_token=valid-access-token') {
+        assert.equal(requestOptions.method, 'get');
+        assert.equal(requestOptions.muteHttpExceptions, true);
+        return createVerifyResponse(200, {
+          client_id: '2009859108',
+          expires_in: 3600,
+          scope: 'openid profile'
+        });
+      }
+      if (url === 'https://api.line.me/oauth2/v2.1/userinfo') {
+        assert.equal(requestOptions.method, 'get');
+        assert.equal(requestOptions.muteHttpExceptions, true);
+        assert.equal(requestOptions.headers.Authorization, 'Bearer valid-access-token');
+        return createVerifyResponse(200, {
+          sub: 'line-user-001',
+          name: '田中LINE'
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: {
+      idToken: 'expired-id-token',
+      accessToken: 'valid-access-token',
+      liffId: '2009859108-sJ31BCFx'
+    },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.userId, 'line-user-001');
+  assert.equal(response.body.name, '田中LINE');
+  assert.deepEqual(fetchUrls, [
+    'https://api.line.me/oauth2/v2.1/verify',
+    'https://api.line.me/oauth2/v2.1/verify?access_token=valid-access-token',
+    'https://api.line.me/oauth2/v2.1/userinfo'
+  ]);
+});
+
+test('access token の channel が一致しない場合は拒否する', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      LIFF_ID: '2009859108-sJ31BCFx'
+    },
+    fetch(url, requestOptions) {
+      if (url === 'https://api.line.me/oauth2/v2.1/verify' && requestOptions.method === 'post') {
+        return createVerifyResponse(400, {
+          error: 'invalid_request',
+          error_description: 'IdToken expired.'
+        });
+      }
+      if (url === 'https://api.line.me/oauth2/v2.1/verify?access_token=wrong-access-token') {
+        return createVerifyResponse(200, {
+          client_id: '2999999999',
+          expires_in: 3600,
+          scope: 'openid profile'
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: {
+      idToken: 'expired-id-token',
+      accessToken: 'wrong-access-token',
+      liffId: '2009859108-sJ31BCFx'
+    },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(response.body.code, 'unauthorized');
+  assert.equal(response.body.details.accessTokenClientIdSuffix, '9999');
+  assert.equal(response.body.details.expectedClientIdSuffixes, '9108');
+});
+
+test('ID token verify の内部エラーでは access token fallback しない', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      LIFF_ID: '2009859108-sJ31BCFx'
+    },
+    fetch(url, requestOptions) {
+      if (url === 'https://api.line.me/oauth2/v2.1/verify' && requestOptions.method === 'post') {
+        return createVerifyResponse(200, {
+          name: '田中LINE'
+        });
+      }
+      throw new Error(`unexpected fallback fetch: ${url}`);
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: {
+      idToken: 'broken-id-token',
+      accessToken: 'valid-access-token',
+      liffId: '2009859108-sJ31BCFx'
+    },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.body.code, 'internal_error');
+});
+
 test('LIFF_ID が設定済みなら LIFF channel ID を verify に使う', async () => {
   const verifyClientIds = [];
   const runtime = await loadGasRuntime({

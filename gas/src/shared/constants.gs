@@ -364,9 +364,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       delete query._method;
     }
     var requestIdToken = query.idToken || query.authToken || (body && (body.idToken || body.authToken));
+    var requestAccessToken = query.accessToken || (body && body.accessToken);
     var requestLiffId = query.liffId || (body && body.liffId);
     if (!query.idToken && requestIdToken) {
       query.idToken = requestIdToken;
+    }
+    if (!query.accessToken && requestAccessToken) {
+      query.accessToken = requestAccessToken;
     }
     if (!query.liffId && requestLiffId) {
       query.liffId = requestLiffId;
@@ -379,6 +383,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
     if (body && body.authToken) {
       delete body.authToken;
+    }
+    if (body && body.accessToken) {
+      delete body.accessToken;
     }
     if (body && body.liffId) {
       delete body.liffId;

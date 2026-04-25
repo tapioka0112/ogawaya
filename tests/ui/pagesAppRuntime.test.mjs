@@ -482,6 +482,18 @@ test('GitHub Pages app は全件完了済みでも外部エフェクトに依存
     }
     throw new Error(`unexpected request: ${url}`);
   }, {
+    liff: {
+      async init() {},
+      isLoggedIn() {
+        return true;
+      },
+      getIDToken() {
+        return 'token';
+      },
+      getAccessToken() {
+        return 'access-token';
+      }
+    },
     confetti() {
       confettiCalls += 1;
       throw new Error('confetti should not be required for completion rendering');
@@ -498,6 +510,7 @@ test('GitHub Pages app は全件完了済みでも外部エフェクトに依存
   );
   assert.equal(confettiCalls, 0);
   assert.equal(todayRequestBody.authToken, 'token');
+  assert.equal(todayRequestBody.accessToken, 'access-token');
   assert.equal(todayRequestBody.liffId, '2000000000-test');
 });
 

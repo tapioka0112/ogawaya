@@ -356,10 +356,13 @@
     var liffId = String(options && options.liffId ? options.liffId : '').trim();
     var useFunctionsApi = normalizedFunctionsBaseUrl !== '';
 
-    function buildLegacyBody(idToken, body) {
+    function buildLegacyBody(idToken, accessToken, body) {
       var requestBody = Object.assign({}, body || {});
       if (idToken) {
         requestBody.authToken = idToken;
+      }
+      if (accessToken) {
+        requestBody.accessToken = accessToken;
       }
       if (liffId) {
         requestBody.liffId = liffId;
@@ -367,7 +370,7 @@
       return requestBody;
     }
 
-    async function requestLegacyGas(method, path, idToken, body, queryExtras) {
+    async function requestLegacyGas(method, path, idToken, accessToken, body, queryExtras) {
       var query = {
         path: String(path || '').replace(/^\/+/, '')
       };
@@ -376,11 +379,11 @@
       });
 
       var actualMethod = method;
-      var requestBody = buildLegacyBody(idToken, body);
+      var requestBody = buildLegacyBody(idToken, accessToken, body);
       var options = {
         method: actualMethod
       };
-      if (method === 'GET' && idToken) {
+      if (method === 'GET' && (idToken || accessToken)) {
         actualMethod = 'POST';
         query._method = 'GET';
         options.method = actualMethod;
@@ -411,10 +414,13 @@
       return payload;
     }
 
-    async function requestFunctionsApi(method, path, idToken, body, queryExtras) {
+    async function requestFunctionsApi(method, path, idToken, accessToken, body, queryExtras) {
       var query = Object.assign({}, queryExtras || {});
       if (idToken) {
         query.idToken = idToken;
+      }
+      if (accessToken) {
+        query.accessToken = accessToken;
       }
       if (defaultStoreId && !query.storeId) {
         query.storeId = defaultStoreId;
@@ -448,32 +454,32 @@
       return payload;
     }
 
-    function request(method, legacyPath, idToken, body, queryExtras) {
+    function request(method, legacyPath, idToken, accessToken, body, queryExtras) {
       if (useFunctionsApi) {
         if (legacyPath === 'api/checklists/today') {
-          return requestFunctionsApi('GET', '/v1/user/checklists/today', idToken, body, queryExtras);
+          return requestFunctionsApi('GET', '/v1/user/checklists/today', idToken, accessToken, body, queryExtras);
         }
         var checkMatch = String(legacyPath).match(/^api\/checklist-items\/([^/]+)\/check$/);
         if (checkMatch) {
-          return requestFunctionsApi('POST', '/v1/user/checklist-items/' + encodeURIComponent(checkMatch[1]) + '/check', idToken, body, queryExtras);
+          return requestFunctionsApi('POST', '/v1/user/checklist-items/' + encodeURIComponent(checkMatch[1]) + '/check', idToken, accessToken, body, queryExtras);
         }
         var uncheckMatch = String(legacyPath).match(/^api\/checklist-items\/([^/]+)\/uncheck$/);
         if (uncheckMatch) {
-          return requestFunctionsApi('POST', '/v1/user/checklist-items/' + encodeURIComponent(uncheckMatch[1]) + '/uncheck', idToken, body, queryExtras);
+          return requestFunctionsApi('POST', '/v1/user/checklist-items/' + encodeURIComponent(uncheckMatch[1]) + '/uncheck', idToken, accessToken, body, queryExtras);
         }
       }
-      return requestLegacyGas(method, legacyPath, idToken, body, queryExtras);
+      return requestLegacyGas(method, legacyPath, idToken, accessToken, body, queryExtras);
     }
 
     return {
-      getTodayChecklist: function (idToken) {
-        return request('GET', 'api/checklists/today', idToken);
+      getTodayChecklist: function (idToken, accessToken) {
+        return request('GET', 'api/checklists/today', idToken, accessToken);
       },
-      checkItem: function (idToken, runItemId) {
-        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, { comment: '' });
+      checkItem: function (idToken, accessToken, runItemId) {
+        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, accessToken, { comment: '' });
       },
-      uncheckItem: function (idToken, runItemId) {
-        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/uncheck', idToken, { reason: '' });
+      uncheckItem: function (idToken, accessToken, runItemId) {
+        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/uncheck', idToken, accessToken, { reason: '' });
       }
     };
   }
@@ -506,6 +512,9 @@
     idToken = typeof global.liff.getIDToken === 'function'
       ? global.liff.getIDToken()
       : '';
+    var accessToken = typeof global.liff.getAccessToken === 'function'
+      ? global.liff.getAccessToken()
+      : '';
     var idTokenDiagnostics = extractIdTokenDiagnostics(idToken);
     endTiming(tokenMarker, {
       status: idToken ? 'ok' : 'empty',
@@ -513,16 +522,22 @@
       liffChannelId: extractLiffChannelId(liffId),
       aud: idTokenDiagnostics.aud,
       tokenLength: idTokenDiagnostics.length,
-      tokenParts: idTokenDiagnostics.parts
+      tokenParts: idTokenDiagnostics.parts,
+      accessToken: accessToken ? 'ok' : 'empty',
+      accessTokenLength: accessToken ? String(accessToken).length : 0
     });
-    if (!idToken) {
+    if (!idToken && !accessToken) {
       throw new Error('LIFF 認証コンテキストを取得できません');
     }
-    return idToken;
+    return {
+      idToken: idToken,
+      accessToken: accessToken
+    };
   }
 
   var state = {
     idToken: '',
+    accessToken: '',
     checklist: null,
     api: null,
     config: null,
@@ -2719,8 +2734,8 @@
 
   function syncItemStatusViaGas(runItemId, desiredStatus, timeoutMs) {
     var requestPromise = desiredStatus === 'checked'
-      ? state.api.checkItem(state.idToken, runItemId)
-      : state.api.uncheckItem(state.idToken, runItemId);
+      ? state.api.checkItem(state.idToken, state.accessToken, runItemId)
+      : state.api.uncheckItem(state.idToken, state.accessToken, runItemId);
     return withTimeout(
       requestPromise,
       timeoutMs,
@@ -3160,7 +3175,7 @@
       refreshOptions.timingName || 'gas.today',
       refreshOptions.timingLabel || 'GAS API today',
       function () {
-        return state.api.getTodayChecklist(state.idToken);
+        return state.api.getTodayChecklist(state.idToken, state.accessToken);
       }
     );
     applyChecklistPayload(checklist, {
@@ -3243,9 +3258,11 @@
         return false;
       });
 
-      state.idToken = await measureTiming('liff.auth', 'LIFF認証全体', function () {
+      var authContext = await measureTiming('liff.auth', 'LIFF認証全体', function () {
         return initializeAuth(config.liffId);
       });
+      state.idToken = authContext.idToken;
+      state.accessToken = authContext.accessToken;
       state.authUserContext = extractUserContextFromIdToken(state.idToken);
 
       if (state.checklist) {
