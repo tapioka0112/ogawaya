@@ -180,6 +180,42 @@ test('LIFF_ID が設定済みなら LIFF channel ID を verify に使う', async
   assert.deepEqual(verifyClientIds, ['2009859108']);
 });
 
+test('LINE_LOGIN_CHANNEL_ID が設定済みなら verify で最優先する', async () => {
+  const verifyClientIds = [];
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      LINE_LOGIN_CHANNEL_ID: '2001234567',
+      LIFF_ID: '2009859108-sJ31BCFx',
+      LINE_CHANNEL_ID: 'wrong-channel'
+    },
+    fetch(url, requestOptions) {
+      assert.equal(url, 'https://api.line.me/oauth2/v2.1/verify');
+      verifyClientIds.push(requestOptions.payload.client_id);
+      return createVerifyResponse(200, {
+        sub: 'line-user-001',
+        name: '田中LINE',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      });
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: {
+      idToken: 'valid-pt',
+      liffId: '2999999999-other'
+    },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(verifyClientIds, ['2001234567']);
+});
+
 test('LIFF_ID 未設定なら request liffId の channel ID を verify に使う', async () => {
   const verifyClientIds = [];
   const runtime = await loadGasRuntime({
@@ -310,6 +346,34 @@ test('LIFF verify 応答に sub が無い場合は 500 を返す', async () => {
 
   assert.equal(response.statusCode, 500);
   assert.equal(response.body.code, 'internal_error');
+});
+
+test('LIFF verify 失敗時は試行した channel suffix と LINE error を details に返す', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      LIFF_ID: '2009859108-sJ31BCFx',
+      LINE_CHANNEL_ID: 'channel-001'
+    },
+    fetch() {
+      return createVerifyResponse(401, {
+        error: 'invalid_client_id'
+      });
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: { idToken: 'broken-token' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(response.body.code, 'unauthorized');
+  assert.equal(response.body.details.verifyAttempts, '9108:401:invalid_client_id,-001:401:invalid_client_id');
 });
 
 test('同じ idToken の連続 API は verify 結果を ScriptCache から再利用する', async () => {

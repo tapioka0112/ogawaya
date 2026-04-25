@@ -88,11 +88,11 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return match && match[1] ? match[1] : '';
   }
 
-  function normalizeVerifyChannelIds(configuredLiffId, channelId, requestLiffId) {
+  function normalizeVerifyChannelIds(loginChannelId, configuredLiffId, channelId, requestLiffId) {
     var ids = [];
     var configuredLiffChannelId = extractLiffChannelId(configuredLiffId);
     var requestLiffChannelId = configuredLiffChannelId ? '' : extractLiffChannelId(requestLiffId);
-    [configuredLiffChannelId, requestLiffChannelId, channelId].forEach(function (candidate) {
+    [loginChannelId, configuredLiffChannelId, requestLiffChannelId, channelId].forEach(function (candidate) {
       var normalized = String(candidate || '').trim();
       if (normalized && ids.indexOf(normalized) === -1) {
         ids.push(normalized);
@@ -101,17 +101,32 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return ids;
   }
 
-  function buildDefaultIdentityClient(liffId, channelId) {
+  function buildVerifyFailureDetails(attempts) {
+    return {
+      verifyAttempts: attempts.map(function (attempt) {
+        return [
+          attempt.channelIdSuffix,
+          attempt.responseCode,
+          attempt.lineError
+        ].filter(function (value) {
+          return value !== '';
+        }).join(':');
+      }).join(',')
+    };
+  }
+
+  function buildDefaultIdentityClient(loginChannelId, liffId, channelId) {
     return {
       verifyIdToken: function (idToken, requestLiffId) {
-        var verifyChannelIds = normalizeVerifyChannelIds(liffId, channelId, requestLiffId);
+        var verifyChannelIds = normalizeVerifyChannelIds(loginChannelId, liffId, channelId, requestLiffId);
+        var attempts = [];
         var verifyStartedAt = nowMillis();
         ns.logEvent('info', 'auth.verify.request', {
           channelConfigured: verifyChannelIds.length > 0,
           hasIdToken: !!idToken,
           idTokenLength: idToken ? String(idToken).length : 0
         });
-        ns.assert(verifyChannelIds.length > 0, 'config_error', 'LIFF_ID または LINE_CHANNEL_ID が未設定です', 500);
+        ns.assert(verifyChannelIds.length > 0, 'config_error', 'LIFF 認証用 channel ID が未設定です', 500);
         ns.assert(idToken, 'unauthorized', 'LIFF 認証コンテキストがありません', 401);
 
         var scriptCache = getScriptCacheSafely();
@@ -152,14 +167,30 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             }
           });
           var responseCode = Number(response.getResponseCode());
+          var responseText = response.getContentText();
+          var lineError = '';
+          if (responseCode !== 200 && responseText) {
+            try {
+              var errorPayload = JSON.parse(responseText);
+              lineError = errorPayload && errorPayload.error ? String(errorPayload.error) : '';
+            } catch (parseError) {
+              lineError = 'unparseable';
+            }
+          }
+          attempts.push({
+            responseCode: responseCode,
+            channelIdSuffix: String(verifyChannelId).slice(-4),
+            lineError: lineError
+          });
           ns.logEvent('info', 'auth.verify.response', {
             responseCode: responseCode,
-            channelIdSuffix: String(verifyChannelId).slice(-4)
+            channelIdSuffix: String(verifyChannelId).slice(-4),
+            lineError: lineError
           });
           if (responseCode !== 200) {
             continue;
           }
-          var payload = JSON.parse(response.getContentText());
+          var payload = JSON.parse(responseText);
           ns.assert(payload.sub, 'internal_error', 'LINE verify 応答に sub が含まれていません', 500);
           var identity = {
             lineUserId: payload.sub,
@@ -187,7 +218,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           return identity;
         }
 
-        throw ns.createError('unauthorized', 'LIFF 認証の検証に失敗しました', 401);
+        var error = ns.createError('unauthorized', 'LIFF 認証の検証に失敗しました', 401);
+        error.details = buildVerifyFailureDetails(attempts);
+        throw error;
       }
     };
   }
@@ -291,7 +324,11 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   ns.createChecklistService = function (options) {
     var repository = options.repository;
     var clock = options.clock || ns.defaultClock();
-    var identityClient = options.identityClient || buildDefaultIdentityClient(options.liffId, options.lineChannelId);
+    var identityClient = options.identityClient || buildDefaultIdentityClient(
+      options.lineLoginChannelId,
+      options.liffId,
+      options.lineChannelId
+    );
     var notificationService = options.notificationService;
     var appBaseUrl = options.appBaseUrl || '';
     var checklistAppUrl = options.checklistAppUrl || appBaseUrl;

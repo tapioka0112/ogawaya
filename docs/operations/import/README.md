@@ -46,6 +46,7 @@ Apps Script をまだ実行できない場合は、従来どおり CSV を手で
 ## 置き換える必要がある値
 
 - `SPREADSHEET_ID`
+- `LINE_LOGIN_CHANNEL_ID`
 - `LINE_CHANNEL_ID`
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`

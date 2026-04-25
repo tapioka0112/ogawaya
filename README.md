@@ -40,6 +40,7 @@
 ## デプロイ準備
 1. GAS 側 Script Properties を設定する。
    - `SPREADSHEET_ID`
+   - `LINE_LOGIN_CHANNEL_ID`（LIFF の `idToken` verify に使う LINE Login channel ID）
    - `LINE_CHANNEL_ID`
    - `LINE_CHANNEL_SECRET`
    - `LINE_CHANNEL_ACCESS_TOKEN`
@@ -48,7 +49,7 @@
    - `CHECKLIST_APP_URL`
    - `ADMIN_LOGIN_ID`
    - `ADMIN_LOGIN_PASSWORD`
-   - LIFF の `idToken` 検証は `LIFF_ID` 先頭10桁の LINE Login channel ID を優先し、`LINE_CHANNEL_ID` を fallback として使う。
+   - LIFF の `idToken` 検証は `LINE_LOGIN_CHANNEL_ID` を優先し、`LIFF_ID` 先頭10桁、`LINE_CHANNEL_ID` の順に fallback する。
    - GitHub Pages 版は `pages/config.json` の `liffId` も GAS に送る。GAS Script Properties の `LIFF_ID` がある場合はそちらを優先する。
 2. `pages/config.json` を設定する。
    - `gasApiBaseUrl`

@@ -316,6 +316,34 @@
     }
   }
 
+  function extractIdTokenDiagnostics(idToken) {
+    if (typeof idToken !== 'string') {
+      return {};
+    }
+    var parts = idToken.split('.');
+    if (parts.length < 2) {
+      return {};
+    }
+    try {
+      var header = JSON.parse(decodeBase64Url(parts[0]));
+      var payload = JSON.parse(decodeBase64Url(parts[1]));
+      return {
+        alg: header && header.alg ? String(header.alg) : '',
+        kidSuffix: header && header.kid ? String(header.kid).slice(-6) : '',
+        iss: payload && payload.iss ? String(payload.iss) : '',
+        aud: payload && payload.aud ? String(payload.aud) : '',
+        exp: payload && payload.exp ? String(payload.exp) : ''
+      };
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function extractLiffChannelId(liffId) {
+    var match = String(liffId || '').replace(/\s+/g, '').match(/([0-9]{10})-[A-Za-z0-9]+/);
+    return match && match[1] ? match[1] : '';
+  }
+
   function createApi(options) {
     var normalizedGasBaseUrl = normalizeBaseUrl(options && options.gasApiBaseUrl ? options.gasApiBaseUrl : '');
     var normalizedFunctionsBaseUrl = normalizeBaseUrl(options && options.functionsApiBaseUrl ? options.functionsApiBaseUrl : '');
@@ -372,6 +400,7 @@
         var apiError = new Error(payload && payload.message ? payload.message : 'API request failed');
         apiError.code = payload && payload.code ? payload.code : '';
         apiError.statusCode = statusCode;
+        apiError.details = payload && payload.details && typeof payload.details === 'object' ? payload.details : null;
         throw apiError;
       }
       return payload;
@@ -408,6 +437,7 @@
         var apiError = new Error(payload && payload.message ? payload.message : 'API request failed');
         apiError.code = payload && payload.code ? payload.code : '';
         apiError.statusCode = statusCode;
+        apiError.details = payload && payload.details && typeof payload.details === 'object' ? payload.details : null;
         throw apiError;
       }
       return payload;
@@ -471,8 +501,12 @@
     idToken = typeof global.liff.getIDToken === 'function'
       ? global.liff.getIDToken()
       : '';
+    var idTokenDiagnostics = extractIdTokenDiagnostics(idToken);
     endTiming(tokenMarker, {
-      status: idToken ? 'ok' : 'empty'
+      status: idToken ? 'ok' : 'empty',
+      liffId: liffId,
+      liffChannelId: extractLiffChannelId(liffId),
+      aud: idTokenDiagnostics.aud
     });
     if (!idToken) {
       throw new Error('LIFF 認証コンテキストを取得できません');
@@ -621,9 +655,26 @@
       if (value === '' || value == null) {
         return;
       }
+      if (typeof value === 'object') {
+        pairs.push(key + '=' + JSON.stringify(value));
+        return;
+      }
       pairs.push(key + '=' + String(value));
     });
     return pairs.join(' ');
+  }
+
+  function buildErrorTimingDetails(error) {
+    var details = {
+      status: 'error',
+      message: error && error.message ? String(error.message) : 'error'
+    };
+    if (error && error.details && typeof error.details === 'object') {
+      Object.keys(error.details).forEach(function (key) {
+        details[key] = error.details[key];
+      });
+    }
+    return details;
   }
 
   function scheduleTimingConsoleReport() {
@@ -696,10 +747,7 @@
       endTiming(marker, { status: 'ok' });
       return value;
     } catch (error) {
-      endTiming(marker, {
-        status: 'error',
-        message: error && error.message ? String(error.message) : 'error'
-      });
+      endTiming(marker, buildErrorTimingDetails(error));
       throw error;
     }
   }

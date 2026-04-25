@@ -244,11 +244,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   };
 
   ns.mapErrorToResponse = function (error) {
-    return ns.createJsonResponse(error.statusCode || 500, {
+    var body = {
       ok: false,
       code: error.code || 'internal_error',
       message: error.message
-    });
+    };
+    if (error && error.details && typeof error.details === 'object') {
+      body.details = error.details;
+    }
+    return ns.createJsonResponse(error.statusCode || 500, body);
   };
 
   ns.logEvent = function (level, eventName, details) {
