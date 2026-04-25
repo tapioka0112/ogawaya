@@ -125,9 +125,9 @@
     'https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js'
   ];
   var ITEM_ACTION_DISPATCH_DEBOUNCE_MS = 120;
-  var ITEM_ACTION_REQUEST_TIMEOUT_MS = 2500;
+  var ITEM_ACTION_REQUEST_TIMEOUT_MS = 8000;
   var ITEM_ACTION_RETRY_MAX_ATTEMPTS = 6;
-  var BACKGROUND_GAS_SYNC_TIMEOUT_MS = 8000;
+  var BACKGROUND_GAS_SYNC_TIMEOUT_MS = 15000;
   var BACKGROUND_GAS_SYNC_RETRY_MAX_ATTEMPTS = 5;
   var FIRESTORE_WRITE_SUSPEND_MS = 5 * 60 * 1000;
   var JST_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
@@ -1969,7 +1969,9 @@
       normalizedChecklist.currentUser.userId = String(currentUserOverride.userId || normalizedChecklist.currentUser.userId || '');
       normalizedChecklist.currentUser.name = String(currentUserOverride.name || normalizedChecklist.currentUser.name || '');
     }
-    state.checklist = mergeChecklistPreservingInFlight(normalizedChecklist);
+    state.checklist = mergeChecklistPreservingInFlight(normalizedChecklist, {
+      preserveMissingItems: applyOptions.preserveMissingItems === true
+    });
     recomputeProgress();
     renderOverview();
     renderChecklist();
@@ -2580,7 +2582,9 @@
         return;
       }
       applyChecklistPayload(snapshotChecklist, {
-        restartSync: true
+        restartSync: true,
+        source: state.lastSnapshotSource || 'snapshot.background',
+        preserveMissingItems: true
       });
     }).catch(function (error) {
       console.error('[sync] failed to refresh checklist snapshot in background', error);
@@ -2922,7 +2926,37 @@
     });
   }
 
-  function mergeChecklistPreservingInFlight(serverChecklist) {
+  function shouldPreserveMissingChecklistItems(localChecklist, serverChecklist) {
+    if (!localChecklist || !serverChecklist) {
+      return false;
+    }
+    if (String(localChecklist.runId || '') !== String(serverChecklist.runId || '')) {
+      return false;
+    }
+    if (String(localChecklist.targetDate || '') !== String(serverChecklist.targetDate || '')) {
+      return false;
+    }
+    var localStoreId = resolveChecklistStoreId(localChecklist);
+    var serverStoreId = resolveChecklistStoreId(serverChecklist);
+    return !localStoreId || !serverStoreId || localStoreId === serverStoreId;
+  }
+
+  function appendMissingLocalItems(localItems, serverItems) {
+    var serverItemIds = {};
+    serverItems.forEach(function (item) {
+      serverItemIds[item.id] = true;
+    });
+    localItems.forEach(function (item) {
+      if (serverItemIds[item.id]) {
+        return;
+      }
+      serverItemIds[item.id] = true;
+      serverItems.push(cloneChecklistItem(item));
+    });
+  }
+
+  function mergeChecklistPreservingInFlight(serverChecklist, options) {
+    var mergeOptions = options || {};
     if (!state.checklist || !Array.isArray(state.checklist.items)) {
       return serverChecklist;
     }
@@ -2932,6 +2966,12 @@
     });
     var nextChecklist = serverChecklist || {};
     var nextItems = Array.isArray(nextChecklist.items) ? nextChecklist.items : [];
+    if (
+      mergeOptions.preserveMissingItems === true &&
+      shouldPreserveMissingChecklistItems(state.checklist, nextChecklist)
+    ) {
+      appendMissingLocalItems(state.checklist.items, nextItems);
+    }
     nextChecklist.items = nextItems.map(function (serverItem) {
       var localItem = localItems[serverItem.id];
       if (!localItem) {

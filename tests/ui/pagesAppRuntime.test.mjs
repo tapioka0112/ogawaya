@@ -299,6 +299,7 @@ function firestoreRestDocument(payload) {
 }
 
 function createChecklistPayload(item) {
+  const items = Array.isArray(item) ? item : [item];
   return {
     ok: true,
     statusCode: 200,
@@ -313,7 +314,7 @@ function createChecklistPayload(item) {
       role: '',
       store: { id: 'store-hashimoto', name: '橋本店' }
     },
-    items: [item]
+    items
   };
 }
 
@@ -981,6 +982,99 @@ test('GitHub Pages app は Firestore snapshot が未作成でも同日端末キ�
   );
   assert.equal(firestoreSnapshotRequestCount, 1);
   assert.equal(todayRequestCount, 0);
+});
+
+test('GitHub Pages app は古い Firestore snapshot で端末キャッシュの期間タスクを消さない', async () => {
+  const dailyItem = {
+    id: 'run-item-daily',
+    templateItemId: 'tmpl-item-daily',
+    title: '厨房内床清掃',
+    description: '',
+    period: 'daily',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const weeklyItem = {
+    id: 'run-item-weekly',
+    templateItemId: 'tmpl-item-weekly',
+    title: 'バーナー・コンロの清掃',
+    description: '',
+    period: 'weekly',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  let firestoreSnapshotRequestCount = 0;
+  let todayRequestCount = 0;
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'app'
+        }
+      });
+    }
+    if (String(url).startsWith('https://firestore.googleapis.com/')) {
+      if (String(url).includes('/snapshots/')) {
+        firestoreSnapshotRequestCount += 1;
+        return firestoreRestDocument(createChecklistPayload(dailyItem));
+      }
+      return response({ documents: [] });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      todayRequestCount += 1;
+      return new Promise(() => {});
+    }
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    Date: createFixedDate('2026-04-24T02:00:00Z'),
+    firebase: null,
+    localStorageValues: {
+      'ogawaya:checklist-cache:v1': JSON.stringify({
+        storeId: 'store-hashimoto',
+        targetDate: '2026-04-24',
+        checklist: createChecklistPayload([dailyItem, weeklyItem])
+      })
+    }
+  });
+
+  await wait(80);
+  document.elements['period-tab-weekly'].click();
+  await wait(10);
+
+  assert.equal(firestoreSnapshotRequestCount, 1);
+  assert.equal(todayRequestCount, 1);
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'period', 'weekly')?.dataset.period,
+    'weekly',
+    JSON.stringify({
+      texts: flattenElements(document.elements['checklist-items']).map((node) => node.textContent).filter(Boolean)
+    })
+  );
+  assert.ok(
+    flattenElements(document.elements['checklist-items']).some((node) => String(node.textContent || '').includes('バーナー・コンロの清掃'))
+  );
 });
 
 test('GitHub Pages app は debugTiming=1 で起動時間ウォーターフォールを描画する', async () => {
