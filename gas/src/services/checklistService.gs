@@ -83,16 +83,33 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return remaining;
   }
 
-  function buildDefaultIdentityClient(channelId) {
+  function extractLiffChannelId(liffId) {
+    var match = String(liffId || '').replace(/\s+/g, '').match(/([0-9]{10})-[A-Za-z0-9]+/);
+    return match && match[1] ? match[1] : '';
+  }
+
+  function normalizeVerifyChannelIds(liffId, channelId) {
+    var ids = [];
+    [extractLiffChannelId(liffId), channelId].forEach(function (candidate) {
+      var normalized = String(candidate || '').trim();
+      if (normalized && ids.indexOf(normalized) === -1) {
+        ids.push(normalized);
+      }
+    });
+    return ids;
+  }
+
+  function buildDefaultIdentityClient(liffId, channelId) {
+    var verifyChannelIds = normalizeVerifyChannelIds(liffId, channelId);
     return {
       verifyIdToken: function (idToken) {
         var verifyStartedAt = nowMillis();
         ns.logEvent('info', 'auth.verify.request', {
-          channelConfigured: !!channelId,
+          channelConfigured: verifyChannelIds.length > 0,
           hasIdToken: !!idToken,
           idTokenLength: idToken ? String(idToken).length : 0
         });
-        ns.assert(channelId, 'config_error', 'LINE_CHANNEL_ID が未設定です', 500);
+        ns.assert(verifyChannelIds.length > 0, 'config_error', 'LIFF_ID または LINE_CHANNEL_ID が未設定です', 500);
         ns.assert(idToken, 'unauthorized', 'LIFF 認証コンテキストがありません', 401);
 
         var scriptCache = getScriptCacheSafely();
@@ -122,44 +139,53 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           }
         }
 
-        var response = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify', {
-          method: 'post',
-          muteHttpExceptions: true,
-          payload: {
-            id_token: idToken,
-            client_id: channelId
+        for (var channelIndex = 0; channelIndex < verifyChannelIds.length; channelIndex += 1) {
+          var verifyChannelId = verifyChannelIds[channelIndex];
+          var response = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify', {
+            method: 'post',
+            muteHttpExceptions: true,
+            payload: {
+              id_token: idToken,
+              client_id: verifyChannelId
+            }
+          });
+          var responseCode = Number(response.getResponseCode());
+          ns.logEvent('info', 'auth.verify.response', {
+            responseCode: responseCode,
+            channelIdSuffix: String(verifyChannelId).slice(-4)
+          });
+          if (responseCode !== 200) {
+            continue;
           }
-        });
-        ns.logEvent('info', 'auth.verify.response', {
-          responseCode: Number(response.getResponseCode())
-        });
-        ns.assert(response.getResponseCode() === 200, 'unauthorized', 'LIFF 認証の検証に失敗しました', 401);
-        var payload = JSON.parse(response.getContentText());
-        ns.assert(payload.sub, 'internal_error', 'LINE verify 応答に sub が含まれていません', 500);
-        var identity = {
-          lineUserId: payload.sub,
-          displayName: payload.name || ''
-        };
-        if (scriptCache && cacheKey) {
-          try {
-            scriptCache.put(
-              cacheKey,
-              JSON.stringify(identity),
-              calculateIdentityCacheTtlSeconds(payload.exp)
-            );
-          } catch (cacheWriteError) {
-            ns.logEvent('warn', 'auth.verify.cache_write_failed', {
-              message: cacheWriteError && cacheWriteError.message ? String(cacheWriteError.message) : ''
-            });
+          var payload = JSON.parse(response.getContentText());
+          ns.assert(payload.sub, 'internal_error', 'LINE verify 応答に sub が含まれていません', 500);
+          var identity = {
+            lineUserId: payload.sub,
+            displayName: payload.name || ''
+          };
+          if (scriptCache && cacheKey) {
+            try {
+              scriptCache.put(
+                cacheKey,
+                JSON.stringify(identity),
+                calculateIdentityCacheTtlSeconds(payload.exp)
+              );
+            } catch (cacheWriteError) {
+              ns.logEvent('warn', 'auth.verify.cache_write_failed', {
+                message: cacheWriteError && cacheWriteError.message ? String(cacheWriteError.message) : ''
+              });
+            }
           }
+          ns.logEvent('info', 'auth.verify.success', {
+            lineUserId: summarizeId(payload.sub),
+            hasDisplayName: !!payload.name,
+            cacheHit: false,
+            verifyMs: nowMillis() - verifyStartedAt
+          });
+          return identity;
         }
-        ns.logEvent('info', 'auth.verify.success', {
-          lineUserId: summarizeId(payload.sub),
-          hasDisplayName: !!payload.name,
-          cacheHit: false,
-          verifyMs: nowMillis() - verifyStartedAt
-        });
-        return identity;
+
+        throw ns.createError('unauthorized', 'LIFF 認証の検証に失敗しました', 401);
       }
     };
   }
@@ -263,7 +289,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   ns.createChecklistService = function (options) {
     var repository = options.repository;
     var clock = options.clock || ns.defaultClock();
-    var identityClient = options.identityClient || buildDefaultIdentityClient(options.lineChannelId);
+    var identityClient = options.identityClient || buildDefaultIdentityClient(options.liffId, options.lineChannelId);
     var notificationService = options.notificationService;
     var appBaseUrl = options.appBaseUrl || '';
     var checklistAppUrl = options.checklistAppUrl || appBaseUrl;

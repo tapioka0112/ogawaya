@@ -48,6 +48,7 @@
    - `CHECKLIST_APP_URL`
    - `ADMIN_LOGIN_ID`
    - `ADMIN_LOGIN_PASSWORD`
+   - LIFF の `idToken` 検証は `LIFF_ID` 先頭10桁の LINE Login channel ID を優先し、`LINE_CHANNEL_ID` を fallback として使う。
 2. `pages/config.json` を設定する。
    - `gasApiBaseUrl`
    - `liffId`

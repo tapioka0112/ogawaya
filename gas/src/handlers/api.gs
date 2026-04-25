@@ -219,6 +219,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       notificationService: notificationService,
       appBaseUrl: appBaseUrl,
       checklistAppUrl: options.checklistAppUrl || scriptProperties.getProperty('CHECKLIST_APP_URL') || appBaseUrl,
+      liffId: options.liffId || scriptProperties.getProperty('LIFF_ID'),
       lineChannelId: options.lineChannelId || scriptProperties.getProperty('LINE_CHANNEL_ID'),
       allowAnonymousAccess: allowAnonymousAccess,
       adminLoginId: options.adminLoginId || scriptProperties.getProperty('ADMIN_LOGIN_ID'),
