@@ -120,6 +120,8 @@ GAS の時間主導トリガーを設定:
 - `runDailyStart` を毎日 10:30
 - `runDailyClosing` を毎日 0:00
 
+`runDailyStart` は当日のチェックリスト run を作成し、Firestore snapshot も保存します。既に run がある場合も snapshot を補完するため、その日の最初の LIFF 表示も Firestore snapshot から高速表示できます。
+
 0:30 未完了通知は手動で通常の日次トリガーを作りません。Apps Script エディタで `installReminderTriggers` を 1 回実行します。
 
 作成されるトリガー:

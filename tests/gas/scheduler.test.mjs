@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { loadGasRuntime } from '../helpers/gasHarness.mjs';
 import { createBaseDataset } from '../helpers/fixtures.mjs';
 
-async function createSchedulerApp(lineClient) {
+async function createSchedulerApp(lineClient, options = {}) {
   const runtime = await loadGasRuntime();
   const seed = createBaseDataset();
   seed.line_accounts = [
@@ -34,6 +34,7 @@ async function createSchedulerApp(lineClient) {
       }
     },
     lineClient,
+    snapshotClient: options.snapshotClient,
     clock: {
       now() {
         return new Date('2026-04-21T01:30:00Z');
@@ -62,6 +63,82 @@ test('daily start は当日分を作成し、既存時は二重作成しない',
   assert.equal(second.createdRuns.length, 0);
   assert.equal(app.repository.listTable('checklist_runs').length, 1);
   assert.ok(app.repository.listTable('checklist_run_items').every((item) => item.status === 'unchecked'));
+});
+
+test('daily start は当日分作成時に Firestore snapshot を保存する', async () => {
+  const snapshotWrites = [];
+  const app = await createSchedulerApp({
+    pushMessage() {
+      return { status: 'sent' };
+    }
+  }, {
+    snapshotClient: {
+      writeTodaySnapshot(storeId, targetDate, payload) {
+        snapshotWrites.push({ storeId, targetDate, payload });
+        return { responseCode: 200 };
+      }
+    }
+  });
+
+  const response = app.runDailyStart();
+
+  assert.equal(response.createdRuns.length, 1);
+  assert.equal(response.snapshotSyncs.length, 1);
+  assert.equal(response.snapshotSyncs[0].status, 'ok');
+  assert.equal(snapshotWrites.length, 1);
+  assert.equal(snapshotWrites[0].storeId, 'store-001');
+  assert.equal(snapshotWrites[0].targetDate, '2026-04-21');
+  assert.equal(snapshotWrites[0].payload.items.length, 2);
+});
+
+test('daily start は既存 run でも Firestore snapshot を補完する', async () => {
+  const snapshotWrites = [];
+  const app = await createSchedulerApp({
+    pushMessage() {
+      return { status: 'sent' };
+    }
+  }, {
+    snapshotClient: {
+      writeTodaySnapshot(storeId, targetDate, payload) {
+        snapshotWrites.push({ storeId, targetDate, payload });
+        return { responseCode: 200 };
+      }
+    }
+  });
+  app.repository.createChecklistRun({
+    id: 'run-existing',
+    template_id: 'tmpl-001',
+    store_id: 'store-001',
+    target_date: '2026-04-21',
+    status: 'open',
+    notified_at: '2026-04-21T01:30:00Z',
+    closed_at: '',
+    created_at: '2026-04-21T01:30:00Z'
+  });
+  app.repository.replaceTable('checklist_run_items', [
+    {
+      id: 'run-item-existing',
+      run_id: 'run-existing',
+      template_item_id: 'tmpl-item-001',
+      title: '開店準備',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-21T01:30:00Z'
+    }
+  ]);
+
+  const response = app.runDailyStart();
+
+  assert.equal(response.createdRuns.length, 0);
+  assert.equal(response.snapshotSyncs.length, 1);
+  assert.equal(response.snapshotSyncs[0].status, 'ok');
+  assert.equal(snapshotWrites.length, 1);
+  assert.equal(snapshotWrites[0].storeId, 'store-001');
+  assert.equal(snapshotWrites[0].targetDate, '2026-04-21');
+  assert.equal(snapshotWrites[0].payload.items.length, 1);
 });
 
 test('daily start は 10:30 境界で運用日の target_date を切り替える', async () => {

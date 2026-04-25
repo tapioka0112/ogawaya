@@ -1980,51 +1980,63 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
       runDailyStart: function () {
         var createdRuns = [];
+        var snapshotSyncs = [];
         var targetDate = resolveBusinessDate(clock.now());
         repository.listActiveTemplates().forEach(function (template) {
           var existingRun = repository.findRunByStoreAndDate(template.store_id, targetDate);
-          if (existingRun) {
-            return;
+          var run = existingRun;
+          var created = false;
+          if (!run) {
+            var now = ns.toIsoString(clock.now());
+            var runId = Utilities.getUuid();
+            var runPayload = {
+              id: runId,
+              template_id: template.id,
+              store_id: template.store_id,
+              target_date: targetDate,
+              status: ns.RUN_STATUS.OPEN,
+              notified_at: now,
+              closed_at: '',
+              created_at: now
+            };
+            var templateItems = repository.listTemplateItems(template.id);
+            run = repository.createChecklistRunWithItems(runPayload, templateItems.map(function (templateItem) {
+              return {
+                id: Utilities.getUuid(),
+                run_id: runId,
+                template_item_id: templateItem.id,
+                title: templateItem.title,
+                sort_order: templateItem.sort_order,
+                status: ns.ITEM_STATUS.UNCHECKED,
+                checked_by: '',
+                checked_by_name: '',
+                checked_at: '',
+                updated_at: now
+              };
+            }));
+            created = true;
+
+            notificationService.sendToUsers(
+              run,
+              repository.listLinkedUsersByStore(template.store_id, [ns.ROLES.PART_TIME]),
+              ns.NOTIFICATION_TYPES.DAILY_START,
+              buildDailyStartMessage(repository.findStoreById(template.store_id), run)
+            );
+            createdRuns.push(run);
           }
 
-          var now = ns.toIsoString(clock.now());
-          var runId = Utilities.getUuid();
-          var runPayload = {
-            id: runId,
-            template_id: template.id,
-            store_id: template.store_id,
-            target_date: targetDate,
-            status: ns.RUN_STATUS.OPEN,
-            notified_at: now,
-            closed_at: '',
-            created_at: now
-          };
-          var templateItems = repository.listTemplateItems(template.id);
-          var run = repository.createChecklistRunWithItems(runPayload, templateItems.map(function (templateItem) {
-            return {
-              id: Utilities.getUuid(),
-              run_id: runId,
-              template_item_id: templateItem.id,
-              title: templateItem.title,
-              sort_order: templateItem.sort_order,
-              status: ns.ITEM_STATUS.UNCHECKED,
-              checked_by: '',
-              checked_by_name: '',
-              checked_at: '',
-              updated_at: now
-            };
-          }));
-
-          notificationService.sendToUsers(
-            run,
-            repository.listLinkedUsersByStore(template.store_id, [ns.ROLES.PART_TIME]),
-            ns.NOTIFICATION_TYPES.DAILY_START,
-            buildDailyStartMessage(repository.findStoreById(template.store_id), run)
-          );
-          writeChecklistSnapshot(run, repository.listRunItems(run.id));
-          createdRuns.push(run);
+          var snapshotSync = writeChecklistSnapshot(run, repository.listRunItems(run.id));
+          snapshotSyncs.push(Object.assign({
+            runId: run.id,
+            storeId: template.store_id,
+            targetDate: targetDate,
+            created: created
+          }, snapshotSync));
         });
-        return { createdRuns: createdRuns };
+        return {
+          createdRuns: createdRuns,
+          snapshotSyncs: snapshotSyncs
+        };
       },
 
       runDailyClosing: function () {
