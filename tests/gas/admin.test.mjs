@@ -880,3 +880,307 @@ test('管理者テンプレート挿入は重複したクライアント生成ID
   assert.equal(response.statusCode, 400);
   assert.equal(response.body.code, 'invalid_request');
 });
+
+test('Firestore event 内部同期 API は shared secret 不一致を拒否する', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      FIRESTORE_EVENT_SYNC_SECRET: 'sync-secret'
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset()),
+    snapshotClient: null
+  });
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/internal/firestore-events:apply',
+    query: {},
+    body: {
+      syncSecret: 'wrong-secret',
+      event: {}
+    }
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.body.code, 'forbidden');
+});
+
+test('Firestore template_insert event は週間月間タスクを期間開始日の run に保存する', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      ADMIN_LOGIN_ID: 'admin-login',
+      ADMIN_LOGIN_PASSWORD: 'admin-password',
+      FIRESTORE_EVENT_SYNC_SECRET: 'sync-secret'
+    },
+    enableCacheService: true
+  });
+  const seed = createBaseDataset();
+  seed.checklist_template_items = [
+    {
+      id: 'tmpl-item-weekly',
+      template_id: 'tmpl-001',
+      title: '週間確認',
+      description: '',
+      period: 'weekly',
+      sort_order: '1',
+      is_required: 'true',
+      is_active: 'true',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-20T00:00:00Z'
+    },
+    {
+      id: 'tmpl-item-monthly',
+      template_id: 'tmpl-001',
+      title: '月間確認',
+      description: '',
+      period: 'monthly',
+      sort_order: '2',
+      is_required: 'true',
+      is_active: 'true',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-20T00:00:00Z'
+    }
+  ];
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    snapshotClient: {
+      writeTodaySnapshot() {
+        return { responseCode: 200 };
+      }
+    },
+    clock: {
+      now() {
+        return new Date('2026-04-25T03:00:00Z');
+      },
+      today() {
+        return '2026-04-25';
+      },
+      yesterday() {
+        return '2026-04-24';
+      }
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/internal/firestore-events:apply',
+    query: {},
+    body: {
+      syncSecret: 'sync-secret',
+      eventId: 'event-template-insert',
+      storeId: 'store-001',
+      targetDate: '2026-04-25',
+      event: {
+        type: 'template_insert',
+        storeId: 'store-001',
+        targetDate: '2026-04-25',
+        runId: 'client-run-20260425',
+        templateId: 'tmpl-001',
+        items: [
+          {
+            id: 'client-run-item-weekly',
+            templateItemId: 'tmpl-item-weekly'
+          },
+          {
+            id: 'client-run-item-monthly',
+            templateItemId: 'tmpl-item-monthly'
+          }
+        ]
+      }
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.result.insertedCount, 2);
+  const weeklyItem = app.repository.findRunItemById('client-run-item-weekly');
+  const monthlyItem = app.repository.findRunItemById('client-run-item-monthly');
+  assert.equal(app.repository.findRunById(weeklyItem.run_id).target_date, '2026-04-19');
+  assert.equal(app.repository.findRunById(monthlyItem.run_id).target_date, '2026-04-01');
+
+  const token = loginAsAdmin(app);
+  const adminRun = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/admin/runs/2026-04-25',
+    query: { adminToken: token },
+    body: {}
+  });
+
+  assert.equal(adminRun.statusCode, 200);
+  assert.equal(
+    JSON.stringify(adminRun.body.checklist.items.map((item) => [item.id, item.period])),
+    JSON.stringify([
+      ['client-run-item-weekly', 'weekly'],
+      ['client-run-item-monthly', 'monthly']
+    ])
+  );
+});
+
+test('Firestore status event は認証なしの内部同期で run item の完了状態を更新する', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      FIRESTORE_EVENT_SYNC_SECRET: 'sync-secret'
+    }
+  });
+  const seed = createBaseDataset();
+  seed.checklist_runs = [
+    {
+      id: 'run-week',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-19',
+      status: 'open',
+      notified_at: '2026-04-19T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-19T01:30:00Z'
+    },
+    {
+      id: 'run-day',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-25',
+      status: 'open',
+      notified_at: '2026-04-25T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-25T01:30:00Z'
+    }
+  ];
+  seed.checklist_run_items = [
+    {
+      id: 'run-item-weekly',
+      run_id: 'run-week',
+      template_item_id: 'tmpl-item-002',
+      title: '週間確認',
+      period: 'weekly',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-19T01:30:00Z'
+    }
+  ];
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    snapshotClient: {
+      writeTodaySnapshot() {
+        return { responseCode: 200 };
+      }
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/internal/firestore-events:apply',
+    query: {},
+    body: {
+      syncSecret: 'sync-secret',
+      eventId: 'event-status',
+      storeId: 'store-001',
+      targetDate: '2026-04-25',
+      event: {
+        storeId: 'store-001',
+        targetDate: '2026-04-25',
+        runId: 'run-day',
+        itemId: 'run-item-weekly',
+        status: 'checked',
+        checkedBy: '蒼太',
+        checkedByUserId: 'line-user-sota',
+        checkedAt: '2026-04-25T12:00:00.000Z',
+        updatedAt: '2026-04-25T12:00:01.000Z'
+      }
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  const updatedItem = app.repository.findRunItemById('run-item-weekly');
+  assert.equal(updatedItem.status, 'checked');
+  assert.equal(updatedItem.checked_by, 'line-user-sota');
+  assert.equal(updatedItem.checked_by_name, '蒼太');
+  assert.equal(updatedItem.checked_at, '2026-04-25T12:00:00Z');
+});
+
+test('Firestore events 定期同期は reader から取得した template_insert を Spreadsheet へ反映する', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      FIRESTORE_EVENT_SYNC_SECRET: 'sync-secret'
+    }
+  });
+  const seed = createBaseDataset();
+  seed.checklist_template_items = [
+    {
+      id: 'tmpl-item-weekly',
+      template_id: 'tmpl-001',
+      title: '週間確認',
+      description: '',
+      period: 'weekly',
+      sort_order: '1',
+      is_required: 'true',
+      is_active: 'true',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-20T00:00:00Z'
+    }
+  ];
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    snapshotClient: {
+      writeTodaySnapshot() {
+        return { responseCode: 200 };
+      }
+    },
+    firestoreEventReader: {
+      listRunEvents(storeId, targetDate) {
+        assert.equal(storeId, 'store-001');
+        assert.equal(targetDate, '2026-04-25');
+        return [
+          {
+            id: 'event-template-insert',
+            type: 'template_insert',
+            emittedAt: '2026-04-25T12:00:00Z',
+            storeId: 'store-001',
+            targetDate: '2026-04-25',
+            runId: 'client-run-20260425',
+            templateId: 'tmpl-001',
+            items: [
+              {
+                id: 'client-run-item-weekly-sync',
+                templateItemId: 'tmpl-item-weekly'
+              }
+            ]
+          }
+        ];
+      }
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/internal/firestore-events:sync',
+    query: {},
+    body: {
+      syncSecret: 'sync-secret',
+      storeId: 'store-001',
+      targetDate: '2026-04-25'
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.appliedCount, 1);
+  const weeklyItem = app.repository.findRunItemById('client-run-item-weekly-sync');
+  assert.equal(app.repository.findRunById(weeklyItem.run_id).target_date, '2026-04-19');
+
+  const secondResponse = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/internal/firestore-events:sync',
+    query: {},
+    body: {
+      syncSecret: 'sync-secret',
+      storeId: 'store-001',
+      targetDate: '2026-04-25'
+    }
+  });
+
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(secondResponse.body.appliedCount, 0);
+  assert.equal(secondResponse.body.skippedCount, 1);
+});

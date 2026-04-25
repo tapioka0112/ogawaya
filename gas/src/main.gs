@@ -110,6 +110,12 @@ function logClientEvent(payload) {
   return { ok: true };
 }
 
+function syncFirestoreEventsToSpreadsheet() {
+  return Ogawaya.createApplication({
+    allowAnonymousAccess: allowAnonymousAccessEnabled_()
+  }).runFirestoreEventSync({});
+}
+
 Ogawaya.normalizeTaskTitleForPeriodMigration = function (value) {
   return String(value || '').replace(/\s+/g, '').trim();
 };

@@ -149,6 +149,115 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   };
 
+  function decodeFirestoreValue(value) {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'stringValue')) {
+      return String(value.stringValue || '');
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'timestampValue')) {
+      return ns.toIsoString(new Date(String(value.timestampValue || '')));
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'integerValue')) {
+      return Number(value.integerValue || 0);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'doubleValue')) {
+      return Number(value.doubleValue || 0);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'booleanValue')) {
+      return value.booleanValue === true;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'nullValue')) {
+      return null;
+    }
+    if (value.arrayValue) {
+      return (value.arrayValue.values || []).map(decodeFirestoreValue);
+    }
+    if (value.mapValue) {
+      return decodeFirestoreFields(value.mapValue.fields || {});
+    }
+    return null;
+  }
+
+  function decodeFirestoreFields(fields) {
+    var decoded = {};
+    Object.keys(fields || {}).forEach(function (key) {
+      decoded[key] = decodeFirestoreValue(fields[key]);
+    });
+    return decoded;
+  }
+
+  function decodeFirestoreEventDocument(document) {
+    var eventPayload = decodeFirestoreFields((document && document.fields) || {});
+    var nameParts = String((document && document.name) || '').split('/');
+    eventPayload.id = nameParts[nameParts.length - 1] || '';
+    return eventPayload;
+  }
+
+  function buildFirestoreRunEventsUrl(projectId, storeId, targetDate, pageToken) {
+    var path = [
+      'stores',
+      storeId,
+      'runs',
+      targetDate,
+      'events'
+    ].map(encodeURIComponent).join('/');
+    var url = 'https://firestore.googleapis.com/v1/projects/' +
+      encodeURIComponent(projectId) +
+      '/databases/(default)/documents/' +
+      path +
+      '?pageSize=300';
+    if (pageToken) {
+      url += '&pageToken=' + encodeURIComponent(pageToken);
+    }
+    return url;
+  }
+
+  ns.createFirestoreEventReader = function (options) {
+    var safeOptions = options || {};
+    var projectId = String(safeOptions.projectId || '').trim();
+    ns.assert(projectId, 'config_error', 'FIREBASE_PROJECT_ID が未設定です', 500);
+    var fetchFn = safeOptions.fetch || function (url, requestOptions) {
+      return UrlFetchApp.fetch(url, requestOptions);
+    };
+
+    return {
+      listRunEvents: function (storeId, targetDate) {
+        var events = [];
+        var pageToken = '';
+        do {
+          var response = fetchFn(buildFirestoreRunEventsUrl(projectId, storeId, targetDate, pageToken), {
+            method: 'get',
+            muteHttpExceptions: true
+          });
+          var responseCode = Number(response.getResponseCode());
+          var responseText = response.getContentText();
+          if (responseCode === 404) {
+            return events;
+          }
+          if (responseCode < 200 || responseCode >= 300) {
+            var error = ns.createError('external_api_error', 'Firestore events の取得に失敗しました', 502);
+            error.details = {
+              projectId: projectId,
+              storeId: storeId,
+              targetDate: targetDate,
+              responseCode: responseCode,
+              response: sanitizeDiagnosticText(responseText || '')
+            };
+            throw error;
+          }
+          var payload = JSON.parse(responseText || '{}');
+          (payload.documents || []).forEach(function (document) {
+            events.push(decodeFirestoreEventDocument(document));
+          });
+          pageToken = String(payload.nextPageToken || '');
+        } while (pageToken);
+        return events;
+      }
+    };
+  };
+
   function isBusinessDayCutoverPassed(date) {
     var isoString = Utilities.formatDate(date, ns.TIMEZONE, "yyyy-MM-dd'T'HH:mm:ss'Z'");
     var timeMatch = isoString.match(/T(\d{2}):(\d{2}):\d{2}Z$/);
@@ -787,6 +896,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var checklistAppUrl = options.checklistAppUrl || appBaseUrl;
     var allowAnonymousAccess = options.allowAnonymousAccess === true;
     var snapshotClient = options.snapshotClient || null;
+    var firestoreEventReader = options.firestoreEventReader || null;
     function normalizeAdminCredential(value) {
       var normalized = String(value || '').trim();
       if (normalized.length >= 2) {
@@ -802,6 +912,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var adminLoginId = normalizeAdminCredential(options.adminLoginId);
     var adminLoginPassword = normalizeAdminCredential(options.adminLoginPassword);
     var adminSessionTtlSeconds = Number(options.adminSessionTtlSeconds || 12 * 60 * 60);
+    var firestoreEventSyncSecret = String(options.firestoreEventSyncSecret || '').trim();
     var adminSessionMemory = {};
     var ADMIN_SESSION_KEY_PREFIX = 'ogawaya:admin:session:v2:';
     var TASK_CATALOG_TEMPLATE_PREFIX = 'task-catalog-';
@@ -1416,6 +1527,28 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return normalizedDate;
     }
 
+    function requireFirestoreEventSyncSecret(body) {
+      ns.assert(
+        firestoreEventSyncSecret,
+        'config_error',
+        'FIRESTORE_EVENT_SYNC_SECRET が未設定です',
+        500
+      );
+      var actualSecret = String((body && body.syncSecret) || '').trim();
+      ns.assert(actualSecret === firestoreEventSyncSecret, 'forbidden', 'Firestore event sync secret が不正です', 403);
+    }
+
+    function resolveRunTargetDateForPeriod(period, targetDate) {
+      var normalizedPeriod = ns.normalizeTaskPeriod(period);
+      if (normalizedPeriod === ns.TASK_PERIODS.WEEKLY) {
+        return getSundayWeekStartDate(targetDate);
+      }
+      if (normalizedPeriod === ns.TASK_PERIODS.MONTHLY) {
+        return getMonthStartDate(targetDate);
+      }
+      return targetDate;
+    }
+
     function buildTaskCatalogTemplateId(storeId) {
       return TASK_CATALOG_TEMPLATE_PREFIX + String(storeId || '');
     }
@@ -1507,6 +1640,350 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         items: runItems.map(function (item) {
           return buildRunItemResponse(item, metadataByTemplateItemId);
         })
+      };
+    }
+
+    function buildTemplateItemIdFilter(templateItemIds) {
+      if (!templateItemIds || templateItemIds.length === 0) {
+        return null;
+      }
+      var filter = {};
+      templateItemIds.forEach(function (templateItemId) {
+        var normalizedTemplateItemId = String(templateItemId || '').trim();
+        if (normalizedTemplateItemId) {
+          filter[normalizedTemplateItemId] = true;
+        }
+      });
+      return Object.keys(filter).length > 0 ? filter : null;
+    }
+
+    function buildTemplateApplyRunContext(run, existingRunItems) {
+      var existingTemplateItemIds = {};
+      existingRunItems.forEach(function (runItem) {
+        if (runItem.template_item_id) {
+          existingTemplateItemIds[runItem.template_item_id] = true;
+        }
+      });
+      return {
+        run: run,
+        existingTemplateItemIds: existingTemplateItemIds,
+        maxSortOrder: existingRunItems.reduce(function (maxValue, runItem) {
+          return Math.max(maxValue, Number(runItem.sort_order || 0));
+        }, 0),
+        nextItems: [],
+        changedItems: []
+      };
+    }
+
+    function applyTemplateToPeriodRuns(storeId, targetDate, templateId, body, options) {
+      var applyOptions = options || {};
+      var normalizedTemplateId = String(templateId || '').trim();
+      ns.assert(normalizedTemplateId, 'invalid_request', 'templateId は必須です', 400);
+      var template = repository.findTemplateById(normalizedTemplateId);
+      ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
+      ns.assert(template.store_id === storeId, 'forbidden', '所属外のテンプレートは利用できません', 403);
+
+      var allowedTemplateItemIds = buildTemplateItemIdFilter(applyOptions.templateItemIds || []);
+      var templateItems = repository.listTemplateItems(template.id).filter(function (templateItem) {
+        return !allowedTemplateItemIds || !!allowedTemplateItemIds[templateItem.id];
+      });
+      ns.assert(templateItems.length > 0, 'invalid_request', 'テンプレートに項目がありません', 400);
+
+      var clientRunItemIdByTemplateItemId = buildClientRunItemIdByTemplateItemId(body);
+      var baseRun = ensureRunForDate(storeId, targetDate);
+      var contextByTargetDate = {};
+      var affectedRunById = {};
+      var now = ns.toIsoString(clock.now());
+
+      function getContext(runTargetDate) {
+        if (!contextByTargetDate[runTargetDate]) {
+          var run = runTargetDate === targetDate ? baseRun : ensureRunForDate(storeId, runTargetDate);
+          contextByTargetDate[runTargetDate] = buildTemplateApplyRunContext(run, repository.listRunItems(run.id));
+        }
+        return contextByTargetDate[runTargetDate];
+      }
+
+      function rememberAffectedRun(run) {
+        affectedRunById[run.id] = run;
+      }
+
+      templateItems.forEach(function (templateItem) {
+        var runTargetDate = resolveRunTargetDateForPeriod(templateItem.period, targetDate);
+        var context = getContext(runTargetDate);
+        if (context.existingTemplateItemIds[templateItem.id]) {
+          return;
+        }
+
+        var clientRunItemId = clientRunItemIdByTemplateItemId[templateItem.id] || '';
+        if (clientRunItemId) {
+          var existingClientRunItem = repository.findRunItemById(clientRunItemId);
+          if (existingClientRunItem) {
+            ns.assert(
+              existingClientRunItem.template_item_id === templateItem.id,
+              'invalid_request',
+              'clientItems.id は別のタスクで使用されています',
+              400
+            );
+            var existingClientRun = repository.findRunById(existingClientRunItem.run_id);
+            ns.assert(existingClientRun, 'not_found', '移動元チェックリストが見つかりません', 404);
+            ns.assert(existingClientRun.store_id === storeId, 'forbidden', '所属外のタスクは利用できません', 403);
+            if (existingClientRun.id !== context.run.id) {
+              var movedItem = repository.updateRunItem(existingClientRunItem.id, {
+                run_id: context.run.id,
+                title: templateItem.title,
+                period: ns.normalizeTaskPeriod(templateItem.period),
+                sort_order: String(context.maxSortOrder + context.nextItems.length + context.changedItems.length + 1),
+                updated_at: now
+              });
+              context.changedItems.push(movedItem);
+              rememberAffectedRun(existingClientRun);
+              rememberAffectedRun(context.run);
+            }
+            context.existingTemplateItemIds[templateItem.id] = true;
+            return;
+          }
+        }
+
+        var item = buildRunItemPayloadFromTemplateItem(
+          templateItem,
+          context.run.id,
+          Utilities.getUuid(),
+          context.maxSortOrder + context.nextItems.length + context.changedItems.length + 1,
+          now
+        );
+        if (clientRunItemId) {
+          item.id = clientRunItemId;
+        }
+        context.nextItems.push(item);
+        context.existingTemplateItemIds[templateItem.id] = true;
+        rememberAffectedRun(context.run);
+      });
+
+      var insertedItems = [];
+      var changedItems = [];
+      Object.keys(contextByTargetDate).forEach(function (runTargetDate) {
+        var context = contextByTargetDate[runTargetDate];
+        if (context.nextItems.length > 0) {
+          insertedItems = insertedItems.concat(repository.createRunItems(context.nextItems));
+          rememberAffectedRun(context.run);
+        }
+        changedItems = changedItems.concat(context.changedItems);
+      });
+
+      Object.keys(affectedRunById).forEach(function (runId) {
+        writeRunAndCurrentSnapshots(affectedRunById[runId]);
+      });
+      if (!affectedRunById[baseRun.id]) {
+        writeChecklistSnapshotForTargetDate(storeId, targetDate);
+      }
+
+      var responseItems = insertedItems.concat(changedItems);
+      var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, responseItems);
+      return {
+        insertedCount: insertedItems.length,
+        changedCount: changedItems.length,
+        items: responseItems.map(function (item) {
+          return buildRunItemResponse(item, metadataByTemplateItemId);
+        })
+      };
+    }
+
+    function buildFirestoreTemplateClientBody(eventPayload) {
+      return {
+        clientItems: (eventPayload.items || []).map(function (item) {
+          return {
+            templateItemId: String(item && item.templateItemId ? item.templateItemId : '').trim(),
+            id: String(item && item.id ? item.id : '').trim()
+          };
+        })
+      };
+    }
+
+    function normalizeFirestoreEventTimestamp(value, fieldName, required) {
+      var normalized = String(value || '').trim();
+      if (!normalized) {
+        ns.assert(required !== true, 'invalid_request', fieldName + ' は必須です', 400);
+        return '';
+      }
+      var parsed = new Date(normalized);
+      ns.assert(!isNaN(parsed.getTime()), 'invalid_request', fieldName + ' の形式が不正です', 400);
+      return ns.toIsoString(parsed);
+    }
+
+    function applyFirestoreStatusEvent(storeId, targetDate, eventPayload) {
+      var runItemId = ns.requireString(eventPayload.itemId, 'event.itemId');
+      var status = String(eventPayload.status || '').trim();
+      ns.assert(
+        status === ns.ITEM_STATUS.CHECKED || status === ns.ITEM_STATUS.UNCHECKED,
+        'invalid_request',
+        'event.status が不正です',
+        400
+      );
+      var item = repository.findRunItemById(runItemId);
+      ns.assert(item, 'not_found', 'チェック項目が見つかりません', 404);
+      var run = repository.findRunById(item.run_id);
+      ns.assert(run, 'not_found', 'チェックリストが見つかりません', 404);
+      ns.assert(run.store_id === storeId, 'forbidden', '所属外のタスクは利用できません', 403);
+
+      var checked = status === ns.ITEM_STATUS.CHECKED;
+      var checkedAt = checked
+        ? normalizeFirestoreEventTimestamp(eventPayload.checkedAt, 'event.checkedAt', true)
+        : '';
+      var updatedAt = normalizeFirestoreEventTimestamp(eventPayload.updatedAt, 'event.updatedAt', false)
+        || ns.toIsoString(clock.now());
+      var updatedItem = repository.updateRunItem(item.id, {
+        status: status,
+        checked_by: checked ? String(eventPayload.checkedByUserId || '').trim() : '',
+        checked_by_name: checked ? String(eventPayload.checkedBy || '').trim() : '',
+        checked_at: checkedAt,
+        updated_at: updatedAt
+      });
+      writeRunAndCurrentSnapshots(run);
+      if (targetDate !== run.target_date && repository.findRunByStoreAndDate(run.store_id, targetDate)) {
+        writeChecklistSnapshotForTargetDate(run.store_id, targetDate);
+      }
+      return {
+        item: buildSingleRunItemResponse(repository, updatedItem)
+      };
+    }
+
+    function applyFirestoreEventPayload(storeId, targetDate, eventId, eventPayload) {
+      ns.assert(storeId, 'invalid_request', 'storeId は必須です', 400);
+      ns.assert(String(eventPayload.storeId || '') === storeId, 'invalid_request', 'event.storeId が不正です', 400);
+      ns.assert(String(eventPayload.targetDate || '') === targetDate, 'invalid_request', 'event.targetDate が不正です', 400);
+
+      if (eventPayload.type === 'template_insert') {
+        var templateItemIds = (eventPayload.items || []).map(function (item) {
+          return String(item && item.templateItemId ? item.templateItemId : '').trim();
+        }).filter(function (templateItemId) {
+          return templateItemId !== '';
+        });
+        ns.assert(templateItemIds.length > 0, 'invalid_request', 'event.items は1件以上必要です', 400);
+        return {
+          eventId: String(eventId || ''),
+          result: applyTemplateToPeriodRuns(
+            storeId,
+            targetDate,
+            eventPayload.templateId,
+            buildFirestoreTemplateClientBody(eventPayload),
+            { templateItemIds: templateItemIds }
+          )
+        };
+      }
+
+      return {
+        eventId: String(eventId || ''),
+        result: applyFirestoreStatusEvent(storeId, targetDate, eventPayload)
+      };
+    }
+
+    function listFirestoreEventSyncTargetDates(options) {
+      var syncOptions = options || {};
+      if (syncOptions.targetDate) {
+        return [parseAdminTargetDate(syncOptions.targetDate)];
+      }
+      var days = Number(syncOptions.days || 14);
+      ns.assert(isFinite(days) && days >= 1 && days <= 45, 'invalid_request', 'days は 1〜45 で指定してください', 400);
+      var currentTargetDate = resolveBusinessDate(clock.now());
+      var dates = [];
+      for (var offset = 0; offset < days; offset += 1) {
+        dates.push(addDaysToTargetDate(currentTargetDate, -offset));
+      }
+      return dates;
+    }
+
+    function listFirestoreEventSyncStoreIds(options) {
+      var syncOptions = options || {};
+      if (syncOptions.storeId) {
+        var storeId = String(syncOptions.storeId || '').trim();
+        ns.assert(repository.findStoreById(storeId), 'invalid_request', 'storeId の店舗が見つかりません', 400);
+        return [storeId];
+      }
+      return repository.listTable('stores').filter(function (store) {
+        return String(store.status || '') === 'active';
+      }).map(function (store) {
+        return store.id;
+      });
+    }
+
+    function sortFirestoreEvents(events) {
+      return (events || []).slice().sort(function (left, right) {
+        return String(left.emittedAt || '').localeCompare(String(right.emittedAt || ''));
+      });
+    }
+
+    function buildFirestoreEventSyncStateKey(storeId, targetDate) {
+      return [
+        'FIRESTORE_EVENT_SYNCED_IDS',
+        String(storeId || '').replace(/[^A-Za-z0-9_-]/g, '_'),
+        String(targetDate || '').replace(/[^0-9-]/g, '_')
+      ].join(':');
+    }
+
+    function readSyncedFirestoreEventIds(storeId, targetDate) {
+      var raw = PropertiesService.getScriptProperties().getProperty(buildFirestoreEventSyncStateKey(storeId, targetDate));
+      if (!raw) {
+        return {};
+      }
+      var values = JSON.parse(raw);
+      ns.assert(Array.isArray(values), 'invalid_data', 'Firestore event sync state の形式が不正です', 500);
+      var result = {};
+      values.forEach(function (eventId) {
+        if (eventId) {
+          result[String(eventId)] = true;
+        }
+      });
+      return result;
+    }
+
+    function writeSyncedFirestoreEventIds(storeId, targetDate, eventIds) {
+      var values = Object.keys(eventIds || {}).sort().slice(-1000);
+      PropertiesService.getScriptProperties().setProperty(
+        buildFirestoreEventSyncStateKey(storeId, targetDate),
+        JSON.stringify(values)
+      );
+    }
+
+    function syncFirestoreEventsFromReader(options) {
+      ns.assert(firestoreEventReader, 'config_error', 'Firestore event reader が未設定です', 500);
+      var syncOptions = options || {};
+      var storeIds = listFirestoreEventSyncStoreIds(syncOptions);
+      var targetDates = listFirestoreEventSyncTargetDates(syncOptions);
+      var appliedCount = 0;
+      var scannedCount = 0;
+      var skippedCount = 0;
+      var force = syncOptions.force === true;
+
+      storeIds.forEach(function (storeId) {
+        targetDates.forEach(function (targetDate) {
+          var events = sortFirestoreEvents(firestoreEventReader.listRunEvents(storeId, targetDate));
+          var syncedEventIds = readSyncedFirestoreEventIds(storeId, targetDate);
+          var changed = false;
+          scannedCount += events.length;
+          events.forEach(function (eventPayload) {
+            var eventId = String(eventPayload.id || '');
+            ns.assert(eventId, 'invalid_data', 'Firestore event id が空です', 500);
+            if (!force && syncedEventIds[eventId]) {
+              skippedCount += 1;
+              return;
+            }
+            applyFirestoreEventPayload(storeId, targetDate, eventPayload.id, eventPayload);
+            syncedEventIds[eventId] = true;
+            changed = true;
+            appliedCount += 1;
+          });
+          if (changed) {
+            writeSyncedFirestoreEventIds(storeId, targetDate, syncedEventIds);
+          }
+        });
+      });
+
+      return {
+        storeIds: storeIds,
+        targetDates: targetDates,
+        scannedCount: scannedCount,
+        appliedCount: appliedCount,
+        skippedCount: skippedCount
       };
     }
 
@@ -1797,64 +2274,26 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       applyAdminTemplateToRun: function (query, body, targetDateRaw, templateId) {
         var session = requireAdminSession(query, body);
         var targetDate = parseAdminTargetDate(targetDateRaw);
-        var normalizedTemplateId = String(templateId || '').trim();
-        ns.assert(normalizedTemplateId, 'invalid_request', 'templateId は必須です', 400);
-        var template = repository.findTemplateById(normalizedTemplateId);
-        ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
-        ns.assert(template.store_id === session.storeId, 'forbidden', '所属外のテンプレートは利用できません', 403);
+        return applyTemplateToPeriodRuns(session.storeId, targetDate, templateId, body, {});
+      },
 
-        var templateItems = repository.listTemplateItems(template.id);
-        ns.assert(templateItems.length > 0, 'invalid_request', 'テンプレートに項目がありません', 400);
-        var clientRunItemIdByTemplateItemId = buildClientRunItemIdByTemplateItemId(body);
+      applyFirestoreEventSync: function (query, body) {
+        var safeBody = body || {};
+        requireFirestoreEventSyncSecret(safeBody);
+        var eventPayload = safeBody.event || {};
+        var storeId = String(safeBody.storeId || eventPayload.storeId || '').trim();
+        var targetDate = parseAdminTargetDate(safeBody.targetDate || eventPayload.targetDate);
+        return applyFirestoreEventPayload(storeId, targetDate, safeBody.eventId, eventPayload);
+      },
 
-        var run = ensureRunForDate(session.storeId, targetDate);
-        var existingRunItems = repository.listRunItems(run.id);
-        var existingTemplateItemIds = {};
-        existingRunItems.forEach(function (runItem) {
-          if (runItem.template_item_id) {
-            existingTemplateItemIds[runItem.template_item_id] = true;
-          }
-        });
-        var maxSortOrder = existingRunItems.reduce(function (maxValue, runItem) {
-          return Math.max(maxValue, Number(runItem.sort_order || 0));
-        }, 0);
-        var now = ns.toIsoString(clock.now());
-        var newItems = templateItems.filter(function (templateItem) {
-          return !existingTemplateItemIds[templateItem.id];
-        }).map(function (templateItem, index) {
-          var item = {
-            id: Utilities.getUuid(),
-            run_id: run.id,
-            template_item_id: templateItem.id,
-            title: templateItem.title,
-            period: ns.normalizeTaskPeriod(templateItem.period),
-            sort_order: String(maxSortOrder + index + 1),
-            status: ns.ITEM_STATUS.UNCHECKED,
-            checked_by: '',
-            checked_by_name: '',
-            checked_at: '',
-            updated_at: now
-          };
-          if (clientRunItemIdByTemplateItemId[templateItem.id]) {
-            ns.assert(
-              !repository.findRunItemById(clientRunItemIdByTemplateItemId[templateItem.id]),
-              'invalid_request',
-              'clientItems.id は既に使用されています',
-              400
-            );
-            item.id = clientRunItemIdByTemplateItemId[templateItem.id];
-          }
-          return item;
-        });
-        var insertedItems = newItems.length > 0 ? repository.createRunItems(newItems) : [];
-        var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, insertedItems);
-        writeRunAndCurrentSnapshots(run);
-        return {
-          insertedCount: insertedItems.length,
-          items: insertedItems.map(function (item) {
-            return buildRunItemResponse(item, metadataByTemplateItemId);
-          })
-        };
+      syncFirestoreEventsFromFirestore: function (query, body) {
+        var safeBody = body || {};
+        requireFirestoreEventSyncSecret(safeBody);
+        return syncFirestoreEventsFromReader(safeBody);
+      },
+
+      runFirestoreEventSync: function (options) {
+        return syncFirestoreEventsFromReader(options || {});
       },
 
       deleteAdminRunItem: function (query, body, targetDateRaw, runItemIdRaw) {

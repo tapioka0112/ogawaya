@@ -1,11 +1,13 @@
-const { onDocumentWritten } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onRequest } = require('firebase-functions/v2/https');
+const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const crypto = require('node:crypto');
 
 initializeApp();
 const db = getFirestore();
+const firestoreEventSyncSecret = defineSecret('FIRESTORE_EVENT_SYNC_SECRET');
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const BUSINESS_DAY_CUTOFF_HOUR = 10;
@@ -48,6 +50,8 @@ const COLLECTIONS = {
 };
 
 const SNAPSHOT_DOC_ID = 'today';
+const FIRESTORE_EVENT_DOCUMENT_PATH = 'stores/{storeId}/runs/{targetDate}/events/{eventId}';
+const GAS_FIRESTORE_EVENT_SYNC_PATH = '/api/internal/firestore-events:apply';
 
 class HttpError extends Error {
   constructor(statusCode, code, message) {
@@ -137,6 +141,24 @@ function readLineChannelId() {
   const channelId = String(process.env.LINE_CHANNEL_ID || '').trim();
   assert(channelId !== '', 500, 'config_error', 'LINE_CHANNEL_ID が未設定です');
   return channelId;
+}
+
+function readRequiredEnv(name) {
+  const value = String(process.env[name] || '').trim();
+  assert(value !== '', 500, 'config_error', `${name} が未設定です`);
+  return value;
+}
+
+function buildGasFirestoreEventSyncUrl() {
+  const url = new URL(readRequiredEnv('GAS_API_BASE_URL'));
+  url.searchParams.set('path', GAS_FIRESTORE_EVENT_SYNC_PATH);
+  return url.toString();
+}
+
+function readFirestoreEventSyncSecret() {
+  const value = String(firestoreEventSyncSecret.value() || process.env.FIRESTORE_EVENT_SYNC_SECRET || '').trim();
+  assert(value !== '', 500, 'config_error', 'FIRESTORE_EVENT_SYNC_SECRET が未設定です');
+  return value;
 }
 
 function readCachedVerifiedIdentity(cacheKey) {
@@ -1206,6 +1228,57 @@ function normalizeCalendarEntries(value) {
   return map;
 }
 
+function normalizeFirestoreEventSyncValue(value) {
+  if (value === null || typeof value === 'undefined') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeFirestoreEventSyncValue);
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value.toDate === 'function') {
+    return value.toDate().toISOString();
+  }
+  if (typeof value === 'object') {
+    const normalized = {};
+    Object.keys(value).forEach((key) => {
+      normalized[key] = normalizeFirestoreEventSyncValue(value[key]);
+    });
+    return normalized;
+  }
+  return value;
+}
+
+async function postFirestoreEventToGas(storeId, targetDate, eventId, eventPayload) {
+  const response = await fetch(
+    buildGasFirestoreEventSyncUrl(),
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        syncSecret: readFirestoreEventSyncSecret(),
+        eventId,
+        storeId,
+        targetDate,
+        event: normalizeFirestoreEventSyncValue(eventPayload)
+      })
+    }
+  );
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(`GAS Firestore event sync failed: ${response.status} ${responseText.slice(0, 240)}`);
+  }
+  const responsePayload = responseText ? JSON.parse(responseText) : {};
+  if (responsePayload.ok === false) {
+    throw new Error(`GAS Firestore event sync rejected: ${responsePayload.code || 'unknown'}`);
+  }
+  return responsePayload;
+}
+
 function buildMonthlySummary(calendarMap, year, month, storeId, counts) {
   const calendar = Object.keys(calendarMap).sort().map((date) => {
     return calendarMap[date];
@@ -1228,6 +1301,34 @@ function buildMonthlySummary(calendarMap, year, month, storeId, counts) {
     updatedAt: FieldValue.serverTimestamp()
   };
 }
+
+exports.syncFirestoreEventToGas = onDocumentCreated(
+  {
+    document: FIRESTORE_EVENT_DOCUMENT_PATH,
+    region: 'asia-northeast1',
+    retry: true,
+    secrets: [firestoreEventSyncSecret]
+  },
+  async (event) => {
+    if (!event.data) {
+      return;
+    }
+
+    const storeId = String(event.params.storeId || '');
+    const targetDate = String(event.params.targetDate || '');
+    const eventId = String(event.params.eventId || '');
+    assertValidTargetDate(targetDate);
+    if (!storeId) {
+      throw new Error('storeId is required');
+    }
+    if (!eventId) {
+      throw new Error('eventId is required');
+    }
+
+    const eventPayload = event.data.data() || {};
+    await postFirestoreEventToGas(storeId, targetDate, eventId, eventPayload);
+  }
+);
 
 exports.syncStatsFromSnapshot = onDocumentWritten(
   {

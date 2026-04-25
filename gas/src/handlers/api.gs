@@ -91,6 +91,34 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return ns.createJsonResponse(200, { ok: true });
     }
 
+    if (method === 'POST' && path === '/api/internal/firestore-events:apply') {
+      return ns.createJsonResponse(200, service.applyFirestoreEventSync(request.query, request.body));
+    }
+
+    if (method === 'POST' && path === '/api/internal/firestore-events:sync') {
+      return ns.createJsonResponse(200, service.syncFirestoreEventsFromFirestore(request.query, request.body));
+    }
+
+    if (method === 'POST' && path === '/api/internal/firestore-events:install-trigger') {
+      var triggerSecret = String(
+        PropertiesService.getScriptProperties().getProperty('FIRESTORE_EVENT_SYNC_SECRET') || ''
+      ).trim();
+      ns.assert(triggerSecret, 'config_error', 'FIRESTORE_EVENT_SYNC_SECRET が未設定です', 500);
+      ns.assert(
+        String((request.body && request.body.syncSecret) || '').trim() === triggerSecret,
+        'forbidden',
+        'Firestore event sync secret が不正です',
+        403
+      );
+      ScriptApp.getProjectTriggers().forEach(function (trigger) {
+        if (trigger.getHandlerFunction && trigger.getHandlerFunction() === 'syncFirestoreEventsToSpreadsheet') {
+          ScriptApp.deleteTrigger(trigger);
+        }
+      });
+      ScriptApp.newTrigger('syncFirestoreEventsToSpreadsheet').timeBased().everyMinutes(5).create();
+      return ns.createJsonResponse(200, { installed: true });
+    }
+
     if (method === 'POST' && path === '/api/admin/login') {
       return ns.createJsonResponse(200, service.adminLogin(request.body));
     }
@@ -245,13 +273,22 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       adminLoginId: options.adminLoginId || scriptProperties.getProperty('ADMIN_LOGIN_ID'),
       adminLoginPassword: options.adminLoginPassword || scriptProperties.getProperty('ADMIN_LOGIN_PASSWORD'),
       adminSessionTtlSeconds: options.adminSessionTtlSeconds || scriptProperties.getProperty('ADMIN_SESSION_TTL_SECONDS'),
+      firestoreEventSyncSecret: options.firestoreEventSyncSecret
+        || scriptProperties.getProperty('FIRESTORE_EVENT_SYNC_SECRET'),
       snapshotClient: typeof options.snapshotClient !== 'undefined'
         ? options.snapshotClient
         : createFirestoreSnapshotClient(
           options.firebaseProjectId
           || scriptProperties.getProperty('FIREBASE_PROJECT_ID')
           || ns.DEFAULT_FIREBASE_PROJECT_ID
-        )
+        ),
+      firestoreEventReader: typeof options.firestoreEventReader !== 'undefined'
+        ? options.firestoreEventReader
+        : ns.createFirestoreEventReader({
+          projectId: options.firebaseProjectId
+            || scriptProperties.getProperty('FIREBASE_PROJECT_ID')
+            || ns.DEFAULT_FIREBASE_PROJECT_ID
+        })
     });
     var webhookHandler = ns.createWebhookHandler({
       appBaseUrl: appBaseUrl,
@@ -306,6 +343,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
       syncNotificationChannelUsage: function () {
         return checklistService.syncNotificationChannelUsage();
+      },
+      runFirestoreEventSync: function (options) {
+        return checklistService.runFirestoreEventSync(options || {});
       }
     };
   };

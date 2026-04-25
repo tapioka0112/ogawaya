@@ -49,6 +49,7 @@
    - `CHECKLIST_APP_URL`
    - `ADMIN_LOGIN_ID`
    - `ADMIN_LOGIN_PASSWORD`
+   - `FIRESTORE_EVENT_SYNC_SECRET`
    - LIFF の `idToken` 検証は `LINE_LOGIN_CHANNEL_ID` を優先し、`LIFF_ID` 先頭10桁、`LINE_CHANNEL_ID` の順に fallback する。
    - `idToken` が期限切れの場合は、LIFF の `accessToken` を LINE Login API で検証し、同一 channel の token だけを認証に使う。
    - LIFF の `idToken` または `accessToken` が期限切れ・取り消し済みの場合は、画面側で LIFF session を1回だけ更新する。
@@ -73,6 +74,7 @@
 - `snapshots/today` が未作成の運用日でも、LIFF は同日分の端末キャッシュを先に描画し、Firestore `events` とGAS APIで追従する。
 - 統計タブは `snapshots/today` をクライアント集計する。
 - Firestore 直接書き込みには Firebase Authentication の匿名ログインを使う。
+- Firestore `events` は GAS の `syncFirestoreEventsToSpreadsheet` time-driven trigger で Spreadsheet に後追い同期する。
 - Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。
 
 ## LIFF 起動時間の計測
