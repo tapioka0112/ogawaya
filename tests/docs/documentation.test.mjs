@@ -115,15 +115,30 @@ test('非IT担当者向けの全体運用手順が存在する', async () => {
   const bootstrap = await readFile('docs/operations/bootstrap.md', 'utf8');
   const manual = await readFile('docs/operations/non-technical-operations.md', 'utf8');
 
-  assert.match(readme, /non-technical-operations\.md/);
-  assert.match(bootstrap, /\[non-technical-operations\.md\]\(\.\/non-technical-operations\.md\)/);
-  assert.match(manual, /毎日やること/);
-  assert.match(manual, /Apps Scriptで関数を実行する方法/);
-  assert.match(manual, /管理者画面の使い方/);
-  assert.match(manual, /従業員を追加する/);
-  assert.match(manual, /通知用LINE公式アカウントを増やす/);
-  assert.match(manual, /Googleスプレッドシートで触ってよい場所/);
-  assert.match(manual, /よくあるトラブル/);
-  assert.match(manual, /installReminderTriggers/);
-  assert.match(manual, /LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01/);
+  for (const content of [readme, bootstrap]) {
+    assert.match(content, /non-technical-operations\.md/);
+  }
+  for (const text of [
+    '毎日やること',
+    'Apps Scriptで関数を実行する方法',
+    '管理者画面の使い方',
+    '従業員を追加する',
+    '通知用LINE公式アカウントを増やす',
+    'Googleスプレッドシートで触ってよい場所',
+    'LINE公式アカウントとLIFFの設定確認',
+    'GAS Script Properties',
+    'GitHub Pagesと設定ファイル',
+    'Deploy LIFF Pages',
+    'Firebaseの確認',
+    'よくあるトラブル',
+    'installReminderTriggers',
+    'LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01',
+    'https://tapioka0112.github.io/ogawaya/',
+    'https://tapioka0112.github.io/ogawaya/admin.html',
+    'https://liff.line.me/2009859108-sJ31BCFx',
+    'https://console.firebase.google.com/project/owagaya-fd93b/overview',
+    'https://script.google.com/d/1q7LLKLs4l_mH2gE9VmaxdX0Ilrbt9BLuOSTZXlOZIPxukh7FH7zHeMHd/edit'
+  ]) {
+    assert.match(manual, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
 });

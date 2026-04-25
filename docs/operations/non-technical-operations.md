@@ -1,213 +1,253 @@
-# おがわやチェックリスト 非IT担当者向け運用手順書
+# おがわやチェックリスト 運用手順書
 
-## まず読むところ
+この手順書は、プログラムを書かない運用担当者が毎日の運用を行うための最新版です。
+古い手順書の内容は引き継がず、現在のリポジトリ設定とコードから確認できた内容で作り直しています。
 
-この手順書は、プログラムを書かない人が毎日の運用をするためのものです。  
-「どの画面を開くか」「何を押すか」「どこを確認するか」だけを順番に書いています。
+## 1. まず開くURL
 
-このシステムで使う画面は主に3つです。
+| 用途 | URL |
+| --- | --- |
+| 従業員がLINEで開く画面 | `https://liff.line.me/2009859108-sJ31BCFx` |
+| 従業員用Web画面 | `https://tapioka0112.github.io/ogawaya/` |
+| 管理者画面 | `https://tapioka0112.github.io/ogawaya/admin.html` |
+| GitHubリポジトリ | `https://github.com/tapioka0112/ogawaya` |
+| GitHub Pages設定 | `https://github.com/tapioka0112/ogawaya/settings/pages` |
+| Apps Script編集画面 | `https://script.google.com/d/1q7LLKLs4l_mH2gE9VmaxdX0Ilrbt9BLuOSTZXlOZIPxukh7FH7zHeMHd/edit` |
+| GAS API | `https://script.google.com/macros/s/AKfycbwHus8fdYWaLzkL0qrj6mX2rEDBphVlqWA4IAzETnsNXmanUgD5xLiMZZooGkeLI4pbMg/exec` |
+| Firebase Console | `https://console.firebase.google.com/project/owagaya-fd93b/overview` |
+| Firestore Rules | `https://console.firebase.google.com/project/owagaya-fd93b/firestore/rules` |
+| LINE Official Account Manager | `https://manager.line.biz/` |
+| LINE Developers Console | `https://developers.line.biz/console/` |
 
-| 使うもの | 何をする場所か | 普段触る人 |
-| --- | --- | --- |
-| LINEのチェックリスト画面 | 従業員が今日のタスクをチェックする | 全員 |
-| 管理者画面 | タスクを作る、日付に追加する、テンプレートを入れる | 店長、管理者 |
-| Googleスプレッドシート | データ確認、通知設定、緊急時の確認 | 運用担当者 |
+GoogleスプレッドシートのURLは、Apps ScriptのScript Propertiesにある `SPREADSHEET_ID` を使って次の形で開きます。
 
-このシステムの基本ルールです。
+```text
+https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit
+```
+
+`<SPREADSHEET_ID>` は秘密情報ではありませんが、運用中の本番データに直結します。社外へ共有しないでください。
+
+## 2. このシステムの基本
 
 | 項目 | 内容 |
 | --- | --- |
-| 1日の切替 | 日本時間 `10:30`。`10:30〜翌10:29` が同じ営業日です。 |
-| 今日のタスク | 毎日 `10:30` に自動で作られます。 |
-| 残りタスク通知 | 毎日 `0:30` に未完了タスクがある人へ送ります。 |
-| チェックした人 | LINEの表示名で記録されます。 |
+| 1日の切替 | 日本時間 `10:30`。`10:30` から翌日 `10:29` までが同じ営業日です。 |
+| 今日のタスク作成 | Apps Scriptの `runDailyStart` が毎日 `10:30` に作ります。 |
+| 未完了通知 | `runDailyIncompleteReminder` が `0:30` に送ります。 |
 | データの正本 | Googleスプレッドシートです。 |
-| 画面の同期 | Firestoreを使って、開いている画面へ反映します。 |
+| 画面の公開場所 | GitHub Pagesです。GitHub Actionsの `Deploy LIFF Pages` が `pages/` を公開します。 |
+| 保存API | GAS APIです。 |
+| 画面の高速同期 | Firebase Firestore の `events` と `snapshots/today` を使います。 |
+| チェックした人 | LIFF認証で取得したLINE表示名とユーザーIDで記録します。 |
 
-## 最初にブックマークするもの
+普段の運用で触る順番は、管理者画面、Googleスプレッドシート、Apps Scriptの順です。
+GitHub、Firebase、LINE Developersは、設定変更や障害対応のときだけ触ります。
 
-以下のURLは、実際の運用担当者が自分の環境のURLに置き換えて管理してください。
+## 3. 毎日やること
 
-| 名前 | URL |
+### 従業員がタスクをチェックする
+
+1. LINE公式アカウントのリッチメニューからチェックリストを開く。
+2. 開けない場合は、LINEアプリ内で `https://liff.line.me/2009859108-sJ31BCFx` を開く。
+3. 今日のタスクを確認する。
+4. 終わったタスクを押してチェック済みにする。
+5. 間違えて押した場合は、もう一度押して未完了に戻す。
+6. 統計タブで、自分の完了数と今月の達成状況を確認する。
+
+PCブラウザでもWeb画面は開けますが、本人確認はLINEのLIFF認証を使います。通常はLINEアプリから開いてください。
+
+### 管理者が確認する
+
+1. `https://tapioka0112.github.io/ogawaya/admin.html` を開く。
+2. 管理者IDとパスワードでログインする。
+3. カレンダーで今日の日付を選ぶ。
+4. 「タスクの管理」で、今日のタスクが正しく並んでいるか確認する。
+5. 足りないタスクがあれば、管理者画面から追加する。
+6. 不要なタスクがあれば、管理者画面から削除する。
+7. 営業後に未完了タスクが残っていないか確認する。
+
+管理者IDとパスワードは、Apps ScriptのScript Propertiesにある `ADMIN_LOGIN_ID` と `ADMIN_LOGIN_PASSWORD` です。値そのものはこの手順書に書きません。
+
+## 4. 管理者画面の使い方
+
+管理者画面は、LINE内の従業員画面から「管理者画面を開く」を押すか、直接 `https://tapioka0112.github.io/ogawaya/admin.html` を開いて使います。
+
+### ログインする
+
+1. 管理者画面を開く。
+2. 「管理者ID」に `ADMIN_LOGIN_ID` の値を入力する。
+3. 「パスワード」に `ADMIN_LOGIN_PASSWORD` の値を入力する。
+4. 「ログイン」を押す。
+5. 「タスク操作」が表示されたらログイン完了です。
+
+### タスクを作成する
+
+これは「後で日付に入れられるタスクの部品」を作る操作です。作成しただけでは今日のチェックリストには入りません。
+
+1. 「タスクを作成」を押す。
+2. 「タスク名」に名前を入力する。
+3. 必要なら「詳細 (任意)」に説明を入力する。
+4. 「タスクを作成」を押す。
+5. 画面に「タスクを作成しました」と出ることを確認する。
+
+### 作成済みタスクを指定日に入れる
+
+1. カレンダーで追加したい日付を選ぶ。
+2. 「タスクを挿入」を押す。
+3. 「挿入するタスク」から追加したいタスクを選ぶ。
+4. 「選択したタスクを挿入」を押す。
+5. 「タスクの管理」に追加されたことを確認する。
+
+### テンプレートを作成する
+
+テンプレートは、複数タスクをまとめて追加するためのセットです。
+
+1. 先に必要なタスクを「タスクを作成」で作っておく。
+2. 「テンプレートを作成」を押す。
+3. 「新規テンプレート名」に名前を入力する。
+4. 「テンプレートに含めるタスク」で入れたいタスクにチェックを付ける。
+5. 「テンプレートを作成」を押す。
+6. 画面に「テンプレートを作成しました」と出ることを確認する。
+
+### テンプレートを指定日に入れる
+
+1. カレンダーで追加したい日付を選ぶ。
+2. 「テンプレートを挿入」を押す。
+3. 「挿入するテンプレート」から使いたいテンプレートを選ぶ。
+4. 「選択したテンプレートを挿入」を押す。
+5. 「タスクの管理」にテンプレート内のタスクが追加されたことを確認する。
+
+テンプレート挿入は、画面へ先に反映され、その後GASへ保存されます。少し待って別端末にも表示されれば正常です。
+
+### 日付に入っているタスクを削除する
+
+これは「その日のチェックリストから外す」操作です。タスクの部品自体は残ります。
+
+1. カレンダーで対象日を選ぶ。
+2. 「タスクの管理」を見る。
+3. 消したいタスクの右側にある「削除」を押す。
+4. 一覧から消えたことを確認する。
+
+## 5. 統計とカレンダーの見方
+
+従業員画面の統計タブでは、Firestore snapshotを集計して表示します。
+
+| 表示 | 意味 |
 | --- | --- |
-| 従業員用LINE画面 | `https://liff.line.me/<LIFF_ID>` |
-| Web画面 | `https://tapioka0112.github.io/ogawaya/` |
-| 管理者画面 | `https://tapioka0112.github.io/ogawaya/admin.html` |
-| Googleスプレッドシート | 運用中のSpreadsheet URL |
-| Apps Script | 運用中のApps Script URL |
-| Firebase Console | 運用中のFirebaseプロジェクトURL |
-| LINE Official Account Manager | https://manager.line.biz/ |
-| LINE Developers | https://developers.line.biz/console/ |
+| 今月の達成状況 | タスクが全件完了した日数です。 |
+| 自分が完了させたタスク数 | 自分のLINEユーザーIDでチェックした件数です。 |
+| カレンダーの点 | その日にタスクがあることを示します。 |
+| カレンダーのチェック | その日のタスクが全件完了したことを示します。 |
+| カレンダーの選択枠 | 今、詳細を表示している日付です。 |
 
-## Apps Scriptで関数を実行する方法
+統計がおかしいときは、まずLINE画面を閉じて開き直します。
+それでも直らない場合は、Firestore snapshotが古い、またはGAS保存が遅れている状態です。Apps Scriptの実行ログと `?debugTiming=1` の表示を確認します。
 
-この手順書では、何度か「Apps Scriptで `関数名` を実行する」と書いています。  
-その場合は、以下の通りに操作します。
+## 6. Apps Scriptで関数を実行する方法
 
-1. ブックマークしているApps Scriptを開く。
-2. 画面上部の関数選択欄を押す。
+1. Apps Script編集画面を開く。
+2. 上部の関数選択欄を押す。
 3. 実行したい関数名を選ぶ。
 4. 「実行」を押す。
-5. 初回だけ権限確認が出るので、運用アカウントで許可する。
+5. 初回だけ権限確認が出たら、運用アカウントで許可する。
 6. 実行ログが「完了」になったことを確認する。
 
 よく使う関数です。
 
 | 関数名 | いつ使うか |
 | --- | --- |
-| `runDailyStart` | 今日のタスクが作られていないとき |
-| `rebalanceNotificationRecipients` | 従業員や通知アカウントを増減した後 |
-| `syncNotificationChannelUsage` | 通知数を今すぐ更新したいとき |
-| `installReminderTriggers` | 0:30通知トリガーを作り直したいとき |
+| `runDailyStart` | 今日のタスクが作られていないとき。通常は毎日 `10:30` のトリガーで自動実行されます。 |
+| `runDailyClosing` | 締め処理を手動で確認したいとき。通常は毎日 `0:00` のトリガーで自動実行されます。 |
+| `installReminderTriggers` | `0:30` 未完了通知のトリガーを作り直すとき。 |
+| `runDailyIncompleteReminder` | 未完了通知を今すぐ手動で送るとき。 |
+| `runReminderWatchdog` | 未完了通知の送信漏れ補正を手動確認するとき。 |
+| `rebalanceNotificationRecipients` | 従業員や通知用LINE公式アカウントを増減した後。 |
+| `syncNotificationChannelUsage` | 通知送信数を今すぐ集計し直したいとき。 |
+| `bootstrapSpreadsheetTemplates` | 初期シートを作るとき。既存データがあるシートは上書きしません。 |
 
-## 毎日やること
+## 7. 自動処理とトリガー
 
-従業員がやることです。
+Apps Scriptの「トリガー」画面で確認します。
 
-1. LINEのリッチメニューを開く。
-2. 「チェックリストを表示する」を押す。
-3. 今日のタスクを確認する。
-4. 終わったタスクにチェックを入れる。
-5. 間違えてチェックした場合は、もう一度押して取り消す。
-6. 統計タブで自分のチェック数を確認する。
+| 関数名 | 予定 | 役割 |
+| --- | --- | --- |
+| `runDailyStart` | 毎日 `10:30` | 当日のチェックリストを作り、Firestore snapshotも保存します。 |
+| `runDailyClosing` | 毎日 `0:00` | 営業日の締め処理をします。 |
+| `runDailyIncompleteReminder` | 次回 `0:30` の1回限り | 未完了タスク通知を送ります。 |
+| `runReminderWatchdog` | 15分おき | `0:30` 通知の送信漏れを補正します。 |
 
-管理者が見ることです。
+`runDailyIncompleteReminder` は毎日作り直される1回限りのトリガーです。見当たらない場合は `installReminderTriggers` を実行してください。
 
-1. 営業中にチェックリスト画面を開く。
-2. 未完了のタスクが残っていないか確認する。
-3. 必要なタスクが足りない場合は、管理者画面から追加する。
-4. 深夜 `0:30` の残りタスク通知後に、まだ残っているタスクがないか確認する。
+## 8. Googleスプレッドシートで触ってよい場所
 
-## 管理者画面の使い方
+基本は管理者画面を使います。Googleスプレッドシートを直接編集するのは、通知設定、従業員停止、緊急確認のときだけです。
 
-管理者画面は、タスクを追加・削除するための画面です。
-
-ログイン手順です。
-
-1. `https://tapioka0112.github.io/ogawaya/admin.html` を開く。
-2. 管理者IDを入力する。
-3. 管理者パスワードを入力する。
-4. 「ログイン」を押す。
-
-ログインできない場合は、Apps ScriptのScript Propertiesにある `ADMIN_LOGIN_ID` と `ADMIN_LOGIN_PASSWORD` を確認します。
-
-## タスクを新しく作る
-
-「タスクを作る」は、あとで日付に追加できるタスクの部品を作る操作です。  
-作っただけでは、その日のチェックリストには入りません。
-
-1. 管理者画面を開く。
-2. 「タスク名」に名前を入れる。
-3. 「詳細」に説明を入れる。
-4. 「タスクを作成」を押す。
-5. タスク一覧に増えたことを確認する。
-
-例です。
-
-| 入力欄 | 例 |
+| シート | 触ってよい作業 |
 | --- | --- |
-| タスク名 | 店内清掃 |
-| 詳細 | テーブル、床、券売機周りを確認する |
+| `stores` | 店舗IDと店舗名の確認。 |
+| `notification_channels` | 通知用LINE公式アカウントの追加、停止。 |
+| `notification_recipients` | 従業員の通知対象化、退職者の停止。 |
+| `notification_channel_usage` | 月間送信数の確認。 |
+| `notifications` | 通知が送られたか、失敗したかの確認。 |
 
-## 作ったタスクを指定日に入れる
+通常は直接編集しないシートです。
 
-「タスクを挿入」は、作成済みタスクを選んだ日付のチェックリストに追加する操作です。
-
-1. 管理者画面のカレンダーで日付を選ぶ。
-2. 「タスクを挿入」を押す。
-3. 追加したいタスクを選ぶ。
-4. 挿入する。
-5. 「タスクの管理」に表示されたことを確認する。
-
-## いらないタスクを消す
-
-日付に入っているタスクを消す操作です。  
-タスクの部品自体を完全削除する操作ではありません。
-
-1. 管理者画面のカレンダーで日付を選ぶ。
-2. 「タスクの管理」を見る。
-3. 消したいタスクの右側にある削除ボタンを押す。
-4. 表示から消えたことを確認する。
-
-## テンプレートを作る
-
-テンプレートは、複数のタスクをまとめて一括追加するためのセットです。
-
-1. 管理者画面を開く。
-2. 「テンプレートを作成」を押す。
-3. テンプレート名を入れる。
-4. 含めたいタスクを複数選ぶ。
-5. 保存する。
-6. テンプレート一覧に増えたことを確認する。
-
-例です。
-
-| テンプレート名 | 入れるタスク |
+| シート | 理由 |
 | --- | --- |
-| 開店前チェック | 材料補充、水回り確認、券売機確認 |
-| 閉店前チェック | 清掃、在庫確認、戸締まり |
+| `checklist_runs` | 毎日のチェックリスト本体です。 |
+| `checklist_run_items` | 各タスクのチェック状態です。 |
+| `checklist_item_logs` | 操作履歴です。 |
+| `checklist_templates` | 管理者画面から作るテンプレート本体です。 |
+| `checklist_template_items` | テンプレート内のタスクです。 |
+| `line_accounts` | 旧連携用です。通常は使いません。 |
+| `users` | 旧ユーザー管理用です。通常は使いません。 |
 
-## テンプレートを指定日に入れる
-「テンプレートを挿入」は、テンプレート内のタスクを選んだ日付へまとめて追加する操作です。
+行を削除するより、`status` を `inactive` にする運用を優先してください。削除すると過去の履歴確認が難しくなります。
 
-1. 管理者画面のカレンダーで日付を選ぶ。
-2. 「テンプレートを挿入」を押す。
-3. 使いたいテンプレートを選ぶ。
-4. 挿入する。
-5. 「タスクの管理」に複数タスクが追加されたことを確認する。
-
-## 従業員を追加する
-
-従業員を追加するときは、本人のLINEで一度チェックリストを開いてもらいます。  
-これでシステムがLINEのユーザーIDと表示名を覚えます。
+## 9. 従業員を追加する
 
 1. 従業員にLINE公式アカウントを友だち追加してもらう。
-2. 従業員に `https://liff.line.me/<LIFF_ID>` をLINEアプリ内で開いてもらう。
+2. 従業員にLINEアプリ内で `https://liff.line.me/2009859108-sJ31BCFx` を開いてもらう。
 3. Googleスプレッドシートの `notification_recipients` を開く。
 4. 従業員のLINE表示名が増えていることを確認する。
-5. Apps Scriptで `rebalanceNotificationRecipients` を実行する。
-6. `notification_recipients` の `channel_id` に `notify-01` などが入ったことを確認する。
+5. 対象者の `status` が `active` になっていることを確認する。
+6. Apps Scriptで `rebalanceNotificationRecipients` を実行する。
+7. `notification_recipients.channel_id` に `notify-01` などが入ったことを確認する。
 
-`channel_id` が空のままだと、`0:30` の残りタスク通知は送れません。
+`channel_id` が空の人には `0:30` の未完了通知を送れません。
 
-## 従業員を外す
-
-退職や通知不要になった人を外す手順です。
+## 10. 従業員を外す
 
 1. Googleスプレッドシートの `notification_recipients` を開く。
 2. 対象者の `status` を `inactive` にする。
 3. Apps Scriptで `rebalanceNotificationRecipients` を実行する。
-4. 必要ならLINE公式アカウント側でも友だち・グループの整理をする。
+4. `notification_recipients.channel_id` の割当が更新されたことを確認する。
+5. 必要なら、LINE公式アカウント側でも友だちやグループの整理をする。
 
-行を削除するのではなく、`status` を `inactive` にしてください。  
-削除すると、過去の通知や確認で誰だったか分かりにくくなります。
+## 11. 通知用LINE公式アカウントを増やす
 
-## 通知用LINE公式アカウントを増やす
-
-残りタスク通知は、LINE公式アカウントの無料通数を超えないように分散します。  
-日本のLINE公式アカウント料金例では、コミュニケーションプランの無料メッセージ通数は月200通です。
-
-1アカウントあたりの人数目安です。
+未完了通知は、LINE公式アカウントの無料通数を超えないように複数アカウントへ分散します。
+この運用では、1アカウントあたり月 `200` 通、1アカウントあたり `6` 人を目安にします。
 
 | 人数 | 31日送った場合 | 判定 |
 | --- | ---: | --- |
-| 6人 | 186通 | 安全 |
-| 7人 | 217通 | 超過 |
+| 6人 | 186通 | 目安内 |
+| 7人 | 217通 | 200通を超える |
 
-増設手順です。
+追加手順です。
 
 1. LINE Official Account Managerで新しい公式アカウントを作る。
-2. LINE DevelopersでMessaging APIを有効にする。
-3. 長期チャネルアクセストークンを発行する。
+2. LINE Developersで同じProvider配下にMessaging APIチャネルを作る。
+3. Messaging API設定で長期チャネルアクセストークンを発行する。
 4. Apps ScriptのScript Propertiesに `LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_02` のような名前で保存する。
 5. Googleスプレッドシートの `notification_channels` に1行追加する。
 6. 追加した公式アカウントを、通知を受ける従業員に友だち追加してもらう。
 7. Apps Scriptで `rebalanceNotificationRecipients` を実行する。
-8. `notification_recipients.channel_id` の割当が更新されたことを確認する。
+8. `notification_recipients.channel_id` に新しい `notify-02` などが割り当たったことを確認する。
 
 `notification_channels` に入れる例です。
 
-| 列 | 入れる値の例 |
+| 列 | 入れる値 |
 | --- | --- |
 | `id` | `notify-02` |
 | `store_id` | `store-hashimoto` |
@@ -216,164 +256,261 @@
 | `monthly_limit` | `200` |
 | `recipient_limit` | `6` |
 | `status` | `active` |
-| `created_at` | `2026-04-24T00:00:00Z` |
-| `updated_at` | `2026-04-24T00:00:00Z` |
+| `created_at` | 追加した日時。例: `2026-04-25T00:00:00Z` |
+| `updated_at` | 更新した日時。例: `2026-04-25T00:00:00Z` |
 
-## 送信数を確認する
+## 12. 送信数を確認する
 
 Googleスプレッドシートの `notification_channel_usage` を見ます。
 
 | 列 | 意味 |
 | --- | --- |
-| `channel_id` | どの通知アカウントか |
-| `year_month` | 対象月 |
-| `monthly_limit` | 月の上限 |
-| `local_sent_count` | このシステムが送った数 |
-| `remaining_count` | 残り送信可能数 |
-| `last_synced_at` | 最後に更新された時刻 |
+| `channel_id` | どの通知アカウントか。 |
+| `year_month` | 対象月。 |
+| `monthly_limit` | 月の上限。 |
+| `local_sent_count` | このシステムが送った数。 |
+| `remaining_count` | 残り送信可能数。 |
+| `last_synced_at` | 最後に更新された時刻。 |
+| `error_message` | 更新失敗時の理由。 |
 
-送信数を今すぐ更新したい場合は、Apps Scriptで `syncNotificationChannelUsage` を実行します。
+今すぐ再集計したい場合は、Apps Scriptで `syncNotificationChannelUsage` を実行します。
 
-## 自動処理の確認
+## 13. LINE公式アカウントとLIFFの設定確認
 
-Apps Scriptの「トリガー」画面で確認します。
+この章は、初期構築や再設定のときに使います。日々の運用では毎回触りません。
 
-必要なトリガーです。
+### LINE公式アカウントを作る
 
-| 関数名 | 役割 |
+1. `https://manager.line.biz/` を開く。
+2. LINEアカウントでログインする。
+3. アカウントリストから「作成」を押す。
+4. 店舗や通知用途が分かる名前で公式アカウントを作る。
+5. 作成後、該当アカウントを開く。
+6. 「設定」からMessaging APIを有効化する。
+
+### LINE DevelopersでMessaging APIを確認する
+
+1. `https://developers.line.biz/console/` を開く。
+2. 対象Providerを開く。
+3. Messaging APIチャネルを開く。
+4. 「Channel ID」をScript Propertiesの `LINE_CHANNEL_ID` に入れる。
+5. 「Channel secret」を `LINE_CHANNEL_SECRET` に入れる。
+6. 「Messaging API設定」でチャネルアクセストークンを発行し、`LINE_CHANNEL_ACCESS_TOKEN` に入れる。
+7. 通常は、LINE公式アカウントのリッチメニューからLIFF URLを直接開く設定にする。
+8. Webhookを使う運用にしている場合だけ、Webhook URLに次を設定する。
+
+```text
+https://script.google.com/macros/s/AKfycbwHus8fdYWaLzkL0qrj6mX2rEDBphVlqWA4IAzETnsNXmanUgD5xLiMZZooGkeLI4pbMg/exec?path=/webhook
+```
+
+9. Webhookを使う運用の場合はWebhook利用を有効にする。リッチメニューのURIだけで運用する場合は必須ではありません。
+
+### LINE DevelopersでLIFFを確認する
+
+1. LINE Loginチャネルを開く。
+2. LIFFタブを開く。
+3. LIFF IDが `2009859108-sJ31BCFx` であることを確認する。
+4. Endpoint URLが `https://tapioka0112.github.io/ogawaya/` であることを確認する。
+5. Scopeに `openid` と `profile` が含まれることを確認する。
+6. 必要に応じて、LINE公式アカウントのリッチメニューから `https://liff.line.me/2009859108-sJ31BCFx` を開けるように設定する。
+
+## 14. GAS Script Properties
+
+Apps Script編集画面で「プロジェクトの設定」を開き、「スクリプト プロパティ」を確認します。
+
+| キー | 用途 |
 | --- | --- |
-| `runDailyStart` | 毎日10:30に今日のタスクを作る |
-| `runDailyClosing` | 毎日0:00に自動確認処理をする |
-| `runDailyIncompleteReminder` | 次回0:30に残りタスク通知を送る |
-| `runReminderWatchdog` | 送信漏れを15分おきに補正する |
+| `SPREADSHEET_ID` | 正本データのGoogleスプレッドシートID。 |
+| `LINE_LOGIN_CHANNEL_ID` | LIFFのID token検証に使うLINE Login channel ID。 |
+| `LINE_CHANNEL_ID` | Messaging APIのチャネルID。 |
+| `LINE_CHANNEL_SECRET` | Webhook署名検証に使う秘密値。 |
+| `LINE_CHANNEL_ACCESS_TOKEN` | メイン公式アカウントの送信用アクセストークン。 |
+| `LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01` | 未完了通知用公式アカウント1つ目のアクセストークン。 |
+| `LIFF_ID` | `2009859108-sJ31BCFx`。 |
+| `CHECKLIST_APP_URL` | `https://tapioka0112.github.io/ogawaya/`。 |
+| `FIREBASE_PROJECT_ID` | `owagaya-fd93b`。 |
+| `ADMIN_LOGIN_ID` | 管理者画面のログインID。 |
+| `ADMIN_LOGIN_PASSWORD` | 管理者画面のパスワード。 |
+| `ADMIN_SESSION_TTL_SECONDS` | 管理者ログインの有効秒数。通常 `43200`。 |
+| `ALLOW_ANONYMOUS_ACCESS` | 通常 `false`。閲覧フォールバックを許可する場合だけ `true`。 |
+| `DEBUG_EVENT_SHEET_ENABLED` | 通常 `false`。debug_eventsへ記録したい場合だけ `true`。 |
+| `SPREADSHEET_STATE_CACHE_ENABLED` | 通常 `true`。 |
+| `SPREADSHEET_STATE_CACHE_TTL_SECONDS` | 通常 `300`。 |
+| `SPREADSHEET_STATE_CACHE_CHUNK_SIZE` | 通常 `90000`。 |
 
-`runDailyIncompleteReminder` は毎日作り直される1回限りのトリガーです。  
-見当たらない場合は、Apps Scriptで `installReminderTriggers` を1回実行してください。
+秘密値を変更したら、必ず小さな確認をします。例として管理者ログイン、LINE画面表示、未完了通知の手動実行です。
 
-## Googleスプレッドシートで触ってよい場所
+## 15. GitHub Pagesと設定ファイル
 
-基本は管理者画面を使います。  
-スプレッドシートを直接編集するのは、通知設定や緊急修正のときだけです。
+画面はGitHub Pagesから配信されています。
 
-触ってよいシートです。
-
-| シート | 何をするか |
+| ファイル | 役割 |
 | --- | --- |
-| `stores` | 店舗名の確認 |
-| `notification_channels` | 通知用LINE公式アカウントの追加・停止 |
-| `notification_recipients` | 従業員の通知対象化・停止 |
-| `notification_channel_usage` | 月間送信数の確認 |
+| `pages/index.html` | 従業員画面のHTML。 |
+| `pages/app.js` | 従業員画面の動き。 |
+| `pages/admin.html` | 管理者画面のHTML。 |
+| `pages/admin.js` | 管理者画面の動き。 |
+| `pages/config.json` | GAS API、LIFF、Firebaseの接続先。 |
 
-通常は触らないシートです。
+現行 `pages/config.json` の重要値です。
 
-| シート | 理由 |
+| キー | 現行値 |
 | --- | --- |
-| `checklist_runs` | 毎日のチェックリスト本体です。手で壊すと当日の画面が崩れます。 |
-| `checklist_run_items` | チェック状態の本体です。手で壊すとチェック済み状態が崩れます。 |
-| `checklist_item_logs` | 過去の操作記録です。 |
-| `notifications` | 通知ログです。 |
-| `line_accounts` | 旧連携用です。通常は使いません。 |
-| `users` | 旧ユーザー管理用です。通常は使いません。 |
+| `gasApiBaseUrl` | `https://script.google.com/macros/s/AKfycbwHus8fdYWaLzkL0qrj6mX2rEDBphVlqWA4IAzETnsNXmanUgD5xLiMZZooGkeLI4pbMg/exec` |
+| `liffId` | `2009859108-sJ31BCFx` |
+| `defaultStoreId` | `store-hashimoto` |
+| `enableRealtimeSync` | `true` |
+| `clientFirestoreWriteEnabled` | `true` |
+| `consistencyRefreshSeconds` | `30` |
+| `firebase.projectId` | `owagaya-fd93b` |
 
-タスク追加や削除は、できるだけ管理者画面から行ってください。
+GitHub Pagesの公開元はGitHubのSettingsから確認します。このリポジトリでは `.github/workflows/pages.yml` の `Deploy LIFF Pages` が、`pages/` 配下をGitHub Pagesへ公開します。
 
-## よくあるトラブル
+## 16. Firebaseの確認
+
+Firebase projectは `owagaya-fd93b` です。
+
+確認する場所です。
+
+| 場所 | 確認すること |
+| --- | --- |
+| Authentication | Sign-in methodでAnonymousが有効。 |
+| Firestore Database | データベースが作成済み。 |
+| Firestore Rules | `firebase/firestore.rules` と同じ内容が公開済み。 |
+| Project settings | Web appの `apiKey`, `authDomain`, `projectId`, `appId` が `pages/config.json` と一致。 |
+
+Firestoreで使う場所です。
+
+| パス | 用途 |
+| --- | --- |
+| `stores/{storeId}/runs/{targetDate}/events/*` | チェックやテンプレート挿入をリアルタイム同期するイベント。 |
+| `stores/{storeId}/runs/{targetDate}/snapshots/today` | 初回表示と統計用の当日snapshot。 |
+
+Firestore Rulesは、`events` の読み取りと認証済み作成、`snapshots/today` の読み取りだけを許可します。それ以外は拒否します。
+
+## 17. 初期構築で最低限やること
+
+日々の運用では不要です。環境を作り直すときだけ使います。
+
+1. Googleスプレッドシートを用意する。
+2. Apps ScriptのScript Propertiesに `SPREADSHEET_ID` を入れる。
+3. Apps Scriptで `bootstrapSpreadsheetTemplates` を実行する。
+4. `stores` と `checklist_templates` と `checklist_template_items` を実データに直す。
+5. LINE公式アカウントを作る。
+6. LINE DevelopersでMessaging APIとLINE Login/LIFFを設定する。
+7. Script PropertiesにLINE関連の値を入れる。
+8. `pages/config.json` の値が実環境と一致していることを確認する。
+9. Firebase AuthenticationのAnonymousを有効にする。
+10. Firestore Rulesを公開する。
+11. GASをWebアプリとしてデプロイする。
+12. LINEのWebhook URLとLIFF Endpoint URLを確認する。
+13. LINE公式アカウントのリッチメニューにLIFF URLを設定する。
+14. Apps Scriptで `runDailyStart` を実行し、今日のタスクが開けることを確認する。
+15. Apps Scriptで `installReminderTriggers` を実行する。
+
+## 18. よくあるトラブル
 
 ### チェックリストが表示されない
 
-確認することです。
-
-1. LINEアプリ内で `https://liff.line.me/<LIFF_ID>` を開いているか確認する。
-2. Googleスプレッドシートの `checklist_runs` に今日の行があるか確認する。
-3. 行がなければ、Apps Scriptで `runDailyStart` を実行する。
-4. `checklist_template_items` に有効なタスクがあるか確認する。
+1. LINEアプリ内で `https://liff.line.me/2009859108-sJ31BCFx` を開いているか確認する。
+2. `https://tapioka0112.github.io/ogawaya/` が開けるか確認する。
+3. 今日の運用日が `10:30` 切替で合っているか確認する。
+4. Googleスプレッドシートの `checklist_runs` に今日の行があるか確認する。
+5. 行がなければ、Apps Scriptで `runDailyStart` を実行する。
+6. それでも出ない場合は、Apps Scriptの実行ログを確認する。
 
 ### チェックした人が正しく表示されない
 
-確認することです。
-
 1. LINEアプリから開いているか確認する。
-2. ブラウザだけで開いていないか確認する。
-3. LIFFの権限で `openid` と `profile` が有効か確認する。
-4. もう一度LINEから開き直す。
+2. PCブラウザだけで開いていないか確認する。
+3. LINE DevelopersのLIFF scopeに `openid` と `profile` があるか確認する。
+4. LIFF画面を閉じて開き直す。
 
 ### 管理者画面にログインできない
 
-確認することです。
-
 1. Apps ScriptのScript Propertiesを開く。
-2. `ADMIN_LOGIN_ID` が正しいか確認する。
-3. `ADMIN_LOGIN_PASSWORD` が正しいか確認する。
+2. `ADMIN_LOGIN_ID` を確認する。
+3. `ADMIN_LOGIN_PASSWORD` を確認する。
 4. 前後に余計な空白がないか確認する。
+5. それでも失敗する場合は、Apps Scriptの実行ログで `/api/admin/login` のエラーを見る。
+
+### タスクを追加したのに他の端末へ出ない
+
+1. 管理者画面で同じ日付を選び直す。
+2. 従業員画面を閉じて開き直す。
+3. Firebase AuthenticationのAnonymousが有効か確認する。
+4. Firestore Rulesが現行 `firebase/firestore.rules` と同じか確認する。
+5. GAS APIが成功しているかApps Scriptの実行ログを見る。
 
 ### 0:30の通知が届かない
 
-確認することです。
-
 1. `notification_recipients` に対象者がいるか確認する。
 2. 対象者の `status` が `active` か確認する。
-3. 対象者の `channel_id` が空ではないか確認する。
-4. `notification_channels` の `status` が `active` か確認する。
+3. 対象者の `channel_id` が空でないか確認する。
+4. `notification_channels` の対象行が `active` か確認する。
 5. Script Propertiesに `LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01` などがあるか確認する。
-6. Apps Scriptの実行ログで `runDailyIncompleteReminder` の失敗を確認する。
-7. `notifications` の `status` と `error_message` を確認する。
-8. `installReminderTriggers` を1回実行し直す。
-
-### 画面が古いまま変わらない
-
-確認することです。
-
-1. スマホのLINE画面を閉じて開き直す。
-2. それでも変わらない場合は、GitHub Actionsの `Deploy LIFF Pages` が成功しているか確認する。
-3. 失敗している場合は、開発者に連絡する。
+6. Apps Scriptのトリガーに `runDailyIncompleteReminder` と `runReminderWatchdog` があるか確認する。
+7. なければ `installReminderTriggers` を実行する。
+8. `notifications` の `status` と `error_message` を確認する。
 
 ### Firebase設定エラーが出る
 
-確認することです。
-
 1. Firebase Consoleを開く。
-2. Firestore Databaseが作成済みか確認する。
-3. Firebase Authenticationの匿名ログインが有効か確認する。
-4. Firestore Rulesに `docs/operations/firestore.rules` の内容が公開されているか確認する。
-5. `pages/config.json` のFirebase設定が現在のFirebaseプロジェクトと一致しているか開発者に確認する。
+2. projectが `owagaya-fd93b` であることを確認する。
+3. Firestore Databaseが作成済みか確認する。
+4. AuthenticationのAnonymousが有効か確認する。
+5. Firestore Rulesが公開済みか確認する。
+6. `pages/config.json` のFirebase設定とFirebase ConsoleのWeb app設定が一致するか確認する。
 
-## 触らない方がよいもの
+### `snapshotAuthorizationStatus=REQUIRED` が出る
 
-以下は、分からない状態で触るとシステム全体が止まります。
+1. LIFF画面に `?debugTiming=1` を付けて開く。
+2. 表示された `snapshotAuthorizationUrl` をコピーする。
+3. GASをデプロイしたGoogleアカウントでURLを開く。
+4. Firestore snapshot保存に必要な権限を承認する。
+5. LIFF画面を開き直し、`snapshotSync=ok` になることを確認する。
+
+## 19. 触らない方がよいもの
 
 | 場所 | 理由 |
 | --- | --- |
-| Apps Scriptのコード | 保存・デプロイすると本番に影響します。 |
-| GitHubのコード | GitHub PagesやGAS反映に影響します。 |
+| Apps Scriptのコード | 保存やデプロイで本番に影響します。 |
+| GitHubのコード | GitHub PagesとGAS反映に影響します。 |
 | Firebase Rules | 間違えると同期が止まるか、不要に公開されます。 |
 | Script Propertiesのトークン | 消すとLINE通知や認証が止まります。 |
 | `checklist_run_items` のID列 | チェック状態の紐付けが壊れます。 |
 
-## 月1回の確認
+## 20. 月1回の確認
 
-月初または月末に確認します。
-
-1. `notification_channel_usage` の `remaining_count` を確認する。
-2. 残数が少ない通知アカウントがあれば、公式アカウント追加を検討する。
-3. 退職者が `notification_recipients` に残っていないか確認する。
+1. `notification_channel_usage.remaining_count` を確認する。
+2. 残数が少ない通知アカウントがあれば、通知用LINE公式アカウントを増やす。
+3. 退職者が `notification_recipients` に `active` のまま残っていないか確認する。
 4. テンプレートが実際の業務とズレていないか確認する。
-5. 管理者IDとパスワードの管理者が分かる状態になっているか確認する。
+5. 管理者IDとパスワードの保管者が分かる状態になっているか確認する。
+6. GitHub PagesとGAS API URLが現行と一致しているか確認する。
 
-## 開発者に連絡する条件
+## 21. 開発者に連絡する条件
 
-以下は運用担当者だけで直さず、開発者に連絡してください。
+次の場合は、運用担当者だけで直さず開発者に連絡してください。
 
-1. GASの実行ログで赤いエラーが続く。
-2. GitHub Actionsが失敗している。
-3. LIFF画面が全員で開けない。
-4. Spreadsheetの列を間違えて消した。
-5. Firebase Rulesを変更してから画面同期が止まった。
-6. LINE DevelopersやMessaging APIの設定画面で迷った。
+1. Apps Scriptの実行ログで赤いエラーが続く。
+2. GitHub Pagesの画面が全員で開けない。
+3. Firebase Rulesを変更してから同期が止まった。
+4. Spreadsheetの列やIDを消した。
+5. LINE Developersのチャネル設定を変更した後に認証できない。
+6. `pages/config.json` を変更する必要がある。
 
-## 公式情報
+## 22. 公式情報
 
-料金やトリガーの仕様は変更されることがあります。最新情報は公式ページで確認してください。
+外部サービスの画面や料金は変わります。迷ったら以下の公式情報を確認してください。
 
-- LINE Messaging APIの料金: https://developers.line.biz/ja/docs/messaging-api/pricing/
-- Apps Scriptのインストール型トリガー: https://developers.google.com/apps-script/guides/triggers/installable
-- Apps Script ClockTriggerBuilder: https://developers.google.com/apps-script/reference/script/clock-trigger-builder
+- LINE LIFFアプリ追加: https://developers.line.biz/en/docs/liff/registering-liff-apps/
+- LINE LIFF開発: https://developers.line.biz/en/docs/liff/developing-liff-apps
+- LINE Messaging API概要: https://developers.line.biz/en/docs/messaging-api/overview/
+- LINE Messaging API Webhook: https://developers.line.biz/en/docs/messaging-api/receiving-messages/
+- LINE公式アカウント管理画面: https://manager.line.biz/
+- LINE Official Account Manager基本操作: https://www.lycbiz.com/jp/manual/OfficialAccountRestaurant/basic/
+- Apps Script Webアプリ: https://developers.google.com/apps-script/guides/web
+- Apps Scriptデプロイ: https://developers.google.com/apps-script/concepts/deployments
+- Firebase Security Rules管理: https://firebase.google.com/docs/rules/manage-deploy
+- GitHub Pages公開元設定: https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site
