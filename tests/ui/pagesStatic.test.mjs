@@ -9,7 +9,7 @@ test('GitHub Pages 用 LIFF 画面は必要スクリプトと要素を持つ', a
   assert.doesNotMatch(html, /<script src="https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js"><\/script>/);
   assert.doesNotMatch(html, /<script src="https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-app-compat\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" href="\.\/style\.css\?v=period-window-20260426" \/>/);
-  assert.match(html, /<script src="\.\/app\.js\?v=period-sync-fix-20260426" defer><\/script>/);
+  assert.match(html, /<script src="\.\/app\.js\?v=period-api-refresh-fix-20260426" defer><\/script>/);
   assert.match(appJs, /var LIFF_SDK_URL = 'https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js';/);
   assert.match(appJs, /firebase-app-compat\.js/);
   assert.match(appJs, /firebase-auth-compat\.js/);

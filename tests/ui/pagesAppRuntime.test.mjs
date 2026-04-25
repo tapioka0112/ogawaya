@@ -1077,6 +1077,174 @@ test('GitHub Pages app は古い Firestore snapshot で端末キャッシュの�
   );
 });
 
+test('GitHub Pages app は GAS API再取得で snapshot の期間タスクを消さない', async () => {
+  const dailyItem = {
+    id: 'run-item-daily',
+    templateItemId: 'tmpl-item-daily',
+    title: '厨房内床清掃',
+    description: '',
+    period: 'daily',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const weeklyItem = {
+    id: 'run-item-weekly',
+    templateItemId: 'tmpl-item-weekly',
+    title: 'バーナー・コンロの清掃',
+    description: '',
+    period: 'weekly',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  let todayRequestCount = 0;
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'app'
+        }
+      });
+    }
+    if (String(url).startsWith('https://firestore.googleapis.com/')) {
+      if (String(url).includes('/snapshots/')) {
+        return firestoreRestDocument(createChecklistPayload([dailyItem, weeklyItem]));
+      }
+      return response({ documents: [] });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      todayRequestCount += 1;
+      return response(createChecklistPayload(dailyItem));
+    }
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    Date: createFixedDate('2026-04-24T02:00:00Z'),
+    firebase: null
+  });
+
+  await wait(120);
+  document.elements['period-tab-weekly'].click();
+  await wait(10);
+
+  assert.equal(todayRequestCount, 1);
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'period', 'weekly')?.dataset.period,
+    'weekly',
+    JSON.stringify({
+      texts: flattenElements(document.elements['checklist-items']).map((node) => node.textContent).filter(Boolean)
+    })
+  );
+  assert.ok(
+    flattenElements(document.elements['checklist-items']).some((node) => String(node.textContent || '').includes('バーナー・コンロの清掃'))
+  );
+});
+
+test('GitHub Pages app の API再取得は同じ期間内の欠落 item を削除として反映する', async () => {
+  const dailyItem = {
+    id: 'run-item-daily',
+    templateItemId: 'tmpl-item-daily',
+    title: '厨房内床清掃',
+    description: '',
+    period: 'daily',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const weeklyKeptItem = {
+    id: 'run-item-weekly-kept',
+    templateItemId: 'tmpl-item-weekly-kept',
+    title: 'バーナー・コンロの清掃',
+    description: '',
+    period: 'weekly',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const weeklyDeletedItem = {
+    id: 'run-item-weekly-deleted',
+    templateItemId: 'tmpl-item-weekly-deleted',
+    title: '削除済み週間タスク',
+    description: '',
+    period: 'weekly',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'app'
+        }
+      });
+    }
+    if (String(url).startsWith('https://firestore.googleapis.com/')) {
+      if (String(url).includes('/snapshots/')) {
+        return firestoreRestDocument(createChecklistPayload([dailyItem, weeklyKeptItem, weeklyDeletedItem]));
+      }
+      return response({ documents: [] });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      return response(createChecklistPayload([dailyItem, weeklyKeptItem]));
+    }
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    Date: createFixedDate('2026-04-24T02:00:00Z'),
+    firebase: null
+  });
+
+  await wait(120);
+  document.elements['period-tab-weekly'].click();
+  await wait(10);
+
+  const visibleTexts = flattenElements(document.elements['checklist-items']).map((node) => String(node.textContent || ''));
+  assert.ok(visibleTexts.some((text) => text.includes('バーナー・コンロの清掃')));
+  assert.equal(visibleTexts.some((text) => text.includes('削除済み週間タスク')), false);
+});
+
 test('GitHub Pages app は debugTiming=1 で起動時間ウォーターフォールを描画する', async () => {
   const snapshotItem = {
     id: 'run-item-001',

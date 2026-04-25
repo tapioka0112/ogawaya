@@ -2941,13 +2941,18 @@
     return !localStoreId || !serverStoreId || localStoreId === serverStoreId;
   }
 
-  function appendMissingLocalItems(localItems, serverItems) {
+  function appendMissingLocalItemsFromMissingPeriods(localItems, serverItems) {
     var serverItemIds = {};
+    var serverPeriods = {};
     serverItems.forEach(function (item) {
       serverItemIds[item.id] = true;
+      serverPeriods[normalizeTaskPeriod(item.period)] = true;
     });
     localItems.forEach(function (item) {
       if (serverItemIds[item.id]) {
+        return;
+      }
+      if (serverPeriods[normalizeTaskPeriod(item.period)]) {
         return;
       }
       serverItemIds[item.id] = true;
@@ -2970,7 +2975,7 @@
       mergeOptions.preserveMissingItems === true &&
       shouldPreserveMissingChecklistItems(state.checklist, nextChecklist)
     ) {
-      appendMissingLocalItems(state.checklist.items, nextItems);
+      appendMissingLocalItemsFromMissingPeriods(state.checklist.items, nextItems);
     }
     nextChecklist.items = nextItems.map(function (serverItem) {
       var localItem = localItems[serverItem.id];
@@ -3528,7 +3533,8 @@
     }
     applyChecklistPayload(checklist, {
       restartSync: refreshOptions.restartSync !== false,
-      source: refreshOptions.source || 'gas.api'
+      source: refreshOptions.source || 'gas.api',
+      preserveMissingItems: refreshOptions.preserveMissingItems === true
     });
     clearLiffSessionRenewalAttempt();
   }
@@ -3544,7 +3550,7 @@
       if (typeof document.visibilityState === 'string' && document.visibilityState !== 'visible') {
         return;
       }
-      refreshChecklist({ restartSync: false }).catch(function (error) {
+      refreshChecklist({ restartSync: false, preserveMissingItems: true }).catch(function (error) {
         if (renewLiffSessionForAuthError(error)) {
           return;
         }
@@ -3555,7 +3561,7 @@
     if (!state.visibilityHandlerBound) {
       document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'visible') {
-          refreshChecklist({ restartSync: false }).catch(function (error) {
+          refreshChecklist({ restartSync: false, preserveMissingItems: true }).catch(function (error) {
             if (renewLiffSessionForAuthError(error)) {
               return;
             }
@@ -3643,7 +3649,8 @@
           restartSync: false,
           source: 'gas.api.background',
           timingName: 'gas.today.background',
-          timingLabel: 'GAS API再取得'
+          timingLabel: 'GAS API再取得',
+          preserveMissingItems: true
         }).catch(function (error) {
           if (renewLiffSessionForAuthError(error)) {
             return;
