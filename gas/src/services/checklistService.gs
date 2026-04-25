@@ -682,7 +682,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
     function writeChecklistSnapshot(run, items) {
       if (!snapshotClient) {
-        return null;
+        return {
+          status: 'disabled'
+        };
       }
       var store = repository.findStoreById(run.store_id);
       ns.assert(store, 'config_error', '店舗が見つかりません', 500);
@@ -700,7 +702,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           durationMs: nowMillis() - startedAt,
           responseCode: result.responseCode
         });
-        return result;
+        return {
+          status: 'ok',
+          responseCode: result.responseCode
+        };
       } catch (error) {
         ns.logEvent('warn', 'firestore.snapshot.write.failed', {
           storeId: store.id,
@@ -710,7 +715,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
           message: error && error.message ? String(error.message) : ''
         });
-        return null;
+        return {
+          status: 'error',
+          code: error && error.code ? String(error.code) : '',
+          statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
+          message: error && error.message ? String(error.message) : ''
+        };
       }
     }
 
@@ -1278,7 +1288,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var response = buildChecklistResponse(repository, currentUser, run, items);
         var buildMs = nowMillis() - buildStartedAt;
         var snapshotStartedAt = nowMillis();
-        writeChecklistSnapshot(run, items);
+        var snapshotSync = writeChecklistSnapshot(run, items);
+        response.snapshotSync = snapshotSync;
         var snapshotMs = nowMillis() - snapshotStartedAt;
         ns.logEvent('info', 'api.today.breakdown', {
           authMs: authMs,

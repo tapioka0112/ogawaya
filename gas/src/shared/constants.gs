@@ -30,6 +30,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     '未完了一覧',
     'ヘルプ'
   ];
+  ns.DEFAULT_FIREBASE_PROJECT_ID = 'owagaya-fd93b';
   ns.REQUIRED_OAUTH_SCOPES = [
     'https://www.googleapis.com/auth/datastore',
     'https://www.googleapis.com/auth/script.external_request',

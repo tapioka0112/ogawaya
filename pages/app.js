@@ -852,6 +852,18 @@
     }
   }
 
+  function buildSnapshotSyncTimingDetails(checklist) {
+    var sync = checklist && checklist.snapshotSync;
+    if (!sync || typeof sync !== 'object') {
+      return {};
+    }
+    return {
+      snapshotSync: sync.status || '',
+      snapshotHttpStatus: sync.responseCode || sync.statusCode || '',
+      snapshotMessage: sync.message || ''
+    };
+  }
+
   function recordFirstRenderTiming(source) {
     if (!state.timing.enabled || state.timing.firstRenderRecorded) {
       return;
@@ -3252,13 +3264,18 @@
 
   async function refreshChecklist(options) {
     var refreshOptions = options || {};
-    var checklist = await measureTiming(
+    var marker = beginTiming(
       refreshOptions.timingName || 'gas.today',
-      refreshOptions.timingLabel || 'GAS API today',
-      function () {
-        return state.api.getTodayChecklist(state.idToken, state.accessToken);
-      }
+      refreshOptions.timingLabel || 'GAS API today'
     );
+    var checklist;
+    try {
+      checklist = await state.api.getTodayChecklist(state.idToken, state.accessToken);
+      endTiming(marker, Object.assign({ status: 'ok' }, buildSnapshotSyncTimingDetails(checklist)));
+    } catch (error) {
+      endTiming(marker, buildErrorTimingDetails(error));
+      throw error;
+    }
     applyChecklistPayload(checklist, {
       restartSync: refreshOptions.restartSync !== false,
       source: refreshOptions.source || 'gas.api'

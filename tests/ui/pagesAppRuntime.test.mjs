@@ -909,6 +909,67 @@ test('GitHub Pages app は debugTiming=1 で起動時間ウォーターフォー
   assert.ok(flattenElements(document.body).some((node) => node.textContent === '初回描画まで'));
 });
 
+test('GitHub Pages app は GAS API の snapshot 同期状態を debugTiming に表示する', async () => {
+  const item = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: false,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: null
+      });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      return response(Object.assign(createChecklistPayload(item), {
+        snapshotSync: {
+          status: 'ok',
+          responseCode: 200
+        }
+      }));
+    }
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    Date: createFixedDate('2026-04-24T02:00:00Z'),
+    location: {
+      href: 'https://example.test/?debugTiming=1',
+      search: '?debugTiming=1'
+    },
+    console: {
+      debug() {},
+      error() {},
+      log() {},
+      table() {},
+      warn() {}
+    }
+  });
+
+  await wait(80);
+
+  assert.ok(
+    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotSync=ok'))
+  );
+});
+
 test('GitHub Pages app は古い再取得レスポンスで新しいチェック状態を戻さない', async () => {
   const initialItem = {
     id: 'run-item-001',

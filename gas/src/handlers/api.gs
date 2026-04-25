@@ -244,7 +244,11 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       adminSessionTtlSeconds: options.adminSessionTtlSeconds || scriptProperties.getProperty('ADMIN_SESSION_TTL_SECONDS'),
       snapshotClient: typeof options.snapshotClient !== 'undefined'
         ? options.snapshotClient
-        : createFirestoreSnapshotClient(options.firebaseProjectId || scriptProperties.getProperty('FIREBASE_PROJECT_ID'))
+        : createFirestoreSnapshotClient(
+          options.firebaseProjectId
+          || scriptProperties.getProperty('FIREBASE_PROJECT_ID')
+          || ns.DEFAULT_FIREBASE_PROJECT_ID
+        )
     });
     var webhookHandler = ns.createWebhookHandler({
       appBaseUrl: appBaseUrl,
