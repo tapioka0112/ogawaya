@@ -10,6 +10,7 @@
 | 従業員がLINEで開く画面 | `https://liff.line.me/2009859108-sJ31BCFx` |
 | 従業員用Web画面 | `https://tapioka0112.github.io/ogawaya/` |
 | 管理者画面 | `https://tapioka0112.github.io/ogawaya/admin.html` |
+| Googleスプレッドシート | `https://docs.google.com/spreadsheets/d/1VBTZaLtSi1FZQnWG-zIDQ1GFpoHilAUpf1R7xcllLP8/edit?gid=2082526106#gid=2082526106` |
 | GitHubリポジトリ | `https://github.com/tapioka0112/ogawaya` |
 | GitHub Pages設定 | `https://github.com/tapioka0112/ogawaya/settings/pages` |
 | Apps Script編集画面 | `https://script.google.com/d/1q7LLKLs4l_mH2gE9VmaxdX0Ilrbt9BLuOSTZXlOZIPxukh7FH7zHeMHd/edit` |
@@ -19,13 +20,7 @@
 | LINE Official Account Manager | `https://manager.line.biz/` |
 | LINE Developers Console | `https://developers.line.biz/console/` |
 
-GoogleスプレッドシートのURLは、Apps ScriptのScript Propertiesにある `SPREADSHEET_ID` を使って次の形で開きます。
-
-```text
-https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit
-```
-
-`<SPREADSHEET_ID>` は秘密情報ではありませんが、運用中の本番データに直結します。社外へ共有しないでください。
+Googleスプレッドシートは運用中の本番データに直結します。URLを社外へ共有しないでください。
 
 ## 2. このシステムの基本
 
