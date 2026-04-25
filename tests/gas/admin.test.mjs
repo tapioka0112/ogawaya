@@ -441,6 +441,89 @@ test('管理者画面向け API でログイン後にタスク作成・挿入・
   assert.equal(deleteItem.statusCode, 200);
 });
 
+test('管理者の日付別タスク一覧は従業員ホームと同じ期間内タスクを返し削除できる', async () => {
+  const app = await createAdminApp();
+  const token = loginAsAdmin(app);
+  app.repository.createChecklistRun({
+    id: 'run-week',
+    template_id: 'tmpl-001',
+    store_id: 'store-001',
+    target_date: '2026-04-19',
+    status: 'closed',
+    notified_at: '2026-04-19T01:30:00Z',
+    closed_at: '2026-04-20T01:00:00Z',
+    created_at: '2026-04-19T01:30:00Z'
+  });
+  app.repository.createChecklistRun({
+    id: 'run-month',
+    template_id: 'tmpl-001',
+    store_id: 'store-001',
+    target_date: '2026-04-01',
+    status: 'closed',
+    notified_at: '2026-04-01T01:30:00Z',
+    closed_at: '2026-04-02T01:00:00Z',
+    created_at: '2026-04-01T01:30:00Z'
+  });
+  app.repository.createRunItems([
+    {
+      id: 'run-item-weekly',
+      run_id: 'run-week',
+      template_item_id: 'tmpl-item-002',
+      title: '週間確認',
+      period: 'weekly',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-19T01:30:00Z'
+    },
+    {
+      id: 'run-item-monthly',
+      run_id: 'run-month',
+      template_item_id: 'tmpl-item-monthly',
+      title: '月間確認',
+      period: 'monthly',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-01T01:30:00Z'
+    }
+  ]);
+
+  const adminRun = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/admin/runs/2026-04-21',
+    query: { adminToken: token },
+    body: {}
+  });
+  const employeeRun = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/today',
+    query: { idToken: 'valid-manager' },
+    body: {}
+  });
+
+  assert.equal(adminRun.statusCode, 200);
+  assert.equal(employeeRun.statusCode, 200);
+  assert.deepEqual(
+    adminRun.body.checklist.items.map((item) => [item.id, item.period]),
+    employeeRun.body.items.map((item) => [item.id, item.period])
+  );
+
+  const deleteCarriedWeekly = app.handleApiRequest({
+    method: 'DELETE',
+    path: '/api/admin/runs/2026-04-21/items/run-item-weekly',
+    query: { adminToken: token },
+    body: {}
+  });
+
+  assert.equal(deleteCarriedWeekly.statusCode, 200);
+  assert.equal(app.repository.findRunItemById('run-item-weekly'), null);
+});
+
 test('管理者テンプレート一覧は挿入用にテンプレート項目を返す', async () => {
   const app = await createAdminApp();
   const token = loginAsAdmin(app);

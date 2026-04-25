@@ -1734,7 +1734,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var store = repository.findStoreById(session.storeId);
         ns.assert(store, 'config_error', '店舗が見つかりません', 500);
         var run = repository.findRunByStoreAndDate(session.storeId, targetDate);
-        var items = run ? repository.listRunItems(run.id) : [];
+        var items = listHomeRunItemsForStore(repository, session.storeId, targetDate, run);
         return {
           checklist: buildAdminRunResponse(store, targetDate, run, items)
         };
@@ -1856,7 +1856,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var run = repository.findRunById(runItem.run_id);
         ns.assert(run, 'not_found', '対象チェックリストが見つかりません', 404);
         ns.assert(run.store_id === session.storeId, 'forbidden', '所属外のタスクは削除できません', 403);
-        ns.assert(run.target_date === targetDate, 'invalid_request', '選択日と異なるタスクは削除できません', 400);
+        ns.assert(
+          run.target_date === targetDate || isRunItemVisibleOnTargetDate(runItem, run.target_date, targetDate),
+          'invalid_request',
+          '選択日に表示されないタスクは削除できません',
+          400
+        );
 
         var allRunItems = repository.listTable('checklist_run_items');
         var filteredRunItems = allRunItems.filter(function (item) {
@@ -1865,6 +1870,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         ns.assert(filteredRunItems.length !== allRunItems.length, 'not_found', '削除対象のタスクが見つかりません', 404);
         repository.replaceTable('checklist_run_items', filteredRunItems);
         writeRunAndCurrentSnapshots(run);
+        if (targetDate !== run.target_date && repository.findRunByStoreAndDate(run.store_id, targetDate)) {
+          writeChecklistSnapshotForTargetDate(run.store_id, targetDate);
+        }
         return {
           deletedRunItemId: runItemId
         };
