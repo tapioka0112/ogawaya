@@ -142,4 +142,17 @@ test('非IT担当者向けの全体運用手順が存在する', async () => {
   ]) {
     assert.match(manual, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
+
+  for (const imagePath of [
+    './assets/employee-home.png',
+    './assets/employee-stats.png',
+    './assets/employee-debug-waterfall.png',
+    './assets/admin-login.png',
+    './assets/admin-task-management.png',
+    './assets/admin-template-insert.png'
+  ]) {
+    assert.match(manual, new RegExp(imagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    const image = await readFile(`docs/operations/${imagePath.replace('./', '')}`);
+    assert.ok(image.length > 0);
+  }
 });
