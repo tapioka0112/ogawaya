@@ -359,6 +359,19 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       method = query._method;
       delete query._method;
     }
+    var requestIdToken = query.idToken || query.authToken || (body && (body.idToken || body.authToken));
+    if (!query.idToken && requestIdToken) {
+      query.idToken = requestIdToken;
+    }
+    if (query.authToken) {
+      delete query.authToken;
+    }
+    if (body && body.idToken) {
+      delete body.idToken;
+    }
+    if (body && body.authToken) {
+      delete body.authToken;
+    }
     delete query.path;
     return {
       method: ns.normalizeMethod(method),

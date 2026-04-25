@@ -74,7 +74,7 @@
 
       async function request(method, path, idToken, body, query) {
         var queryParams = {};
-        var requestBody = body || {};
+        var requestBody = Object.assign({}, body || {});
 
         if (idToken) {
           queryParams.idToken = idToken;
@@ -93,12 +93,17 @@
           return ensureSuccessPayload(bridgePayload, 200);
         }
 
+        if (idToken) {
+          delete queryParams.idToken;
+          requestBody.authToken = idToken;
+        }
+
         var actualMethod = method;
         var url = normalizedBaseUrl + path;
         var options = {
           method: method
         };
-        if (method === 'PUT' || method === 'DELETE') {
+        if ((method === 'GET' && idToken) || method === 'PUT' || method === 'DELETE') {
           actualMethod = 'POST';
           queryParams._method = method;
         }

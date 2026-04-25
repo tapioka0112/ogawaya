@@ -124,6 +124,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
         var response = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify', {
           method: 'post',
+          muteHttpExceptions: true,
           payload: {
             id_token: idToken,
             client_id: channelId

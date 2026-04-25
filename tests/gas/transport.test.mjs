@@ -55,6 +55,66 @@ test('GET の _method と _payload は API request として復元される', as
   });
 });
 
+test('POST body の idToken は query に復元される', async () => {
+  const runtime = await loadGasRuntime();
+  const request = runtime.Ogawaya.extractRequest({
+    parameter: {
+      path: 'api/checklists/today',
+      _method: 'GET'
+    },
+    postData: {
+      contents: JSON.stringify({
+        idToken: 'valid-pt'
+      })
+    }
+  }, 'POST');
+
+  assert.equal(request.method, 'GET');
+  assert.equal(request.path, '/api/checklists/today');
+  assert.deepEqual(request.query, { idToken: 'valid-pt' });
+  assert.deepEqual(request.body, {});
+});
+
+test('POST body の idToken は通常 POST API でも query に復元される', async () => {
+  const runtime = await loadGasRuntime();
+  const request = runtime.Ogawaya.extractRequest({
+    parameter: {
+      path: 'api/checklist-items/run-item-001/check'
+    },
+    postData: {
+      contents: JSON.stringify({
+        idToken: 'valid-pt',
+        comment: '確認済み'
+      })
+    }
+  }, 'POST');
+
+  assert.equal(request.method, 'POST');
+  assert.equal(request.path, '/api/checklist-items/run-item-001/check');
+  assert.deepEqual(request.query, { idToken: 'valid-pt' });
+  assert.deepEqual(request.body, { comment: '確認済み' });
+});
+
+test('POST body の authToken は query.idToken に復元される', async () => {
+  const runtime = await loadGasRuntime();
+  const request = runtime.Ogawaya.extractRequest({
+    parameter: {
+      path: 'api/checklists/today',
+      _method: 'GET'
+    },
+    postData: {
+      contents: JSON.stringify({
+        authToken: 'valid-pt'
+      })
+    }
+  }, 'POST');
+
+  assert.equal(request.method, 'GET');
+  assert.equal(request.path, '/api/checklists/today');
+  assert.deepEqual(request.query, { idToken: 'valid-pt' });
+  assert.deepEqual(request.body, {});
+});
+
 test('GET の不正な _payload は invalid_request として 400 を返す', async () => {
   const runtime = await loadGasRuntime();
 

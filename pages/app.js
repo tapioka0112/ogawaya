@@ -322,22 +322,34 @@
     var defaultStoreId = String(options && options.defaultStoreId ? options.defaultStoreId : '');
     var useFunctionsApi = normalizedFunctionsBaseUrl !== '';
 
+    function buildLegacyBody(idToken, body) {
+      var requestBody = Object.assign({}, body || {});
+      if (idToken) {
+        requestBody.authToken = idToken;
+      }
+      return requestBody;
+    }
+
     async function requestLegacyGas(method, path, idToken, body, queryExtras) {
       var query = {
         path: String(path || '').replace(/^\/+/, '')
       };
-      if (idToken) {
-        query.idToken = idToken;
-      }
       Object.keys(queryExtras || {}).forEach(function (key) {
         query[key] = queryExtras[key];
       });
 
+      var actualMethod = method;
+      var requestBody = buildLegacyBody(idToken, body);
       var options = {
-        method: method
+        method: actualMethod
       };
-      if (method !== 'GET') {
-        options.body = JSON.stringify(body || {});
+      if (method === 'GET' && idToken) {
+        actualMethod = 'POST';
+        query._method = 'GET';
+        options.method = actualMethod;
+      }
+      if (actualMethod !== 'GET') {
+        options.body = JSON.stringify(requestBody);
       }
 
       var response = await fetch(appendQuery(normalizedGasBaseUrl, query), options);
@@ -2135,10 +2147,15 @@
     if (!url) {
       return null;
     }
-    return measureTiming('firestore.snapshot.rest', 'Firestore snapshot REST', async function () {
+    var marker = beginTiming('firestore.snapshot.rest', 'Firestore snapshot REST', {
+      storeId: storeId,
+      targetDate: targetDate
+    });
+    try {
       var response = await fetch(url, { cache: 'no-store' });
       if (response.status === 404) {
         state.lastSnapshotSource = 'snapshot.none';
+        endTiming(marker, { status: 'ok', result: 'not_found', httpStatus: response.status });
         return null;
       }
       if (!response.ok) {
@@ -2146,29 +2163,42 @@
       }
       var payload = await response.json();
       state.lastSnapshotSource = 'snapshot.rest';
+      endTiming(marker, { status: 'ok', result: 'found', httpStatus: response.status });
       return normalizeChecklistPayload(decodeFirestoreRestFields(payload.fields || {}));
-    }, {
-      storeId: storeId,
-      targetDate: targetDate
-    });
+    } catch (error) {
+      endTiming(marker, {
+        status: 'error',
+        message: error && error.message ? String(error.message) : 'error'
+      });
+      throw error;
+    }
   }
 
   async function loadChecklistFromSnapshotSdk(storeId, targetDate) {
     if (!initializeRealtimeClient()) {
       return null;
     }
-    return measureTiming('firestore.snapshot.sdk', 'Firestore snapshot SDK', async function () {
-      var doc = await buildSnapshotDocRef(storeId, targetDate).get();
-      if (!doc.exists) {
-        state.lastSnapshotSource = 'snapshot.none';
-        return null;
-      }
-      state.lastSnapshotSource = 'snapshot.sdk';
-      return normalizeChecklistPayload(doc.data() || {});
-    }, {
+    var marker = beginTiming('firestore.snapshot.sdk', 'Firestore snapshot SDK', {
       storeId: storeId,
       targetDate: targetDate
     });
+    try {
+      var doc = await buildSnapshotDocRef(storeId, targetDate).get();
+      if (!doc.exists) {
+        state.lastSnapshotSource = 'snapshot.none';
+        endTiming(marker, { status: 'ok', result: 'not_found' });
+        return null;
+      }
+      state.lastSnapshotSource = 'snapshot.sdk';
+      endTiming(marker, { status: 'ok', result: 'found' });
+      return normalizeChecklistPayload(doc.data() || {});
+    } catch (error) {
+      endTiming(marker, {
+        status: 'error',
+        message: error && error.message ? String(error.message) : 'error'
+      });
+      throw error;
+    }
   }
 
   async function loadChecklistFromRemoteSnapshot(storeId, targetDate) {

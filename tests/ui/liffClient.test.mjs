@@ -867,12 +867,15 @@ test('createApi は checklist 操作と履歴 API を呼び分ける', async () 
   await api.uncheckItem('token', 'run-item-001', { reason: '再確認' });
   await api.getTodayIncomplete('token');
 
-  assert.equal(calls[0].url, 'https://example.com/exec/api/checklist-items/run-item-001/check?idToken=token');
+  assert.equal(calls[0].url, 'https://example.com/exec/api/checklist-items/run-item-001/check');
   assert.equal(calls[0].options.method, 'POST');
-  assert.equal(calls[1].url, 'https://example.com/exec/api/checklist-items/run-item-001/uncheck?idToken=token');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { comment: '確認済み', authToken: 'token' });
+  assert.equal(calls[1].url, 'https://example.com/exec/api/checklist-items/run-item-001/uncheck');
   assert.equal(calls[1].options.method, 'POST');
-  assert.equal(calls[2].url, 'https://example.com/exec/api/checklists/today/incomplete?idToken=token');
-  assert.equal(calls[2].options.method, 'GET');
+  assert.deepEqual(JSON.parse(calls[1].options.body), { reason: '再確認', authToken: 'token' });
+  assert.equal(calls[2].url, 'https://example.com/exec/api/checklists/today/incomplete?_method=GET');
+  assert.equal(calls[2].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[2].options.body), { authToken: 'token' });
 });
 
 test('チェック操作で UI と未完了一覧を更新する', async () => {

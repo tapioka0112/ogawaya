@@ -8,7 +8,7 @@
 - 初期版は `1ユーザー = 1店舗` 前提で運用し、複数店舗の横断閲覧は扱いません。
 - ロールは `part_time / manager / admin` を使い、履歴閲覧は同一店舗の認証済みユーザーに許可します。
 - `POST /api/link` は `employeeCode + passcode` のみを受け付け、`lineUserId` は LIFF 認証コンテキストから取得します。
-- GAS Web App ではヘッダーが `doPost(e)` に露出しないため、LIFF の `idToken` と Webhook 署名はクエリ経由で入口に渡し、サーバー側検証に回します。
+- GAS Web App ではヘッダーが `doPost(e)` に露出しないため、LIFF の `idToken` は POST body の `authToken` で入口に渡し、Webhook 署名はクエリ経由でサーバー側検証に回します。
 
 ## 1. 全体構成図
 
