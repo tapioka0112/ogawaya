@@ -101,7 +101,49 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return ids;
   }
 
-  function buildVerifyFailureDetails(attempts) {
+  function encodeFormPayload(fields) {
+    return Object.keys(fields).map(function (key) {
+      return encodeURIComponent(key) + '=' + encodeURIComponent(String(fields[key]));
+    }).join('&');
+  }
+
+  function sanitizeDiagnosticText(value) {
+    return String(value || '').replace(/\s+/g, ' ').replace(/[,\r\n]/g, ' ').slice(0, 160);
+  }
+
+  function parseLineVerifyError(responseText) {
+    if (!responseText) {
+      return {
+        error: '',
+        description: ''
+      };
+    }
+    try {
+      var errorPayload = JSON.parse(responseText);
+      return {
+        error: errorPayload && errorPayload.error ? sanitizeDiagnosticText(errorPayload.error) : '',
+        description: errorPayload && errorPayload.error_description
+          ? sanitizeDiagnosticText(errorPayload.error_description)
+          : ''
+      };
+    } catch (parseError) {
+      return {
+        error: 'unparseable',
+        description: ''
+      };
+    }
+  }
+
+  function buildVerifyFailureDetails(attempts, idToken) {
+    var tokenText = String(idToken || '');
+    var descriptions = attempts.map(function (attempt) {
+      if (!attempt.lineErrorDescription) {
+        return '';
+      }
+      return attempt.channelIdSuffix + ':' + attempt.lineErrorDescription;
+    }).filter(function (value) {
+      return value !== '';
+    });
     return {
       verifyAttempts: attempts.map(function (attempt) {
         return [
@@ -111,7 +153,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         ].filter(function (value) {
           return value !== '';
         }).join(':');
-      }).join(',')
+      }).join(','),
+      verifyDescriptions: descriptions.join('|'),
+      tokenLength: tokenText.length,
+      tokenParts: tokenText ? tokenText.split('.').length : 0
     };
   }
 
@@ -160,32 +205,33 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           var verifyChannelId = verifyChannelIds[channelIndex];
           var response = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/verify', {
             method: 'post',
+            contentType: 'application/x-www-form-urlencoded',
             muteHttpExceptions: true,
-            payload: {
+            payload: encodeFormPayload({
               id_token: idToken,
               client_id: verifyChannelId
-            }
+            })
           });
           var responseCode = Number(response.getResponseCode());
           var responseText = response.getContentText();
           var lineError = '';
+          var lineErrorDescription = '';
           if (responseCode !== 200 && responseText) {
-            try {
-              var errorPayload = JSON.parse(responseText);
-              lineError = errorPayload && errorPayload.error ? String(errorPayload.error) : '';
-            } catch (parseError) {
-              lineError = 'unparseable';
-            }
+            var verifyError = parseLineVerifyError(responseText);
+            lineError = verifyError.error;
+            lineErrorDescription = verifyError.description;
           }
           attempts.push({
             responseCode: responseCode,
             channelIdSuffix: String(verifyChannelId).slice(-4),
-            lineError: lineError
+            lineError: lineError,
+            lineErrorDescription: lineErrorDescription
           });
           ns.logEvent('info', 'auth.verify.response', {
             responseCode: responseCode,
             channelIdSuffix: String(verifyChannelId).slice(-4),
-            lineError: lineError
+            lineError: lineError,
+            lineErrorDescription: lineErrorDescription
           });
           if (responseCode !== 200) {
             continue;
@@ -219,7 +265,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         }
 
         var error = ns.createError('unauthorized', 'LIFF 認証の検証に失敗しました', 401);
-        error.details = buildVerifyFailureDetails(attempts);
+        error.details = buildVerifyFailureDetails(attempts, idToken);
         throw error;
       }
     };

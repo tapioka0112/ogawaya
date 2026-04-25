@@ -32,6 +32,14 @@ function createVerifyResponse(statusCode, payload) {
   };
 }
 
+function parseVerifyPayload(requestOptions) {
+  assert.equal(requestOptions.method, 'post');
+  assert.equal(requestOptions.muteHttpExceptions, true);
+  assert.equal(requestOptions.contentType, 'application/x-www-form-urlencoded');
+  assert.equal(typeof requestOptions.payload, 'string');
+  return Object.fromEntries(new URLSearchParams(requestOptions.payload));
+}
+
 function createScriptCache() {
   const entries = new Map();
   return {
@@ -157,7 +165,9 @@ test('LIFF_ID が設定済みなら LIFF channel ID を verify に使う', async
     },
     fetch(url, requestOptions) {
       assert.equal(url, 'https://api.line.me/oauth2/v2.1/verify');
-      verifyClientIds.push(requestOptions.payload.client_id);
+      const payload = parseVerifyPayload(requestOptions);
+      assert.equal(payload.id_token, 'valid-pt');
+      verifyClientIds.push(payload.client_id);
       return createVerifyResponse(200, {
         sub: 'line-user-001',
         name: '田中LINE',
@@ -190,7 +200,9 @@ test('LINE_LOGIN_CHANNEL_ID が設定済みなら verify で最優先する', as
     },
     fetch(url, requestOptions) {
       assert.equal(url, 'https://api.line.me/oauth2/v2.1/verify');
-      verifyClientIds.push(requestOptions.payload.client_id);
+      const payload = parseVerifyPayload(requestOptions);
+      assert.equal(payload.id_token, 'valid-pt');
+      verifyClientIds.push(payload.client_id);
       return createVerifyResponse(200, {
         sub: 'line-user-001',
         name: '田中LINE',
@@ -224,7 +236,9 @@ test('LIFF_ID 未設定なら request liffId の channel ID を verify に使う
     },
     fetch(url, requestOptions) {
       assert.equal(url, 'https://api.line.me/oauth2/v2.1/verify');
-      verifyClientIds.push(requestOptions.payload.client_id);
+      const payload = parseVerifyPayload(requestOptions);
+      assert.equal(payload.id_token, 'valid-pt');
+      verifyClientIds.push(payload.client_id);
       return createVerifyResponse(200, {
         sub: 'line-user-001',
         name: '田中LINE',
@@ -259,7 +273,9 @@ test('Script Properties の LIFF_ID は request liffId より優先される', a
     },
     fetch(url, requestOptions) {
       assert.equal(url, 'https://api.line.me/oauth2/v2.1/verify');
-      verifyClientIds.push(requestOptions.payload.client_id);
+      const payload = parseVerifyPayload(requestOptions);
+      assert.equal(payload.id_token, 'valid-pt');
+      verifyClientIds.push(payload.client_id);
       return createVerifyResponse(200, {
         sub: 'line-user-001',
         name: '田中LINE',
@@ -294,8 +310,10 @@ test('LIFF channel ID で失敗したら LINE_CHANNEL_ID で verify を再試行
     },
     fetch(url, requestOptions) {
       assert.equal(url, 'https://api.line.me/oauth2/v2.1/verify');
-      verifyClientIds.push(requestOptions.payload.client_id);
-      if (requestOptions.payload.client_id === '2009859108') {
+      const payload = parseVerifyPayload(requestOptions);
+      assert.equal(payload.id_token, 'valid-pt');
+      verifyClientIds.push(payload.client_id);
+      if (payload.client_id === '2009859108') {
         return createVerifyResponse(401, {
           error: 'invalid id token'
         });
@@ -356,7 +374,8 @@ test('LIFF verify 失敗時は試行した channel suffix と LINE error を det
     },
     fetch() {
       return createVerifyResponse(401, {
-        error: 'invalid_client_id'
+        error: 'invalid_request',
+        error_description: 'Invalid IdToken Audience.'
       });
     }
   });
@@ -373,7 +392,10 @@ test('LIFF verify 失敗時は試行した channel suffix と LINE error を det
 
   assert.equal(response.statusCode, 401);
   assert.equal(response.body.code, 'unauthorized');
-  assert.equal(response.body.details.verifyAttempts, '9108:401:invalid_client_id,-001:401:invalid_client_id');
+  assert.equal(response.body.details.verifyAttempts, '9108:401:invalid_request,-001:401:invalid_request');
+  assert.equal(response.body.details.verifyDescriptions, '9108:Invalid IdToken Audience.|-001:Invalid IdToken Audience.');
+  assert.equal(response.body.details.tokenLength, 12);
+  assert.equal(response.body.details.tokenParts, 1);
 });
 
 test('同じ idToken の連続 API は verify 結果を ScriptCache から再利用する', async () => {

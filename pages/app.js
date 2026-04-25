@@ -332,10 +332,15 @@
         kidSuffix: header && header.kid ? String(header.kid).slice(-6) : '',
         iss: payload && payload.iss ? String(payload.iss) : '',
         aud: payload && payload.aud ? String(payload.aud) : '',
-        exp: payload && payload.exp ? String(payload.exp) : ''
+        exp: payload && payload.exp ? String(payload.exp) : '',
+        length: idToken.length,
+        parts: parts.length
       };
     } catch (error) {
-      return {};
+      return {
+        length: idToken.length,
+        parts: parts.length
+      };
     }
   }
 
@@ -506,7 +511,9 @@
       status: idToken ? 'ok' : 'empty',
       liffId: liffId,
       liffChannelId: extractLiffChannelId(liffId),
-      aud: idTokenDiagnostics.aud
+      aud: idTokenDiagnostics.aud,
+      tokenLength: idTokenDiagnostics.length,
+      tokenParts: idTokenDiagnostics.parts
     });
     if (!idToken) {
       throw new Error('LIFF 認証コンテキストを取得できません');
