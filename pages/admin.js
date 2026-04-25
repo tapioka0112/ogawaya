@@ -1,5 +1,5 @@
 (function (global) {
-  var ADMIN_SESSION_STORAGE_KEY = 'ogawaya:admin:session-token:v2';
+  var ADMIN_SESSION_STORAGE_KEY = 'ogawaya:admin:session-token:v3';
   var CLIENT_ID_STORAGE_KEY = 'ogawaya:client-id';
   var JST_OFFSET_MS = 9 * 60 * 60 * 1000;
   var TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS = 5;
@@ -918,6 +918,109 @@
     });
   }
 
+  function normalizeTemplateInsertEventItem(item) {
+    return {
+      id: String(item && item.id ? item.id : ''),
+      templateItemId: String(item && item.templateItemId ? item.templateItemId : ''),
+      title: String(item && item.title ? item.title : ''),
+      description: String(item && item.description ? item.description : ''),
+      period: normalizeTaskPeriod(item && item.period),
+      sortOrder: Number(item && item.sortOrder ? item.sortOrder : 0),
+      status: 'unchecked',
+      checkedBy: null,
+      checkedByUserId: null,
+      checkedAt: null,
+      updatedAt: item && item.updatedAt ? String(item.updatedAt) : new Date().toISOString(),
+      pendingSave: true
+    };
+  }
+
+  function applyTemplateInsertEventToRunItems(eventPayload, targetDate) {
+    if (!eventPayload || eventPayload.type !== 'template_insert') {
+      return [];
+    }
+    if (String(eventPayload.storeId || '') !== String(state.storeId || '')) {
+      return [];
+    }
+    if (String(eventPayload.targetDate || '') !== String(targetDate || '')) {
+      return [];
+    }
+    var incomingItems = Array.isArray(eventPayload.items)
+      ? eventPayload.items.map(normalizeTemplateInsertEventItem)
+      : [];
+    incomingItems = incomingItems.filter(function (item) {
+      return item.id !== '' && item.title !== '';
+    });
+    if (incomingItems.length === 0) {
+      return [];
+    }
+
+    var existingItems = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
+    var existingIds = {};
+    var existingTemplateItemIds = {};
+    existingItems.forEach(function (item) {
+      existingIds[item.id] = true;
+      if (item.templateItemId) {
+        existingTemplateItemIds[item.templateItemId] = true;
+      }
+    });
+    var newItems = incomingItems.filter(function (item) {
+      if (existingIds[item.id]) {
+        return false;
+      }
+      return !(item.templateItemId && existingTemplateItemIds[item.templateItemId]);
+    });
+    if (newItems.length === 0) {
+      return [];
+    }
+
+    appendRunItemsForDate(targetDate, newItems);
+    return newItems;
+  }
+
+  function loadTemplateInsertEventsFromFirestore(targetDate) {
+    if (!state.config || state.config.enableRealtimeSync !== true || !state.config.firebase) {
+      return Promise.resolve([]);
+    }
+    if (!initializeRealtimeClient()) {
+      return Promise.resolve([]);
+    }
+    return ensureFirebaseAuthSession().then(function () {
+      return state.firestore
+        .collection('stores')
+        .doc(state.storeId)
+        .collection('runs')
+        .doc(targetDate)
+        .collection('events')
+        .orderBy('emittedAt', 'desc')
+        .limit(50)
+        .get();
+    }).then(function (snapshot) {
+      var events = [];
+      snapshot.forEach(function (doc) {
+        var data = doc && typeof doc.data === 'function' ? doc.data() : null;
+        if (data && data.type === 'template_insert') {
+          events.push(data);
+        }
+      });
+      return events.reverse();
+    }).catch(function (error) {
+      console.error('[admin-sync] template_insert event load failed', error);
+      return [];
+    });
+  }
+
+  function restoreTemplateInsertEventsForDate(targetDate) {
+    return loadTemplateInsertEventsFromFirestore(targetDate).then(function (events) {
+      events.forEach(function (eventPayload) {
+        var addedItems = applyTemplateInsertEventToRunItems(eventPayload, targetDate);
+        if (addedItems.length > 0 && eventPayload.templateId) {
+          syncTemplateInsertViaGasInBackground(targetDate, String(eventPayload.templateId), addedItems, 0);
+        }
+      });
+    });
+  }
+
   function buildTemplateClientItems(items) {
     return (items || []).map(function (item) {
       return {
@@ -994,6 +1097,10 @@
       }
       state.checklist = response.checklist || null;
       rememberRunItems(targetDate, state.checklist);
+      await restoreTemplateInsertEventsForDate(targetDate);
+      if (requestId !== state.runItemsRequestId || targetDate !== state.selectedDate) {
+        return;
+      }
     } catch (error) {
       if (requestId !== state.runItemsRequestId || targetDate !== state.selectedDate) {
         return;
