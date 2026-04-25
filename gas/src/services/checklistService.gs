@@ -92,9 +92,30 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var getOAuthToken = safeOptions.getOAuthToken || function () {
       return ScriptApp.getOAuthToken();
     };
+    var requiredScopes = safeOptions.requiredScopes || ['https://www.googleapis.com/auth/datastore'];
+    var getAuthorizationInfo = safeOptions.getAuthorizationInfo || null;
+
+    function ensureRequiredScopesAuthorized() {
+      if (!getAuthorizationInfo) {
+        return;
+      }
+      var authInfo = getAuthorizationInfo(requiredScopes);
+      var status = authInfo && authInfo.getAuthorizationStatus ? String(authInfo.getAuthorizationStatus()) : '';
+      if (status !== 'REQUIRED') {
+        return;
+      }
+      var error = ns.createError('authorization_required', 'Firestore snapshot 用 OAuth scope の承認が必要です', 403);
+      error.details = {
+        authorizationStatus: status,
+        authorizationUrl: authInfo && authInfo.getAuthorizationUrl ? String(authInfo.getAuthorizationUrl() || '') : '',
+        requiredScopes: requiredScopes.join(' ')
+      };
+      throw error;
+    }
 
     return {
       writeTodaySnapshot: function (storeId, targetDate, payload) {
+        ensureRequiredScopesAuthorized();
         var token = String(getOAuthToken() || '');
         ns.assert(token, 'config_error', 'Firestore snapshot 用 OAuth token を取得できません', 500);
         var response = fetchFn(buildFirestoreSnapshotDocumentUrl(projectId, storeId, targetDate), {
@@ -719,6 +740,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var errorDetails = error && error.details ? error.details : {};
         var errorResponseCode = errorDetails.responseCode ? Number(errorDetails.responseCode) : 0;
         var errorResponse = errorDetails.response ? sanitizeDiagnosticText(errorDetails.response) : '';
+        var authorizationStatus = errorDetails.authorizationStatus ? String(errorDetails.authorizationStatus) : '';
+        var authorizationUrl = errorDetails.authorizationUrl ? String(errorDetails.authorizationUrl) : '';
         ns.logEvent('warn', 'firestore.snapshot.write.failed', {
           storeId: store.id,
           targetDate: run.target_date,
@@ -727,7 +750,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
           message: error && error.message ? String(error.message) : '',
           responseCode: errorResponseCode,
-          response: errorResponse
+          response: errorResponse,
+          authorizationStatus: authorizationStatus
         });
         return {
           status: 'error',
@@ -735,7 +759,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
           responseCode: errorResponseCode,
           message: error && error.message ? String(error.message) : '',
-          response: errorResponse
+          response: errorResponse,
+          authorizationStatus: authorizationStatus,
+          authorizationUrl: authorizationUrl
         };
       }
     }

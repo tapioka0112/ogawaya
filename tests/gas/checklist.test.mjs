@@ -17,7 +17,9 @@ function createFetchResponse(status = 200, payload = {}) {
 async function createChecklistApp(options = {}) {
   const runtime = await loadGasRuntime({
     fetch: options.fetch,
-    oauthToken: options.oauthToken
+    oauthToken: options.oauthToken,
+    authorizationStatus: options.authorizationStatus,
+    authorizationUrl: options.authorizationUrl
   });
   const seed = createBaseDataset();
   seed.checklist_template_items[0].description = '券売機と入口を確認する';
@@ -389,6 +391,34 @@ test('Firestore snapshot client が非2xxを返した場合は成功扱いしな
   assert.equal(response.body.snapshotSync.status, 'error');
   assert.equal(response.body.snapshotSync.responseCode, 502);
   assert.equal(response.body.snapshotSync.response, 'bad gateway from firestore');
+});
+
+test('Firestore snapshot 用 OAuth scope が未承認なら承認URLを返す', async () => {
+  const firestoreWrites = [];
+  const app = await createChecklistApp({
+    firebaseProjectId: 'test-project',
+    authorizationStatus: 'REQUIRED',
+    authorizationUrl: 'https://script.google.com/auth/firestore',
+    fetch(url, requestOptions) {
+      firestoreWrites.push({ url, requestOptions });
+      return createFetchResponse(200, { name: 'snapshot' });
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/today',
+    query: { idToken: 'valid-pt' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(firestoreWrites.length, 0);
+  assert.equal(response.body.snapshotSync.status, 'error');
+  assert.equal(response.body.snapshotSync.code, 'authorization_required');
+  assert.equal(response.body.snapshotSync.statusCode, 403);
+  assert.equal(response.body.snapshotSync.authorizationStatus, 'REQUIRED');
+  assert.equal(response.body.snapshotSync.authorizationUrl, 'https://script.google.com/auth/firestore');
 });
 
 test('FIREBASE_PROJECT_ID 未設定時は既定の Firebase project に snapshot を保存する', async () => {

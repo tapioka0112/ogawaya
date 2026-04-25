@@ -62,6 +62,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
       getOAuthToken: function () {
         return ScriptApp.getOAuthToken();
+      },
+      getAuthorizationInfo: function (scopes) {
+        return ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL, scopes);
       }
     });
   }

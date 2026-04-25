@@ -172,6 +172,26 @@ export async function loadGasRuntime(options = {}) {
       }
     },
     ScriptApp: {
+      AuthMode: {
+        FULL: 'FULL'
+      },
+      AuthorizationStatus: {
+        NOT_REQUIRED: 'NOT_REQUIRED',
+        REQUIRED: 'REQUIRED'
+      },
+      getAuthorizationInfo(authMode, scopes) {
+        const status = options.authorizationStatus ?? 'NOT_REQUIRED';
+        return {
+          authMode,
+          scopes,
+          getAuthorizationStatus() {
+            return status;
+          },
+          getAuthorizationUrl() {
+            return options.authorizationUrl ?? 'https://script.google.com/auth';
+          }
+        };
+      },
       getOAuthToken() {
         return options.oauthToken ?? 'test-oauth-token';
       },

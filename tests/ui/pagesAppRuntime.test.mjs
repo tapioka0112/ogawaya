@@ -940,10 +940,11 @@ test('GitHub Pages app は GAS API の snapshot 同期状態を debugTiming に�
       return response(Object.assign(createChecklistPayload(item), {
         snapshotSync: {
           status: 'error',
-          responseCode: 502,
-          statusCode: 502,
-          message: 'Firestore snapshot の保存に失敗しました',
-          response: 'bad gateway from firestore'
+          statusCode: 403,
+          message: 'Firestore snapshot 用 OAuth scope の承認が必要です',
+          response: 'Request had insufficient authentication scopes',
+          authorizationStatus: 'REQUIRED',
+          authorizationUrl: 'https://script.google.com/auth/firestore'
         }
       }));
     }
@@ -972,10 +973,16 @@ test('GitHub Pages app は GAS API の snapshot 同期状態を debugTiming に�
     flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotSync=error'))
   );
   assert.ok(
-    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotHttpStatus=502'))
+    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotHttpStatus=403'))
   );
   assert.ok(
-    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotResponse=bad gateway from firestore'))
+    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotResponse=Request had insufficient authentication scopes'))
+  );
+  assert.ok(
+    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotAuthorizationStatus=REQUIRED'))
+  );
+  assert.ok(
+    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotAuthorizationUrl=https://script.google.com/auth/firestore'))
   );
 });
 

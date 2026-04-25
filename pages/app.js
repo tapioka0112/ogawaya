@@ -861,7 +861,9 @@
       snapshotSync: sync.status || '',
       snapshotHttpStatus: sync.responseCode || sync.statusCode || '',
       snapshotMessage: sync.message || '',
-      snapshotResponse: sync.response || ''
+      snapshotResponse: sync.response || '',
+      snapshotAuthorizationStatus: sync.authorizationStatus || '',
+      snapshotAuthorizationUrl: sync.authorizationUrl || ''
     };
   }
 
