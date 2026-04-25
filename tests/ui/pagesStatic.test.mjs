@@ -8,7 +8,7 @@ test('GitHub Pages 用 LIFF 画面は必要スクリプトと要素を持つ', a
 
   assert.doesNotMatch(html, /<script src="https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js"><\/script>/);
   assert.doesNotMatch(html, /<script src="https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-app-compat\.js"><\/script>/);
-  assert.match(html, /<script src="\.\/app\.js\?v=liff-token-renewal-20260425" defer><\/script>/);
+  assert.match(html, /<script src="\.\/app\.js\?v=firestore-snapshot-default-20260425" defer><\/script>/);
   assert.match(appJs, /var LIFF_SDK_URL = 'https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js';/);
   assert.match(appJs, /firebase-app-compat\.js/);
   assert.match(appJs, /firebase-auth-compat\.js/);
