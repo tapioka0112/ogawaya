@@ -81,6 +81,68 @@
     return String(value || '').replace(/\/+$/, '');
   }
 
+  function decodeFirestoreValue(value) {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'stringValue')) {
+      return value.stringValue;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'integerValue')) {
+      return Number(value.integerValue);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'doubleValue')) {
+      return Number(value.doubleValue);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'booleanValue')) {
+      return value.booleanValue === true;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'timestampValue')) {
+      return value.timestampValue;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'nullValue')) {
+      return null;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'arrayValue')) {
+      return (value.arrayValue.values || []).map(decodeFirestoreValue);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'mapValue')) {
+      return decodeFirestoreFields(value.mapValue.fields || {});
+    }
+    return null;
+  }
+
+  function decodeFirestoreFields(fields) {
+    var decoded = {};
+    Object.keys(fields || {}).forEach(function (key) {
+      decoded[key] = decodeFirestoreValue(fields[key]);
+    });
+    return decoded;
+  }
+
+  function buildFirestoreRestEventsUrl(targetDate, pageToken) {
+    var projectId = state.config && state.config.firebase ? String(state.config.firebase.projectId || '') : '';
+    if (!projectId || !state.storeId || !targetDate) {
+      return '';
+    }
+    var path = [
+      'stores',
+      state.storeId,
+      'runs',
+      targetDate,
+      'events'
+    ].map(encodeURIComponent).join('/');
+    var url = 'https://firestore.googleapis.com/v1/projects/' +
+      encodeURIComponent(projectId) +
+      '/databases/(default)/documents/' +
+      path +
+      '?pageSize=300';
+    if (pageToken) {
+      url += '&pageToken=' + encodeURIComponent(pageToken);
+    }
+    return url;
+  }
+
   function appendQuery(url, query) {
     var pairs = [];
     Object.keys(query || {}).forEach(function (key) {
@@ -978,7 +1040,41 @@
     return newItems;
   }
 
-  function loadTemplateInsertEventsFromFirestore(targetDate) {
+  function sortFirestoreEvents(events) {
+    return (events || []).slice().sort(function (a, b) {
+      return String(a.emittedAt || '').localeCompare(String(b.emittedAt || ''));
+    });
+  }
+
+  function loadTemplateInsertEventsFromFirestoreRest(targetDate) {
+    if (!state.config || state.config.enableRealtimeSync !== true || !state.config.firebase) {
+      return Promise.resolve([]);
+    }
+    var events = [];
+    function loadPage(pageToken) {
+      var url = buildFirestoreRestEventsUrl(targetDate, pageToken);
+      if (!url) {
+        return Promise.resolve(events);
+      }
+      return fetch(url, { method: 'GET', cache: 'no-store' }).then(function (response) {
+        if (!response.ok) {
+          throw new Error('Firestore events REST の読み込みに失敗しました');
+        }
+        return response.json();
+      }).then(function (payload) {
+        (payload.documents || []).forEach(function (doc) {
+          events.push(decodeFirestoreFields(doc.fields || {}));
+        });
+        if (payload.nextPageToken) {
+          return loadPage(payload.nextPageToken);
+        }
+        return events;
+      });
+    }
+    return loadPage('');
+  }
+
+  function loadTemplateInsertEventsFromFirestoreSdk(targetDate) {
     if (!state.config || state.config.enableRealtimeSync !== true || !state.config.firebase) {
       return Promise.resolve([]);
     }
@@ -993,7 +1089,7 @@
         .doc(targetDate)
         .collection('events')
         .orderBy('emittedAt', 'desc')
-        .limit(50)
+        .limit(300)
         .get();
     }).then(function (snapshot) {
       var events = [];
@@ -1004,19 +1100,68 @@
         }
       });
       return events.reverse();
-    }).catch(function (error) {
-      console.error('[admin-sync] template_insert event load failed', error);
-      return [];
     });
+  }
+
+  function loadTemplateInsertEventsFromFirestore(targetDate) {
+    return loadTemplateInsertEventsFromFirestoreRest(targetDate).catch(function (restError) {
+      console.error('[admin-sync] template_insert event REST load failed', restError);
+      return loadTemplateInsertEventsFromFirestoreSdk(targetDate).catch(function (sdkError) {
+        console.error('[admin-sync] template_insert event SDK load failed', sdkError);
+        return [];
+      });
+    }).then(sortFirestoreEvents);
+  }
+
+  function applyRunItemStatusEventToRunItems(eventPayload, targetDate) {
+    if (!eventPayload || String(eventPayload.storeId || '') !== String(state.storeId || '')) {
+      return false;
+    }
+    if (String(eventPayload.targetDate || '') !== String(targetDate || '')) {
+      return false;
+    }
+    var runItemId = String(eventPayload.itemId || '');
+    if (!runItemId || !eventPayload.status) {
+      return false;
+    }
+    var baseChecklist = state.checklist || {
+      targetDate: targetDate,
+      status: 'open',
+      items: []
+    };
+    var items = Array.isArray(baseChecklist.items) ? baseChecklist.items : [];
+    var changed = false;
+    var nextItems = items.map(function (item) {
+      if (String(item.id || '') !== runItemId) {
+        return item;
+      }
+      changed = true;
+      return Object.assign({}, item, {
+        status: String(eventPayload.status || item.status || 'unchecked'),
+        checkedBy: eventPayload.checkedBy || null,
+        checkedByUserId: eventPayload.checkedByUserId || null,
+        checkedAt: eventPayload.checkedAt || null,
+        updatedAt: eventPayload.updatedAt || item.updatedAt || null,
+        pendingSave: false
+      });
+    });
+    if (changed) {
+      updateCurrentChecklistItems(nextItems);
+    }
+    return changed;
   }
 
   function restoreTemplateInsertEventsForDate(targetDate) {
     return loadTemplateInsertEventsFromFirestore(targetDate).then(function (events) {
       events.forEach(function (eventPayload) {
-        var addedItems = applyTemplateInsertEventToRunItems(eventPayload, targetDate);
-        if (addedItems.length > 0 && eventPayload.templateId) {
-          syncTemplateInsertViaGasInBackground(targetDate, String(eventPayload.templateId), addedItems, 0);
+        if (eventPayload.type === 'template_insert') {
+          var addedItems = applyTemplateInsertEventToRunItems(eventPayload, targetDate);
+          if (addedItems.length > 0 && eventPayload.templateId) {
+            syncTemplateInsertViaGasInBackground(targetDate, String(eventPayload.templateId), addedItems, 0);
+          }
+          return;
         }
+        applyRunItemStatusEventToRunItems(eventPayload, targetDate);
       });
     });
   }
