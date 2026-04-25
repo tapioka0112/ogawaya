@@ -95,6 +95,20 @@ test('GitHub Pages の API再取得マージは未確定 desiredStatus を維持
   );
 });
 
+test('GitHub Pages は debugTiming=1 で起動時間をウォーターフォール表示する', async () => {
+  const appJs = await readFile('pages/app.js', 'utf8');
+  const css = await readFile('pages/style.css', 'utf8');
+
+  assert.match(appJs, /debugTiming=1/);
+  assert.match(appJs, /function recordFirstRenderTiming\(source\)/);
+  assert.match(appJs, /measureTiming\('liff\.auth',\s*'LIFF認証全体'/);
+  assert.match(appJs, /measureTiming\('liff\.init',\s*'liff\.init'/);
+  assert.match(appJs, /timingName:\s*'gas\.today\.blocking'/);
+  assert.match(appJs, /className = 'boot-timing-panel'/);
+  assert.match(css, /\.boot-timing-panel\s*\{/);
+  assert.match(css, /\.boot-timing-bar\s*\{/);
+});
+
 test('GitHub Pages の連打時は古い API 応答を UI に反映しない', async () => {
   const appJs = await readFile('pages/app.js', 'utf8');
 

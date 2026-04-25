@@ -395,7 +395,7 @@ async function loadPagesApp(fetchHandler, options = {}) {
   const context = {
     globalThis: {},
     document: documentRef,
-    location: { href: '' },
+    location: options.location || { href: '', search: '' },
     localStorage: {
       values: Object.assign({}, options.localStorageValues || {}),
       getItem(key) {
@@ -433,7 +433,7 @@ async function loadPagesApp(fetchHandler, options = {}) {
     clearInterval,
     confetti: options.confetti,
     addEventListener() {},
-    console,
+    console: options.console || console,
     Intl,
     Date: options.Date || Date
   };
@@ -627,6 +627,69 @@ test('GitHub Pages app は Firestore snapshot が未作成でも同日端末キ�
   );
   assert.equal(firestoreSnapshotRequestCount, 1);
   assert.equal(todayRequestCount, 0);
+});
+
+test('GitHub Pages app は debugTiming=1 で起動時間ウォーターフォールを描画する', async () => {
+  const snapshotItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: false,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'app'
+        }
+      });
+    }
+    if (String(url).startsWith('https://firestore.googleapis.com/')) {
+      return firestoreRestDocument(createChecklistPayload(snapshotItem));
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    liff: null,
+    firebase: null,
+    location: {
+      href: 'https://example.test/?debugTiming=1',
+      search: '?debugTiming=1'
+    },
+    console: {
+      debug() {},
+      error() {},
+      log() {},
+      table() {},
+      warn() {}
+    }
+  });
+
+  await wait(80);
+
+  assert.ok(findByClassName(document.body, 'boot-timing-panel'));
+  assert.ok(findByClassName(document.body, 'boot-timing-bar'));
+  assert.ok(flattenElements(document.body).some((node) => node.textContent === 'config.json'));
+  assert.ok(flattenElements(document.body).some((node) => node.textContent === '初回描画まで'));
 });
 
 test('GitHub Pages app は古い再取得レスポンスで新しいチェック状態を戻さない', async () => {

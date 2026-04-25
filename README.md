@@ -70,6 +70,12 @@
 - Firestore 直接書き込みには Firebase Authentication の匿名ログインを使う。
 - Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。
 
+## LIFF 起動時間の計測
+- `pages/` のURLに `?debugTiming=1` を付けると、起動時間のウォーターフォールを画面下部とブラウザconsoleに表示する。
+- 表示対象は `config.json`、Firestore snapshot/cache、LIFF SDK、`liff.init`、GAS API、初回描画までの時間。
+- LIFF URLでクエリを付けにくい場合は、ブラウザconsoleで `localStorage.setItem('ogawaya:debug-timing', '1')` を実行してから再読み込みする。
+- 解除する場合は `localStorage.removeItem('ogawaya:debug-timing')` を実行する。
+
 ## 0:30 未完了通知
 - 複数のLINE公式アカウントを `notification_channels` に登録し、従業員を `notification_recipients` で割り当てる。
 - 送信元チャネルは `notifications.channel_id` に残る。

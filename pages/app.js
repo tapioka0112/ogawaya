@@ -114,6 +114,7 @@
   var LAST_STORE_ID_STORAGE_KEY = 'ogawaya:last-store-id';
   var CLIENT_ID_STORAGE_KEY = 'ogawaya:client-id';
   var CHECKLIST_CACHE_STORAGE_KEY = 'ogawaya:checklist-cache:v1';
+  var DEBUG_TIMING_STORAGE_KEY = 'ogawaya:debug-timing';
   var SNAPSHOT_DOC_ID = 'today';
   // 統計タブは Firestore snapshot をクライアント集計して表示する。
   var LIFF_SDK_URL = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
@@ -195,8 +196,12 @@
     if (scriptLoadPromises[url]) {
       return scriptLoadPromises[url];
     }
+    var scriptMarker = beginTiming('script.load', url.indexOf('line-scdn') !== -1 ? 'LIFF SDK script' : '外部SDK script', {
+      url: url
+    });
     scriptLoadPromises[url] = new Promise(function (resolve, reject) {
       if (!global.document || typeof global.document.createElement !== 'function') {
+        endTiming(scriptMarker, { status: 'error', message: 'document_missing' });
         reject(new Error('外部SDKを読み込むための document がありません'));
         return;
       }
@@ -204,13 +209,16 @@
       script.src = url;
       script.async = true;
       script.onload = function () {
+        endTiming(scriptMarker, { status: 'ok' });
         resolve();
       };
       script.onerror = function () {
+        endTiming(scriptMarker, { status: 'error' });
         reject(new Error('外部SDKの読み込みに失敗しました: ' + url));
       };
       var parent = global.document.head || global.document.body || global.document.documentElement;
       if (!parent || typeof parent.appendChild !== 'function') {
+        endTiming(scriptMarker, { status: 'error', message: 'parent_missing' });
         reject(new Error('外部SDKを追加するDOMがありません'));
         return;
       }
@@ -420,16 +428,20 @@
   }
 
   async function initializeAuth(liffId) {
-    await ensureLiffSdkReady();
+    await measureTiming('liff.sdk', 'LIFF SDK準備', function () {
+      return ensureLiffSdkReady();
+    });
 
-    await withTimeout(
-      global.liff.init({
-        liffId: liffId,
-        withLoginOnExternalBrowser: true
-      }),
-      10000,
-      'LIFF 認証の初期化がタイムアウトしました。LINE から再度開いてください。'
-    );
+    await measureTiming('liff.init', 'liff.init', function () {
+      return withTimeout(
+        global.liff.init({
+          liffId: liffId,
+          withLoginOnExternalBrowser: true
+        }),
+        10000,
+        'LIFF 認証の初期化がタイムアウトしました。LINE から再度開いてください。'
+      );
+    });
 
     if (typeof global.liff.isLoggedIn === 'function' && !global.liff.isLoggedIn()) {
       if (typeof global.liff.login === 'function') {
@@ -438,9 +450,14 @@
       throw new Error('LINE ログイン画面へ遷移しました。ログイン後に再度開いてください。');
     }
 
-    var idToken = typeof global.liff.getIDToken === 'function'
+    var idToken = null;
+    var tokenMarker = beginTiming('liff.token', 'ID token取得');
+    idToken = typeof global.liff.getIDToken === 'function'
       ? global.liff.getIDToken()
       : '';
+    endTiming(tokenMarker, {
+      status: idToken ? 'ok' : 'empty'
+    });
     if (!idToken) {
       throw new Error('LIFF 認証コンテキストを取得できません');
     }
@@ -462,6 +479,7 @@
     syncUnsubscribe: null,
     syncStartRequestId: 0,
     syncRestBootstrapKey: '',
+    lastSnapshotSource: '',
     consistencyTimerId: null,
     visibilityHandlerBound: false,
     statsYear: new Date().getFullYear(),
@@ -481,7 +499,15 @@
       userId: '',
       name: ''
     },
-    previousProgressPct: -1
+    previousProgressPct: -1,
+    timing: {
+      enabled: false,
+      bootStartMs: 0,
+      entries: [],
+      firstRenderRecorded: false,
+      panelElement: null,
+      consoleReportTimerId: null
+    }
   };
 
   var recentlyCheckedIds = new Set();
@@ -531,6 +557,216 @@
     statsDayDetailSummary: document.getElementById('stats-day-detail-summary'),
     statsDayDetailItems: document.getElementById('stats-day-detail-items')
   };
+
+  function getNowMs() {
+    if (global.performance && typeof global.performance.now === 'function') {
+      return global.performance.now();
+    }
+    return Date.now();
+  }
+
+  function isTimingDebugRequested() {
+    var href = global.location ? String(global.location.href || '') : '';
+    var search = global.location ? String(global.location.search || '') : '';
+    var queryText = search || (href.indexOf('?') === -1 ? '' : href.slice(href.indexOf('?')));
+    if (/(?:[?&])debugTiming=1(?:&|$)/.test(queryText)) {
+      return true;
+    }
+    return readStorageValue(DEBUG_TIMING_STORAGE_KEY) === '1';
+  }
+
+  function initializeTimingDebug() {
+    if (state.timing.bootStartMs > 0) {
+      return;
+    }
+    state.timing.enabled = isTimingDebugRequested();
+    state.timing.bootStartMs = getNowMs();
+    if (state.timing.enabled && document.body) {
+      document.body.dataset.debugTiming = 'true';
+    }
+  }
+
+  function beginTiming(name, label, details) {
+    if (!state.timing.enabled) {
+      return null;
+    }
+    return {
+      name: String(name || ''),
+      label: String(label || name || ''),
+      details: details || {},
+      startMs: getNowMs()
+    };
+  }
+
+  function formatTimingDetails(details) {
+    var pairs = [];
+    Object.keys(details || {}).forEach(function (key) {
+      var value = details[key];
+      if (value === '' || value == null) {
+        return;
+      }
+      pairs.push(key + '=' + String(value));
+    });
+    return pairs.join(' ');
+  }
+
+  function scheduleTimingConsoleReport() {
+    if (!state.timing.enabled || !global.console) {
+      return;
+    }
+    if (state.timing.consoleReportTimerId) {
+      global.clearTimeout(state.timing.consoleReportTimerId);
+    }
+    state.timing.consoleReportTimerId = global.setTimeout(function () {
+      state.timing.consoleReportTimerId = null;
+      var rows = state.timing.entries.map(function (entry) {
+        return {
+          name: entry.name,
+          label: entry.label,
+          startMs: Math.round(entry.startMs),
+          durationMs: Math.round(entry.durationMs),
+          details: formatTimingDetails(entry.details)
+        };
+      });
+      if (typeof global.console.table === 'function') {
+        global.console.table(rows);
+      }
+      if (typeof global.console.log === 'function') {
+        global.console.log('[timing] boot waterfall\n' + buildTimingAsciiChart());
+      }
+    }, 250);
+  }
+
+  function buildTimingAsciiChart() {
+    var totalMs = Math.max(1, state.timing.entries.reduce(function (max, entry) {
+      return Math.max(max, entry.endMs);
+    }, getNowMs() - state.timing.bootStartMs));
+    return state.timing.entries.map(function (entry) {
+      var startBlocks = Math.round((entry.startMs / totalMs) * 24);
+      var widthBlocks = Math.max(1, Math.round((entry.durationMs / totalMs) * 24));
+      return (
+        entry.label + ' ' +
+        '.'.repeat(startBlocks) +
+        '#'.repeat(widthBlocks) +
+        ' ' +
+        Math.round(entry.durationMs) + 'ms'
+      );
+    }).join('\n');
+  }
+
+  function endTiming(marker, details) {
+    if (!marker) {
+      return null;
+    }
+    var endMs = getNowMs();
+    var entry = {
+      name: marker.name,
+      label: marker.label,
+      startMs: Math.max(0, marker.startMs - state.timing.bootStartMs),
+      endMs: Math.max(0, endMs - state.timing.bootStartMs),
+      durationMs: Math.max(0, endMs - marker.startMs),
+      details: Object.assign({}, marker.details || {}, details || {})
+    };
+    state.timing.entries.push(entry);
+    renderTimingPanel();
+    scheduleTimingConsoleReport();
+    return entry;
+  }
+
+  async function measureTiming(name, label, task, details) {
+    var marker = beginTiming(name, label, details);
+    try {
+      var value = await task();
+      endTiming(marker, { status: 'ok' });
+      return value;
+    } catch (error) {
+      endTiming(marker, {
+        status: 'error',
+        message: error && error.message ? String(error.message) : 'error'
+      });
+      throw error;
+    }
+  }
+
+  function recordFirstRenderTiming(source) {
+    if (!state.timing.enabled || state.timing.firstRenderRecorded) {
+      return;
+    }
+    state.timing.firstRenderRecorded = true;
+    var nowMs = getNowMs();
+    state.timing.entries.push({
+      name: 'first.render',
+      label: '初回描画まで',
+      startMs: 0,
+      endMs: Math.max(0, nowMs - state.timing.bootStartMs),
+      durationMs: Math.max(0, nowMs - state.timing.bootStartMs),
+      details: {
+        source: source || ''
+      }
+    });
+    renderTimingPanel();
+    scheduleTimingConsoleReport();
+    emitClientEvent('boot.timing.first_render', {
+      source: source || '',
+      elapsedMs: Math.round(nowMs - state.timing.bootStartMs)
+    });
+  }
+
+  function ensureTimingPanel() {
+    if (!state.timing.enabled || !document.body) {
+      return null;
+    }
+    if (state.timing.panelElement) {
+      return state.timing.panelElement;
+    }
+    var panel = document.createElement('section');
+    panel.className = 'boot-timing-panel';
+    panel.setAttribute('aria-label', '起動時間の計測結果');
+    document.body.appendChild(panel);
+    state.timing.panelElement = panel;
+    return panel;
+  }
+
+  function appendTimingText(parent, tagName, className, text) {
+    var element = document.createElement(tagName);
+    element.className = className;
+    element.textContent = text;
+    parent.appendChild(element);
+    return element;
+  }
+
+  function renderTimingPanel() {
+    var panel = ensureTimingPanel();
+    if (!panel) {
+      return;
+    }
+    panel.innerHTML = '';
+    var totalMs = Math.max(1, state.timing.entries.reduce(function (max, entry) {
+      return Math.max(max, entry.endMs);
+    }, getNowMs() - state.timing.bootStartMs));
+    appendTimingText(panel, 'h2', 'boot-timing-title', '起動時間');
+    appendTimingText(panel, 'p', 'boot-timing-summary', '初回描画までの区間別ウォーターフォール: ' + Math.round(totalMs) + 'ms');
+    var list = document.createElement('div');
+    list.className = 'boot-timing-list';
+    panel.appendChild(list);
+    state.timing.entries.forEach(function (entry) {
+      var row = document.createElement('div');
+      row.className = 'boot-timing-row';
+      var label = appendTimingText(row, 'div', 'boot-timing-label', entry.label);
+      label.title = formatTimingDetails(entry.details);
+      var track = document.createElement('div');
+      track.className = 'boot-timing-track';
+      var bar = document.createElement('span');
+      bar.className = 'boot-timing-bar';
+      bar.style.marginLeft = Math.min(98, (entry.startMs / totalMs) * 100) + '%';
+      bar.style.width = Math.max(2, (entry.durationMs / totalMs) * 100) + '%';
+      track.appendChild(bar);
+      row.appendChild(track);
+      appendTimingText(row, 'div', 'boot-timing-duration', Math.round(entry.durationMs) + 'ms');
+      appendTimingText(row, 'div', 'boot-timing-detail', formatTimingDetails(entry.details));
+      list.appendChild(row);
+    });
+  }
 
   function setText(element, value) {
     if (!element) {
@@ -1405,6 +1641,7 @@
     renderIncomplete();
     rememberStoreIdFromChecklist(state.checklist);
     writeChecklistCache(state.checklist);
+    recordFirstRenderTiming(applyOptions.source || '');
     if (applyOptions.restartSync !== false) {
       startRealtimeSync();
     }
@@ -1628,7 +1865,9 @@
     if (isFirebaseSdkReady() && initializeRealtimeClient()) {
       return Promise.resolve();
     }
-    return ensureFirebaseSdkReady().then(function () {
+    return measureTiming('firebase.sdk', 'Firebase SDK準備', function () {
+      return ensureFirebaseSdkReady();
+    }).then(function () {
       if (!initializeRealtimeClient()) {
         throw new Error('Firebase が初期化されていません');
       }
@@ -1896,26 +2135,40 @@
     if (!url) {
       return null;
     }
-    var response = await fetch(url, { cache: 'no-store' });
-    if (response.status === 404) {
-      return null;
-    }
-    if (!response.ok) {
-      throw new Error('Firestore snapshot の読み込みに失敗しました');
-    }
-    var payload = await response.json();
-    return normalizeChecklistPayload(decodeFirestoreRestFields(payload.fields || {}));
+    return measureTiming('firestore.snapshot.rest', 'Firestore snapshot REST', async function () {
+      var response = await fetch(url, { cache: 'no-store' });
+      if (response.status === 404) {
+        state.lastSnapshotSource = 'snapshot.none';
+        return null;
+      }
+      if (!response.ok) {
+        throw new Error('Firestore snapshot の読み込みに失敗しました');
+      }
+      var payload = await response.json();
+      state.lastSnapshotSource = 'snapshot.rest';
+      return normalizeChecklistPayload(decodeFirestoreRestFields(payload.fields || {}));
+    }, {
+      storeId: storeId,
+      targetDate: targetDate
+    });
   }
 
   async function loadChecklistFromSnapshotSdk(storeId, targetDate) {
     if (!initializeRealtimeClient()) {
       return null;
     }
-    var doc = await buildSnapshotDocRef(storeId, targetDate).get();
-    if (!doc.exists) {
-      return null;
-    }
-    return normalizeChecklistPayload(doc.data() || {});
+    return measureTiming('firestore.snapshot.sdk', 'Firestore snapshot SDK', async function () {
+      var doc = await buildSnapshotDocRef(storeId, targetDate).get();
+      if (!doc.exists) {
+        state.lastSnapshotSource = 'snapshot.none';
+        return null;
+      }
+      state.lastSnapshotSource = 'snapshot.sdk';
+      return normalizeChecklistPayload(doc.data() || {});
+    }, {
+      storeId: storeId,
+      targetDate: targetDate
+    });
   }
 
   async function loadChecklistFromRemoteSnapshot(storeId, targetDate) {
@@ -1951,16 +2204,21 @@
     if (!url) {
       return [];
     }
-    var response = await fetch(url, { cache: 'no-store' });
-    if (response.status === 404) {
-      return [];
-    }
-    if (!response.ok) {
-      throw new Error('Firestore events の読み込みに失敗しました');
-    }
-    var payload = await response.json();
-    return (payload.documents || []).map(function (doc) {
-      return decodeFirestoreRestFields((doc.fields || {}));
+    return measureTiming('firestore.events.rest', 'Firestore events REST', async function () {
+      var response = await fetch(url, { cache: 'no-store' });
+      if (response.status === 404) {
+        return [];
+      }
+      if (!response.ok) {
+        throw new Error('Firestore events の読み込みに失敗しました');
+      }
+      var payload = await response.json();
+      return (payload.documents || []).map(function (doc) {
+        return decodeFirestoreRestFields((doc.fields || {}));
+      });
+    }, {
+      storeId: targetInfo.storeId,
+      targetDate: targetInfo.targetDate
     });
   }
 
@@ -2001,6 +2259,7 @@
     var targetDate = getTodayDateInJst();
     var cachedChecklist = readChecklistCache(storeId, targetDate);
     if (cachedChecklist) {
+      state.lastSnapshotSource = 'local.cache';
       refreshRemoteSnapshotInBackground(storeId, targetDate);
       return cachedChecklist;
     }
@@ -2808,8 +3067,17 @@
 
   async function refreshChecklist(options) {
     var refreshOptions = options || {};
-    var checklist = await state.api.getTodayChecklist(state.idToken);
-    applyChecklistPayload(checklist, { restartSync: refreshOptions.restartSync !== false });
+    var checklist = await measureTiming(
+      refreshOptions.timingName || 'gas.today',
+      refreshOptions.timingLabel || 'GAS API today',
+      function () {
+        return state.api.getTodayChecklist(state.idToken);
+      }
+    );
+    applyChecklistPayload(checklist, {
+      restartSync: refreshOptions.restartSync !== false,
+      source: refreshOptions.source || 'gas.api'
+    });
   }
 
   function startConsistencyRefresh() {
@@ -2848,63 +3116,93 @@
   }
 
   async function boot() {
-    setText(elements.screenMode, 'チェック LIFF');
-    clearError();
-    clearStatus();
+    initializeTimingDebug();
+    var bootMarker = beginTiming('boot.total', '起動全体');
+    var bootError = null;
+    try {
+      setText(elements.screenMode, 'チェック LIFF');
+      clearError();
+      clearStatus();
 
-    var config = await loadConfig();
-    state.config = config;
-    global.OGAWAYA_APP_BASE_URL = config.gasApiBaseUrl || config.functionsApiBaseUrl;
-    global.OGAWAYA_LIFF_ID = config.liffId;
-    global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = config.allowAnonymousAccess;
-    global.OGAWAYA_TRY_LIFF_AUTH_IN_ANONYMOUS = config.tryLiffAuthInAnonymous;
-
-    state.api = createApi({
-      gasApiBaseUrl: config.gasApiBaseUrl,
-      functionsApiBaseUrl: config.functionsApiBaseUrl,
-      defaultStoreId: config.defaultStoreId
-    });
-    var loadedFromSnapshot = false;
-    var snapshotLoadPromise = loadChecklistFromSnapshot().then(function (snapshotChecklist) {
-      if (snapshotChecklist && snapshotChecklist.runId && !state.checklist) {
-        applyChecklistPayload(snapshotChecklist, {
-          restartSync: true
-        });
-        loadedFromSnapshot = true;
-      }
-      return loadedFromSnapshot;
-    }).catch(function (snapshotError) {
-      console.error('[sync] failed to load checklist snapshot', snapshotError);
-      return false;
-    });
-
-    state.idToken = await initializeAuth(config.liffId);
-    state.authUserContext = extractUserContextFromIdToken(state.idToken);
-
-    if (state.checklist) {
-      applyChecklistPayload(state.checklist, {
-        restartSync: false,
-        currentUserOverride: state.authUserContext
+      var config = await measureTiming('config.load', 'config.json', function () {
+        return loadConfig();
       });
-      loadedFromSnapshot = true;
-    } else {
-      loadedFromSnapshot = await snapshotLoadPromise;
+      state.config = config;
+      global.OGAWAYA_APP_BASE_URL = config.gasApiBaseUrl || config.functionsApiBaseUrl;
+      global.OGAWAYA_LIFF_ID = config.liffId;
+      global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = config.allowAnonymousAccess;
+      global.OGAWAYA_TRY_LIFF_AUTH_IN_ANONYMOUS = config.tryLiffAuthInAnonymous;
+
+      state.api = createApi({
+        gasApiBaseUrl: config.gasApiBaseUrl,
+        functionsApiBaseUrl: config.functionsApiBaseUrl,
+        defaultStoreId: config.defaultStoreId
+      });
+      var loadedFromSnapshot = false;
+      var snapshotLoadPromise = loadChecklistFromSnapshot().then(function (snapshotChecklist) {
+        if (snapshotChecklist && snapshotChecklist.runId && !state.checklist) {
+          applyChecklistPayload(snapshotChecklist, {
+            restartSync: true,
+            source: state.lastSnapshotSource || 'snapshot'
+          });
+          loadedFromSnapshot = true;
+        }
+        return loadedFromSnapshot;
+      }).catch(function (snapshotError) {
+        console.error('[sync] failed to load checklist snapshot', snapshotError);
+        return false;
+      });
+
+      state.idToken = await measureTiming('liff.auth', 'LIFF認証全体', function () {
+        return initializeAuth(config.liffId);
+      });
+      state.authUserContext = extractUserContextFromIdToken(state.idToken);
+
       if (state.checklist) {
         applyChecklistPayload(state.checklist, {
           restartSync: false,
-          currentUserOverride: state.authUserContext
+          currentUserOverride: state.authUserContext,
+          source: 'auth.merge'
+        });
+        loadedFromSnapshot = true;
+      } else {
+        loadedFromSnapshot = await snapshotLoadPromise;
+        if (state.checklist) {
+          applyChecklistPayload(state.checklist, {
+            restartSync: false,
+            currentUserOverride: state.authUserContext,
+            source: 'auth.merge'
+          });
+        }
+      }
+
+      if (loadedFromSnapshot) {
+        refreshChecklist({
+          restartSync: false,
+          source: 'gas.api.background',
+          timingName: 'gas.today.background',
+          timingLabel: 'GAS API再取得'
+        }).catch(function (error) {
+          console.error('[sync] background api refresh failed', error);
+        });
+      } else {
+        await refreshChecklist({
+          source: 'gas.api.blocking',
+          timingName: 'gas.today.blocking',
+          timingLabel: 'GAS API初回取得'
         });
       }
-    }
-
-    if (loadedFromSnapshot) {
-      refreshChecklist({ restartSync: false }).catch(function (error) {
-        console.error('[sync] background api refresh failed', error);
+      startConsistencyRefresh();
+    } catch (error) {
+      bootError = error;
+      throw error;
+    } finally {
+      endTiming(bootMarker, {
+        status: bootError ? 'error' : 'ok',
+        firstRender: state.timing.firstRenderRecorded ? 'done' : 'pending',
+        message: bootError && bootError.message ? String(bootError.message) : ''
       });
-    } else {
-      await refreshChecklist();
     }
-    startConsistencyRefresh();
   }
 
   function start() {
