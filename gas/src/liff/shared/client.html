@@ -686,10 +686,9 @@
         state.checklist = checklist;
         setText(elements.storeName, checklist.storeName || (state.me && state.me.store && state.me.store.name) || '-');
         setText(elements.targetDate, checklist.targetDate || '-');
-        if (checklist.progress) {
-          setText(elements.progressSummary, checklist.progress.checked + ' / ' + checklist.progress.total);
-        }
-        renderProgressGauge(checklist.progress);
+        var activeProgress = getActivePeriodProgress(checklist);
+        setText(elements.progressSummary, activeProgress.checked + ' / ' + activeProgress.total);
+        renderProgressGauge(activeProgress);
       }
 
       function renderProgressGauge(progress) {
@@ -752,6 +751,7 @@
         state.activePeriod = normalizeTaskPeriod(period);
         updatePeriodTheme();
         if (state.checklist) {
+          renderOverview(state.checklist);
           renderChecklist(state.checklist);
         }
         renderSelectedTaskDetail({ scroll: false });
@@ -1044,6 +1044,33 @@
           total: state.checklist.items.length,
           checked: checkedCount
         };
+        state.checklist.progressByPeriod = buildProgressByPeriod(state.checklist.items);
+      }
+
+      function buildProgressByPeriod(items) {
+        var progressByPeriod = {};
+        Object.keys(TASK_PERIOD_LABELS).forEach(function (period) {
+          progressByPeriod[period] = {
+            checked: 0,
+            total: 0
+          };
+        });
+        normalizeArray(items).forEach(function (item) {
+          var period = normalizeTaskPeriod(item.period);
+          progressByPeriod[period].total += 1;
+          if (item.status === 'checked') {
+            progressByPeriod[period].checked += 1;
+          }
+        });
+        return progressByPeriod;
+      }
+
+      function getActivePeriodProgress(checklist) {
+        if (!checklist) {
+          return { checked: 0, total: 0 };
+        }
+        var progressByPeriod = checklist.progressByPeriod || buildProgressByPeriod(checklist.items || []);
+        return progressByPeriod[state.activePeriod] || { checked: 0, total: 0 };
       }
 
       function upsertIncompleteItemFromChecklistItem(item) {

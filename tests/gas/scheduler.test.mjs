@@ -296,6 +296,127 @@ test('daily closing は前日分を対象に未完了通知し、未完了なし
   assert.equal(secondClosing.closedRuns[0].closed_at, closing.closedRuns[0].closed_at);
 });
 
+test('daily closing は週間・月間タスクを期間末まで未完了通知しない', async () => {
+  const app = await createSchedulerApp({
+    pushMessage() {
+      return { status: 'sent' };
+    }
+  });
+  app.clock.now = () => new Date('2026-04-27T01:00:00Z');
+  app.clock.yesterday = () => '2026-04-26';
+  app.repository.createChecklistRun({
+    id: 'run-week-start',
+    template_id: 'tmpl-001',
+    store_id: 'store-001',
+    target_date: '2026-04-26',
+    status: 'open',
+    notified_at: '2026-04-26T01:30:00Z',
+    closed_at: '',
+    created_at: '2026-04-26T01:30:00Z'
+  });
+  app.repository.replaceTable('checklist_run_items', [
+    {
+      id: 'run-item-weekly',
+      run_id: 'run-week-start',
+      template_item_id: 'tmpl-item-001',
+      title: '週間確認',
+      period: 'weekly',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-26T01:30:00Z'
+    }
+  ]);
+
+  const closing = app.runDailyClosing();
+
+  assert.equal(closing.notifications.length, 0);
+});
+
+test('daily closing は週末後に週間タスクを未完了通知する', async () => {
+  const app = await createSchedulerApp({
+    pushMessage() {
+      return { status: 'sent' };
+    }
+  });
+  app.clock.now = () => new Date('2026-05-03T01:00:00Z');
+  app.clock.yesterday = () => '2026-05-02';
+  app.repository.createChecklistRun({
+    id: 'run-week-start',
+    template_id: 'tmpl-001',
+    store_id: 'store-001',
+    target_date: '2026-04-26',
+    status: 'closed',
+    notified_at: '2026-04-26T01:30:00Z',
+    closed_at: '2026-04-27T01:00:00Z',
+    created_at: '2026-04-26T01:30:00Z'
+  });
+  app.repository.replaceTable('checklist_run_items', [
+    {
+      id: 'run-item-weekly',
+      run_id: 'run-week-start',
+      template_item_id: 'tmpl-item-001',
+      title: '週間確認',
+      period: 'weekly',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-26T01:30:00Z'
+    }
+  ]);
+
+  const closing = app.runDailyClosing();
+
+  assert.equal(closing.notifications.length > 0, true);
+  assert.doesNotMatch(closing.notifications[0].message, /前日分/);
+  assert.match(closing.notifications[0].message, /週間確認/);
+});
+
+test('daily closing は月末後に月間タスクを未完了通知する', async () => {
+  const app = await createSchedulerApp({
+    pushMessage() {
+      return { status: 'sent' };
+    }
+  });
+  app.clock.now = () => new Date('2026-05-01T01:00:00Z');
+  app.clock.yesterday = () => '2026-04-30';
+  app.repository.createChecklistRun({
+    id: 'run-month-start',
+    template_id: 'tmpl-001',
+    store_id: 'store-001',
+    target_date: '2026-04-01',
+    status: 'closed',
+    notified_at: '2026-04-01T01:30:00Z',
+    closed_at: '2026-04-02T01:00:00Z',
+    created_at: '2026-04-01T01:30:00Z'
+  });
+  app.repository.replaceTable('checklist_run_items', [
+    {
+      id: 'run-item-monthly',
+      run_id: 'run-month-start',
+      template_item_id: 'tmpl-item-001',
+      title: '月間確認',
+      period: 'monthly',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-01T01:30:00Z'
+    }
+  ]);
+
+  const closing = app.runDailyClosing();
+
+  assert.equal(closing.notifications.length > 0, true);
+  assert.doesNotMatch(closing.notifications[0].message, /前日分/);
+  assert.match(closing.notifications[0].message, /月間確認/);
+});
+
 test('締切後でもチェック更新は成功し、操作履歴ログは作成しない', async () => {
   const app = await createSchedulerApp({
     pushMessage() {

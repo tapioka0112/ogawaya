@@ -127,6 +127,146 @@ async function createAnonymousChecklistApp() {
   });
 }
 
+async function createPeriodWindowChecklistApp(options = {}) {
+  const runtime = await loadGasRuntime();
+  const seed = createBaseDataset();
+  seed.checklist_template_items = [
+    {
+      id: 'tmpl-item-daily',
+      template_id: 'tmpl-001',
+      title: '日間確認',
+      description: '',
+      period: 'daily',
+      sort_order: '1',
+      is_required: 'true',
+      is_active: 'true',
+      created_at: '2026-04-01T00:00:00Z',
+      updated_at: '2026-04-01T00:00:00Z'
+    },
+    {
+      id: 'tmpl-item-weekly',
+      template_id: 'tmpl-001',
+      title: '週間確認',
+      description: '',
+      period: 'weekly',
+      sort_order: '2',
+      is_required: 'true',
+      is_active: 'true',
+      created_at: '2026-04-01T00:00:00Z',
+      updated_at: '2026-04-01T00:00:00Z'
+    },
+    {
+      id: 'tmpl-item-monthly',
+      template_id: 'tmpl-001',
+      title: '月間確認',
+      description: '',
+      period: 'monthly',
+      sort_order: '3',
+      is_required: 'true',
+      is_active: 'true',
+      created_at: '2026-04-01T00:00:00Z',
+      updated_at: '2026-04-01T00:00:00Z'
+    }
+  ];
+  seed.checklist_runs = [
+    {
+      id: 'run-month',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-01',
+      status: 'open',
+      notified_at: '2026-04-01T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-01T01:30:00Z'
+    },
+    {
+      id: 'run-week',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-26',
+      status: 'open',
+      notified_at: '2026-04-26T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-26T01:30:00Z'
+    },
+    {
+      id: 'run-today',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-29',
+      status: 'open',
+      notified_at: '2026-04-29T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-29T01:30:00Z'
+    }
+  ];
+  seed.checklist_run_items = [
+    {
+      id: 'run-item-monthly',
+      run_id: 'run-month',
+      template_item_id: 'tmpl-item-monthly',
+      title: '月間確認',
+      period: 'monthly',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-01T01:30:00Z'
+    },
+    {
+      id: 'run-item-weekly',
+      run_id: 'run-week',
+      template_item_id: 'tmpl-item-weekly',
+      title: '週間確認',
+      period: 'weekly',
+      sort_order: '1',
+      status: 'checked',
+      checked_by: 'line-user-001',
+      checked_by_name: '田中LINE',
+      checked_at: '2026-04-28T02:00:00Z',
+      updated_at: '2026-04-28T02:00:00Z'
+    },
+    {
+      id: 'run-item-daily',
+      run_id: 'run-today',
+      template_item_id: 'tmpl-item-daily',
+      title: '日間確認',
+      period: 'daily',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-29T01:30:00Z'
+    }
+  ];
+
+  return runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    snapshotClient: options.snapshotClient,
+    identityClient: {
+      verifyIdToken(idToken) {
+        if (idToken !== 'valid-pt') {
+          throw new Error('invalid token');
+        }
+        return { lineUserId: 'line-user-001', displayName: '田中LINE' };
+      }
+    },
+    clock: {
+      now() {
+        return new Date('2026-04-29T02:00:00Z');
+      },
+      today() {
+        return '2026-04-29';
+      },
+      yesterday() {
+        return '2026-04-28';
+      }
+    }
+  });
+}
+
 async function createMonthlyStatsApp() {
   const runtime = await loadGasRuntime();
   const seed = createBaseDataset();
@@ -307,6 +447,62 @@ test('同日チェックリストを返す', async () => {
   assert.equal(response.body.items[1].period, 'daily');
   assert.equal(response.body.currentUser.userId, 'line-user-001');
   assert.equal(response.body.currentUser.name, '田中LINE');
+});
+
+test('GET /api/checklists/today は期間内の週間・月間タスクを同じ item として返す', async () => {
+  const app = await createPeriodWindowChecklistApp();
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/today',
+    query: { idToken: 'valid-pt' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.targetDate, '2026-04-29');
+  assert.equal(
+    JSON.stringify(response.body.items.map((item) => [item.id, item.period])),
+    JSON.stringify([
+      ['run-item-daily', 'daily'],
+      ['run-item-weekly', 'weekly'],
+      ['run-item-monthly', 'monthly']
+    ])
+  );
+  assert.equal(JSON.stringify(response.body.progressByPeriod), JSON.stringify({
+    daily: { checked: 0, total: 1 },
+    weekly: { checked: 1, total: 1 },
+    monthly: { checked: 0, total: 1 }
+  }));
+  assert.equal(response.body.progress.checked, 1);
+  assert.equal(response.body.progress.total, 3);
+});
+
+test('期間内タスクのチェック更新は元日と今日の snapshot を更新する', async () => {
+  const snapshotWrites = [];
+  const app = await createPeriodWindowChecklistApp({
+    snapshotClient: {
+      writeTodaySnapshot(storeId, targetDate, payload) {
+        snapshotWrites.push({ storeId, targetDate, payload });
+        return { responseCode: 200 };
+      }
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/checklist-items/run-item-monthly/check',
+    query: { idToken: 'valid-pt' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(
+    snapshotWrites.map((entry) => entry.targetDate),
+    ['2026-04-01', '2026-04-29']
+  );
+  assert.equal(snapshotWrites[1].payload.items.length, 3);
+  assert.equal(snapshotWrites[1].payload.progressByPeriod.monthly.checked, 1);
 });
 
 test('GET /api/checklists/today は Firestore snapshot を保存する', async () => {

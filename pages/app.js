@@ -1128,6 +1128,7 @@
   function switchPeriod(period) {
     state.activePeriod = normalizeTaskPeriod(period);
     updatePeriodTheme();
+    renderOverview();
     renderChecklist();
     renderSelectedTaskDetail({ focus: false });
   }
@@ -2005,6 +2006,33 @@
       checked: checkedCount,
       total: items.length
     };
+    state.checklist.progressByPeriod = buildProgressByPeriod(items);
+  }
+
+  function buildProgressByPeriod(items) {
+    var progressByPeriod = {};
+    Object.keys(TASK_PERIOD_LABELS).forEach(function (period) {
+      progressByPeriod[period] = {
+        checked: 0,
+        total: 0
+      };
+    });
+    (items || []).forEach(function (item) {
+      var period = normalizeTaskPeriod(item.period);
+      progressByPeriod[period].total += 1;
+      if (item.status === 'checked') {
+        progressByPeriod[period].checked += 1;
+      }
+    });
+    return progressByPeriod;
+  }
+
+  function getActivePeriodProgress(checklist) {
+    if (!checklist) {
+      return { checked: 0, total: 0 };
+    }
+    var progressByPeriod = checklist.progressByPeriod || buildProgressByPeriod(checklist.items || []);
+    return progressByPeriod[state.activePeriod] || { checked: 0, total: 0 };
   }
 
   function findChecklistItemById(runItemId) {
@@ -3177,8 +3205,9 @@
     }
     setText(elements.storeName, checklist.storeName || '-');
     setText(elements.targetDate, checklist.targetDate || '-');
-    setText(elements.progressSummary, checklist.progress.checked + ' / ' + checklist.progress.total);
-    renderProgressGauge(checklist.progress);
+    var activeProgress = getActivePeriodProgress(checklist);
+    setText(elements.progressSummary, activeProgress.checked + ' / ' + activeProgress.total);
+    renderProgressGauge(activeProgress);
   }
 
   function renderProgressGauge(progress) {

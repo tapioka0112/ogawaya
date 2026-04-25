@@ -41,6 +41,11 @@
     taskPeriodInput: document.getElementById('task-period-input'),
     createTaskButton: document.getElementById('create-task-button'),
     taskSelect: document.getElementById('task-select'),
+    insertDailyDateInput: document.getElementById('insert-daily-date-input'),
+    insertWeekMonthInput: document.getElementById('insert-week-month-input'),
+    insertWeekSelect: document.getElementById('insert-week-select'),
+    insertMonthInput: document.getElementById('insert-month-input'),
+    insertPeriodFields: document.querySelectorAll('[data-insert-period-field]'),
     insertTaskButton: document.getElementById('insert-task-button'),
     templateNameInput: document.getElementById('template-name-input'),
     templateTaskList: document.getElementById('template-task-list'),
@@ -193,6 +198,51 @@
     }
     var previous = new Date(jstDate.getTime() - (24 * 60 * 60 * 1000));
     return formatJstDate(previous);
+  }
+
+  function formatUtcDate(date) {
+    var year = date.getUTCFullYear();
+    var month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    var day = String(date.getUTCDate()).padStart(2, '0');
+    return year + '-' + month + '-' + day;
+  }
+
+  function parseMonthValue(monthValue) {
+    var match = String(monthValue || '').match(/^(\d{4})-(\d{2})$/);
+    if (!match) {
+      throw new Error('対象月を選択してください');
+    }
+    return {
+      year: Number(match[1]),
+      month: Number(match[2])
+    };
+  }
+
+  function formatMonthValue(dateValue) {
+    return String(dateValue || '').slice(0, 7);
+  }
+
+  function addUtcDays(date, days) {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + Number(days || 0)));
+  }
+
+  function listWeeksForMonth(monthValue) {
+    var parts = parseMonthValue(monthValue);
+    var firstDay = new Date(Date.UTC(parts.year, parts.month - 1, 1));
+    var lastDay = new Date(Date.UTC(parts.year, parts.month, 0));
+    var weekStart = addUtcDays(firstDay, -firstDay.getUTCDay());
+    var weeks = [];
+    while (weekStart <= lastDay) {
+      var weekEnd = addUtcDays(weekStart, 6);
+      weeks.push({
+        index: weeks.length + 1,
+        startDate: formatUtcDate(weekStart),
+        endDate: formatUtcDate(weekEnd),
+        label: '第' + (weeks.length + 1) + '週（' + formatUtcDate(weekStart).slice(5).replace('-', '/') + '〜' + formatUtcDate(weekEnd).slice(5).replace('-', '/') + '）'
+      });
+      weekStart = addUtcDays(weekStart, 7);
+    }
+    return weeks;
   }
 
   function safeSetStorage(key, value) {
@@ -391,6 +441,91 @@
     );
     if (state.activeFlow === 'create-template') {
       renderTemplateTaskChecklist();
+    }
+    updateInsertPeriodFields();
+  }
+
+  function getSelectedTask() {
+    var taskId = elements.taskSelect ? String(elements.taskSelect.value || '') : '';
+    if (!taskId) {
+      return null;
+    }
+    return (state.tasks || []).find(function (task) {
+      return task.id === taskId;
+    }) || null;
+  }
+
+  function fillWeekOptions() {
+    if (!elements.insertWeekMonthInput || !elements.insertWeekSelect) {
+      return;
+    }
+    var monthValue = elements.insertWeekMonthInput.value || formatMonthValue(state.selectedDate);
+    var selectedValue = elements.insertWeekSelect.value;
+    fillSelectOptions(
+      elements.insertWeekSelect,
+      listWeeksForMonth(monthValue).map(function (week) {
+        return {
+          value: week.startDate,
+          label: week.label
+        };
+      })
+    );
+    if (selectedValue) {
+      elements.insertWeekSelect.value = selectedValue;
+    }
+    if (!elements.insertWeekSelect.value && elements.insertWeekSelect.options.length > 0) {
+      elements.insertWeekSelect.value = elements.insertWeekSelect.options[0].value;
+    }
+  }
+
+  function updateInsertPeriodFields() {
+    var task = getSelectedTask();
+    var period = normalizeTaskPeriod(task && task.period);
+    elements.insertPeriodFields.forEach(function (field) {
+      field.hidden = field.dataset.insertPeriodField !== period;
+    });
+    if (elements.insertDailyDateInput && !elements.insertDailyDateInput.value) {
+      elements.insertDailyDateInput.value = state.selectedDate;
+    }
+    if (elements.insertWeekMonthInput && !elements.insertWeekMonthInput.value) {
+      elements.insertWeekMonthInput.value = formatMonthValue(state.selectedDate);
+    }
+    if (elements.insertMonthInput && !elements.insertMonthInput.value) {
+      elements.insertMonthInput.value = formatMonthValue(state.selectedDate);
+    }
+    if (period === 'weekly') {
+      fillWeekOptions();
+    }
+  }
+
+  function getSelectedWeekStartDate() {
+    if (!elements.insertWeekSelect || !elements.insertWeekSelect.value) {
+      fillWeekOptions();
+    }
+    var selectedWeekStart = elements.insertWeekSelect ? String(elements.insertWeekSelect.value || '') : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedWeekStart)) {
+      throw new Error('対象週を選択してください');
+    }
+    return selectedWeekStart;
+  }
+
+  function getSelectedMonthStartDate() {
+    var parts = parseMonthValue(elements.insertMonthInput && elements.insertMonthInput.value);
+    return parts.year + '-' + String(parts.month).padStart(2, '0') + '-01';
+  }
+
+  function getInsertTargetDateForTask(task) {
+    switch (normalizeTaskPeriod(task && task.period)) {
+      case 'weekly':
+        return getSelectedWeekStartDate();
+      case 'monthly':
+        return getSelectedMonthStartDate();
+      default:
+        var targetDate = elements.insertDailyDateInput ? String(elements.insertDailyDateInput.value || '') : '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+          throw new Error('対象日を選択してください');
+        }
+        return targetDate;
     }
   }
 
@@ -910,17 +1045,25 @@
     if (!taskId) {
       throw new Error('挿入するタスクを選択してください');
     }
+    var task = getSelectedTask();
+    if (!task) {
+      throw new Error('挿入するタスクが見つかりません');
+    }
+    var targetDate = getInsertTargetDateForTask(task);
     var response = await apiRequest(
       'POST',
-      '/api/admin/runs/' + encodeURIComponent(state.selectedDate) + '/items:insert',
+      '/api/admin/runs/' + encodeURIComponent(targetDate) + '/items:insert',
       {
         taskId: taskId
       }
     );
     if (response.item) {
-      appendCurrentRunItems([response.item]);
-    } else {
-      await loadRunItems({ preferCache: false });
+      appendRunItemsForDate(targetDate, [response.item]);
+    } else if (targetDate === state.selectedDate) {
+      await loadRunItems({ preferCache: false, targetDate: targetDate });
+    }
+    if (targetDate !== state.selectedDate) {
+      await selectDate(targetDate);
     }
     setStatus('タスクを挿入しました');
   }
@@ -999,6 +1142,9 @@
     state.selectedDate = normalized;
     if (elements.dateInput) {
       elements.dateInput.value = normalized;
+    }
+    if (elements.insertDailyDateInput) {
+      elements.insertDailyDateInput.value = normalized;
     }
     var year = Number(normalized.slice(0, 4));
     var month = Number(normalized.slice(5, 7));
@@ -1107,6 +1253,13 @@
     bindButtonClick(elements.createTemplateButton, createTemplate);
     bindButtonClick(elements.applyTemplateButton, applyTemplate);
 
+    if (elements.taskSelect) {
+      elements.taskSelect.addEventListener('change', updateInsertPeriodFields);
+    }
+    if (elements.insertWeekMonthInput) {
+      elements.insertWeekMonthInput.addEventListener('change', fillWeekOptions);
+    }
+
     if (elements.dateInput) {
       elements.dateInput.addEventListener('change', function () {
         selectDate(elements.dateInput.value).catch(function (error) {
@@ -1134,6 +1287,16 @@
     if (elements.dateInput) {
       elements.dateInput.value = state.selectedDate;
     }
+    if (elements.insertDailyDateInput) {
+      elements.insertDailyDateInput.value = state.selectedDate;
+    }
+    if (elements.insertWeekMonthInput) {
+      elements.insertWeekMonthInput.value = formatMonthValue(state.selectedDate);
+    }
+    if (elements.insertMonthInput) {
+      elements.insertMonthInput.value = formatMonthValue(state.selectedDate);
+    }
+    updateInsertPeriodFields();
     setCalendarMonth(Number(state.selectedDate.slice(0, 4)), Number(state.selectedDate.slice(5, 7)));
     bindEvents();
     setActiveFlow(state.activeFlow);

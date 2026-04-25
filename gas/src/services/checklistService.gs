@@ -555,6 +555,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var checkedCount = items.filter(function (item) {
       return item.status === ns.ITEM_STATUS.CHECKED;
     }).length;
+    var progressByPeriod = buildProgressByPeriod(items);
     var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, items);
 
     return {
@@ -568,10 +569,33 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         total: items.length,
         checked: checkedCount
       },
+      progressByPeriod: progressByPeriod,
       items: items.map(function (item) {
         return buildRunItemResponse(item, metadataByTemplateItemId);
       })
     };
+  }
+
+  function buildProgressByPeriod(items) {
+    var progressByPeriod = {};
+    ns.TASK_PERIOD_VALUES.forEach(function (period) {
+      progressByPeriod[period] = {
+        checked: 0,
+        total: 0
+      };
+    });
+    items.forEach(function (item) {
+      var period = ns.normalizeTaskPeriod(item.period);
+      progressByPeriod[period].total += 1;
+      if (item.status === ns.ITEM_STATUS.CHECKED) {
+        progressByPeriod[period].checked += 1;
+      }
+    });
+    return progressByPeriod;
+  }
+
+  function getPeriodSortIndex(period) {
+    return ns.TASK_PERIOD_VALUES.indexOf(ns.normalizeTaskPeriod(period));
   }
 
   function buildTemplateItemResponse(item) {
@@ -617,6 +641,56 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return (parts.day + Math.floor((13 * (month + 1)) / 5) + year + Math.floor(year / 4) - Math.floor(year / 100) + Math.floor(year / 400)) % 7;
   }
 
+  function formatUtcDate(date) {
+    var year = date.getUTCFullYear();
+    var month = String(date.getUTCMonth() + 1);
+    var day = String(date.getUTCDate());
+    return year + '-' + (month.length === 1 ? '0' + month : month) + '-' + (day.length === 1 ? '0' + day : day);
+  }
+
+  function addDaysToTargetDate(targetDate, days) {
+    var parts = parseTargetDateParts(targetDate);
+    return formatUtcDate(new Date(Date.UTC(parts.year, parts.month - 1, parts.day + Number(days || 0))));
+  }
+
+  function getMonthStartDate(targetDate) {
+    var parts = parseTargetDateParts(targetDate);
+    return parts.year + '-' + (parts.month < 10 ? '0' + parts.month : String(parts.month)) + '-01';
+  }
+
+  function getMonthEndDate(targetDate) {
+    var parts = parseTargetDateParts(targetDate);
+    return formatUtcDate(new Date(Date.UTC(parts.year, parts.month, 0)));
+  }
+
+  function getSundayWeekStartDate(targetDate) {
+    var dayOfWeek = calculateDayOfWeek(targetDate);
+    var offset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    return addDaysToTargetDate(targetDate, offset);
+  }
+
+  function isRunItemVisibleOnTargetDate(item, runTargetDate, targetDate) {
+    var period = ns.normalizeTaskPeriod(item.period);
+    if (period === ns.TASK_PERIODS.DAILY) {
+      return runTargetDate === targetDate;
+    }
+    if (period === ns.TASK_PERIODS.WEEKLY) {
+      return runTargetDate === getSundayWeekStartDate(targetDate);
+    }
+    return runTargetDate === getMonthStartDate(targetDate);
+  }
+
+  function isRunItemDueForClosing(item, runTargetDate, closingDate) {
+    var period = ns.normalizeTaskPeriod(item.period);
+    if (period === ns.TASK_PERIODS.DAILY) {
+      return runTargetDate === closingDate;
+    }
+    if (period === ns.TASK_PERIODS.WEEKLY) {
+      return runTargetDate === getSundayWeekStartDate(closingDate) && calculateDayOfWeek(closingDate) === 0;
+    }
+    return runTargetDate === getMonthStartDate(closingDate) && closingDate === getMonthEndDate(closingDate);
+  }
+
   function shouldCreateTemplateItemOnDate(templateItem, targetDate) {
     var period = ns.normalizeTaskPeriod(templateItem.period);
     if (period === ns.TASK_PERIODS.DAILY) {
@@ -648,6 +722,48 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       checked_at: '',
       updated_at: now
     };
+  }
+
+  function listHomeRunItemsForStore(repository, storeId, targetDate, todayRun) {
+    var runById = {};
+    var runs = [];
+    function addRun(run) {
+      if (!run || runById[run.id]) {
+        return;
+      }
+      runById[run.id] = run;
+      runs.push(run);
+    }
+
+    addRun(todayRun || repository.findRunByStoreAndDate(storeId, targetDate));
+    addRun(repository.findRunByStoreAndDate(storeId, getSundayWeekStartDate(targetDate)));
+    addRun(repository.findRunByStoreAndDate(storeId, getMonthStartDate(targetDate)));
+
+    var itemIds = {};
+    var items = [];
+    runs.forEach(function (run) {
+      repository.listRunItems(run.id).forEach(function (item) {
+        if (!isRunItemVisibleOnTargetDate(item, run.target_date, targetDate) || itemIds[item.id]) {
+          return;
+        }
+        itemIds[item.id] = true;
+        items.push(item);
+      });
+    });
+
+    return items.sort(function (a, b) {
+      var periodDiff = getPeriodSortIndex(a.period) - getPeriodSortIndex(b.period);
+      if (periodDiff !== 0) {
+        return periodDiff;
+      }
+      return Number(a.sort_order || 0) - Number(b.sort_order || 0);
+    });
+  }
+
+  function runHasItemsVisibleOnTargetDate(repository, run, targetDate) {
+    return repository.listRunItems(run.id).some(function (item) {
+      return isRunItemVisibleOnTargetDate(item, run.target_date, targetDate);
+    });
   }
 
   function ensureStoreScope(repository, user, storeId) {
@@ -763,20 +879,17 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return payload;
     }
 
-    function writeChecklistSnapshot(run, items) {
+    function writeChecklistSnapshotPayload(store, targetDate, payload) {
       if (!snapshotClient) {
         return {
           status: 'disabled'
         };
       }
-      var store = repository.findStoreById(run.store_id);
-      ns.assert(store, 'config_error', '店舗が見つかりません', 500);
-      var payload = buildChecklistSnapshot(store, run, items);
       var startedAt = nowMillis();
       try {
         var result = snapshotClient.writeTodaySnapshot(
           store.id,
-          run.target_date,
+          targetDate,
           payload
         );
         var responseCode = Number(result && result.responseCode ? result.responseCode : 0);
@@ -790,7 +903,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         }
         ns.logEvent('info', 'firestore.snapshot.write.success', {
           storeId: store.id,
-          targetDate: run.target_date,
+          targetDate: targetDate,
           durationMs: nowMillis() - startedAt,
           responseCode: responseCode
         });
@@ -806,7 +919,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var authorizationUrl = errorDetails.authorizationUrl ? String(errorDetails.authorizationUrl) : '';
         ns.logEvent('warn', 'firestore.snapshot.write.failed', {
           storeId: store.id,
-          targetDate: run.target_date,
+          targetDate: targetDate,
           durationMs: nowMillis() - startedAt,
           code: error && error.code ? String(error.code) : '',
           statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
@@ -826,6 +939,38 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           authorizationUrl: authorizationUrl
         };
       }
+    }
+
+    function writeChecklistSnapshot(run, items) {
+      var store = repository.findStoreById(run.store_id);
+      ns.assert(store, 'config_error', '店舗が見つかりません', 500);
+      return writeChecklistSnapshotPayload(store, run.target_date, buildChecklistSnapshot(store, run, items));
+    }
+
+    function writeChecklistSnapshotForTargetDate(storeId, targetDate) {
+      var run = repository.findRunByStoreAndDate(storeId, targetDate);
+      if (!run) {
+        return {
+          status: 'missing_run'
+        };
+      }
+      var store = repository.findStoreById(storeId);
+      ns.assert(store, 'config_error', '店舗が見つかりません', 500);
+      var items = listHomeRunItemsForStore(repository, storeId, targetDate, run);
+      return writeChecklistSnapshotPayload(store, targetDate, buildChecklistSnapshot(store, run, items));
+    }
+
+    function writeRunAndCurrentSnapshots(run) {
+      var originSync = writeChecklistSnapshotForTargetDate(run.store_id, run.target_date);
+      var currentTargetDate = resolveBusinessDate(clock.now());
+      if (
+        currentTargetDate !== run.target_date
+        && runHasItemsVisibleOnTargetDate(repository, run, currentTargetDate)
+        && repository.findRunByStoreAndDate(run.store_id, currentTargetDate)
+      ) {
+        writeChecklistSnapshotForTargetDate(run.store_id, currentTargetDate);
+      }
+      return originSync;
     }
 
     function registerNotificationRecipient(currentUser) {
@@ -941,7 +1086,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         return '・' + item.title;
       }).join('\n');
       return [
-        '前日分のチェックリストに未完了項目があります。',
+        'チェックリストに未完了項目があります。',
         '',
         '店舗：' + store.name,
         '対象日：' + run.target_date,
@@ -1375,7 +1520,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var runMs = nowMillis() - runStartedAt;
 
         var itemsStartedAt = nowMillis();
-        var items = repository.listRunItems(run.id);
+        var items = listHomeRunItemsForStore(repository, currentUser.user.store_id, run.target_date, run);
         var itemsMs = nowMillis() - itemsStartedAt;
 
         var buildStartedAt = nowMillis();
@@ -1400,7 +1545,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       getTodayIncomplete: function (query) {
         var currentUser = requireAuthenticatedUser(query);
         var run = getTodayRunForUser(currentUser.user);
-        var items = repository.listRunItems(run.id).filter(function (item) {
+        var items = listHomeRunItemsForStore(repository, currentUser.user.store_id, run.target_date, run).filter(function (item) {
           return item.status === ns.ITEM_STATUS.UNCHECKED;
         });
         return {
@@ -1631,7 +1776,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             updated_at: now
           }
         ])[0];
-        writeChecklistSnapshot(run, repository.listRunItems(run.id));
+        writeRunAndCurrentSnapshots(run);
         return {
           item: buildRunItemResponse(createdItem, buildTemplateItemMetadataMap(repository, [createdItem]))
         };
@@ -1691,7 +1836,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         });
         var insertedItems = newItems.length > 0 ? repository.createRunItems(newItems) : [];
         var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, insertedItems);
-        writeChecklistSnapshot(run, repository.listRunItems(run.id));
+        writeRunAndCurrentSnapshots(run);
         return {
           insertedCount: insertedItems.length,
           items: insertedItems.map(function (item) {
@@ -1719,7 +1864,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         });
         ns.assert(filteredRunItems.length !== allRunItems.length, 'not_found', '削除対象のタスクが見つかりません', 404);
         repository.replaceTable('checklist_run_items', filteredRunItems);
-        writeChecklistSnapshot(run, repository.listRunItems(run.id));
+        writeRunAndCurrentSnapshots(run);
         return {
           deletedRunItemId: runItemId
         };
@@ -1734,7 +1879,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
         if (item.status === ns.ITEM_STATUS.CHECKED) {
           logCheckMutationBreakdown('api.check_item.breakdown', startedAt, authMs, 0, true);
-          writeChecklistSnapshot(scopedRunItem.run, repository.listRunItems(scopedRunItem.run.id));
+          writeRunAndCurrentSnapshots(scopedRunItem.run);
           return {
             item: buildSingleRunItemResponse(repository, item)
           };
@@ -1752,7 +1897,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var updatedItem = repository.updateRunItem(item.id, changes);
         var storageWriteMs = nowMillis() - writeStartedAt;
         logCheckMutationBreakdown('api.check_item.breakdown', startedAt, authMs, storageWriteMs, false);
-        writeChecklistSnapshot(scopedRunItem.run, repository.listRunItems(scopedRunItem.run.id));
+        writeRunAndCurrentSnapshots(scopedRunItem.run);
         return {
           item: buildSingleRunItemResponse(repository, updatedItem),
           comment: body.comment || ''
@@ -1768,7 +1913,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
         if (item.status === ns.ITEM_STATUS.UNCHECKED) {
           logCheckMutationBreakdown('api.uncheck_item.breakdown', startedAt, authMs, 0, true);
-          writeChecklistSnapshot(scopedRunItem.run, repository.listRunItems(scopedRunItem.run.id));
+          writeRunAndCurrentSnapshots(scopedRunItem.run);
           return {
             item: buildSingleRunItemResponse(repository, item)
           };
@@ -1786,7 +1931,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var updatedItem = repository.updateRunItem(item.id, changes);
         var storageWriteMs = nowMillis() - writeStartedAt;
         logCheckMutationBreakdown('api.uncheck_item.breakdown', startedAt, authMs, storageWriteMs, false);
-        writeChecklistSnapshot(scopedRunItem.run, repository.listRunItems(scopedRunItem.run.id));
+        writeRunAndCurrentSnapshots(scopedRunItem.run);
         return {
           item: buildSingleRunItemResponse(repository, updatedItem),
           reason: body.reason || ''
@@ -2099,7 +2244,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             }
           }
 
-          var snapshotSync = writeChecklistSnapshot(run, repository.listRunItems(run.id));
+          var snapshotSync = writeChecklistSnapshotForTargetDate(template.store_id, targetDate);
           snapshotSyncs.push(Object.assign({
             runId: run.id,
             storeId: template.store_id,
@@ -2115,35 +2260,51 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
       runDailyClosing: function () {
         var notifications = [];
-        var closedRuns = repository.listRunsByDate(clock.yesterday()).map(function (run) {
-          if (run.status === ns.RUN_STATUS.CLOSED) {
-            return run;
-          }
-          var store = repository.findStoreById(run.store_id);
-          var items = repository.listRunItems(run.id).filter(function (item) {
-            return item.status === ns.ITEM_STATUS.UNCHECKED;
+        var closingDate = clock.yesterday();
+        var targetDates = {};
+        targetDates[closingDate] = true;
+        if (calculateDayOfWeek(closingDate) === 0) {
+          targetDates[getSundayWeekStartDate(closingDate)] = true;
+        }
+        if (closingDate === getMonthEndDate(closingDate)) {
+          targetDates[getMonthStartDate(closingDate)] = true;
+        }
+        var processedRunIds = {};
+        var closedRuns = [];
+        Object.keys(targetDates).sort().forEach(function (targetDate) {
+          repository.listRunsByDate(targetDate).forEach(function (run) {
+            if (processedRunIds[run.id]) {
+              return;
+            }
+            processedRunIds[run.id] = true;
+            var store = repository.findStoreById(run.store_id);
+            var items = repository.listRunItems(run.id).filter(function (item) {
+              return item.status === ns.ITEM_STATUS.UNCHECKED
+                && isRunItemDueForClosing(item, run.target_date, closingDate);
+            });
+            if (items.length > 0) {
+              notifications = notifications.concat(notificationService.sendToUsers(
+                run,
+                repository.listLinkedUsersByStore(run.store_id),
+                ns.NOTIFICATION_TYPES.INCOMPLETE,
+                buildIncompleteMessage(store, run, items)
+              ));
+            }
+            var closedRun = run.status === ns.RUN_STATUS.CLOSED
+              ? run
+              : repository.updateRun(run.id, {
+                status: ns.RUN_STATUS.CLOSED,
+                closed_at: ns.toIsoString(clock.now())
+              });
+            writeRunAndCurrentSnapshots(closedRun);
+            closedRuns.push(closedRun);
           });
-          if (items.length > 0) {
-            notifications = notifications.concat(notificationService.sendToUsers(
-              run,
-              repository.listLinkedUsersByStore(run.store_id),
-              ns.NOTIFICATION_TYPES.INCOMPLETE,
-              buildIncompleteMessage(store, run, items)
-            ));
-          }
-          var closedRun = repository.updateRun(run.id, {
-            status: ns.RUN_STATUS.CLOSED,
-            closed_at: ns.toIsoString(clock.now())
-          });
-          writeChecklistSnapshot(closedRun, repository.listRunItems(closedRun.id));
-          return closedRun;
         });
         return {
           closedRuns: closedRuns,
           notifications: notifications
         };
       },
-
       listNotificationTypes: listNotificationTypes
     };
   };

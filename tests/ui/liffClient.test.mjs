@@ -1125,6 +1125,11 @@ test('ホームは期間タブで表示タスクとテーマを切り替える',
             checked: 1,
             total: 2
           },
+          progressByPeriod: {
+            daily: { checked: 0, total: 1 },
+            weekly: { checked: 1, total: 1 },
+            monthly: { checked: 0, total: 0 }
+          },
           items: [
             {
               id: 'run-item-daily',
@@ -1159,13 +1164,14 @@ test('ホームは期間タブで表示タスクとテーマを切り替える',
   await controller.init();
 
   assert.equal(documentRef.body.dataset.taskPeriod, 'daily');
-  assert.equal(documentRef.elements['progress-summary'].textContent, '1 / 2');
+  assert.equal(documentRef.elements['progress-summary'].textContent, '0 / 1');
   assert.ok(findByDataset(documentRef.elements['checklist-items'], 'period', 'daily'));
   assert.equal(findByDataset(documentRef.elements['checklist-items'], 'period', 'weekly'), null);
 
   documentRef.elements['period-tab-weekly'].click();
 
   assert.equal(documentRef.body.dataset.taskPeriod, 'weekly');
+  assert.equal(documentRef.elements['progress-summary'].textContent, '1 / 1');
   assert.ok(findByDataset(documentRef.elements['checklist-items'], 'period', 'weekly'));
   assert.equal(findByDataset(documentRef.elements['checklist-items'], 'period', 'daily'), null);
 
@@ -1173,7 +1179,7 @@ test('ホームは期間タブで表示タスクとテーマを切り替える',
 
   assert.equal(documentRef.body.dataset.taskPeriod, 'monthly');
   assert.equal(documentRef.elements['checklist-items'].children[0].textContent, '月間タスクはありません。');
-  assert.equal(documentRef.elements['progress-summary'].textContent, '1 / 2');
+  assert.equal(documentRef.elements['progress-summary'].textContent, '0 / 0');
 });
 
 test('チェック操作は API 応答前でも UI を即時反映する', async () => {
