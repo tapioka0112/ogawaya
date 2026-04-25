@@ -115,6 +115,7 @@
   var CLIENT_ID_STORAGE_KEY = 'ogawaya:client-id';
   var CHECKLIST_CACHE_STORAGE_KEY = 'ogawaya:checklist-cache:v1';
   var DEBUG_TIMING_STORAGE_KEY = 'ogawaya:debug-timing';
+  var LIFF_REAUTH_STORAGE_KEY = 'ogawaya:liff-reauth-attempted-at';
   var SNAPSHOT_DOC_ID = 'today';
   // 統計タブは Firestore snapshot をクライアント集計して表示する。
   var LIFF_SDK_URL = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
@@ -173,6 +174,17 @@
         return;
       }
       global.localStorage.setItem(key, String(value || ''));
+    } catch (error) {
+      // noop
+    }
+  }
+
+  function removeStorageValue(key) {
+    try {
+      if (!global.localStorage || typeof global.localStorage.removeItem !== 'function') {
+        return;
+      }
+      global.localStorage.removeItem(key);
     } catch (error) {
       // noop
     }
@@ -333,6 +345,7 @@
         iss: payload && payload.iss ? String(payload.iss) : '',
         aud: payload && payload.aud ? String(payload.aud) : '',
         exp: payload && payload.exp ? String(payload.exp) : '',
+        expDeltaSec: payload && payload.exp ? Number(payload.exp) - Math.floor(Date.now() / 1000) : '',
         length: idToken.length,
         parts: parts.length
       };
@@ -342,6 +355,66 @@
         parts: parts.length
       };
     }
+  }
+
+  function isIdTokenExpired(idToken, skewSeconds) {
+    var diagnostics = extractIdTokenDiagnostics(idToken);
+    var expSeconds = Number(diagnostics.exp);
+    if (!isFinite(expSeconds) || expSeconds <= 0) {
+      return false;
+    }
+    return expSeconds <= Math.floor(Date.now() / 1000) + Number(skewSeconds || 0);
+  }
+
+  function clearLiffSessionRenewalAttempt() {
+    removeStorageValue(LIFF_REAUTH_STORAGE_KEY);
+  }
+
+  function requestLiffSessionRenewal(reason) {
+    var nowMs = Date.now();
+    var previousAttemptMs = Number(readStorageValue(LIFF_REAUTH_STORAGE_KEY));
+    if (isFinite(previousAttemptMs) && previousAttemptMs > 0 && nowMs - previousAttemptMs < 60000) {
+      return false;
+    }
+    writeStorageValue(LIFF_REAUTH_STORAGE_KEY, String(nowMs));
+    setStatus('LINE認証を更新しています...');
+    if (global.liff && typeof global.liff.logout === 'function') {
+      global.liff.logout();
+    }
+    var isInClient = global.liff && typeof global.liff.isInClient === 'function'
+      ? global.liff.isInClient()
+      : true;
+    if (!isInClient && global.liff && typeof global.liff.login === 'function') {
+      global.liff.login({
+        redirectUri: global.location && global.location.href ? String(global.location.href) : undefined
+      });
+      return true;
+    }
+    if (global.location && typeof global.location.reload === 'function') {
+      global.location.reload();
+      return true;
+    }
+    throw new Error('LINE認証を更新できません。LINEから開き直してください。' + (reason ? ' reason=' + reason : ''));
+  }
+
+  function isRenewableAuthError(error) {
+    if (!error || Number(error.statusCode) !== 401) {
+      return false;
+    }
+    var message = error.message ? String(error.message) : '';
+    var details = error.details && typeof error.details === 'object' ? error.details : {};
+    return (
+      message.indexOf('LIFF access token') !== -1 ||
+      String(details.verifyDescriptions || '').indexOf('IdToken expired') !== -1 ||
+      Number(details.accessTokenVerifyStatus || 0) === 400
+    );
+  }
+
+  function renewLiffSessionForAuthError(error) {
+    if (!isRenewableAuthError(error)) {
+      return false;
+    }
+    return requestLiffSessionRenewal('api_auth_failed');
   }
 
   function extractLiffChannelId(liffId) {
@@ -521,6 +594,8 @@
       liffId: liffId,
       liffChannelId: extractLiffChannelId(liffId),
       aud: idTokenDiagnostics.aud,
+      exp: idTokenDiagnostics.exp,
+      expDeltaSec: idTokenDiagnostics.expDeltaSec,
       tokenLength: idTokenDiagnostics.length,
       tokenParts: idTokenDiagnostics.parts,
       accessToken: accessToken ? 'ok' : 'empty',
@@ -528,6 +603,9 @@
     });
     if (!idToken && !accessToken) {
       throw new Error('LIFF 認証コンテキストを取得できません');
+    }
+    if (idToken && isIdTokenExpired(idToken, 30) && requestLiffSessionRenewal('id_token_expired')) {
+      throw new Error('LIFF 認証を更新しています');
     }
     return {
       idToken: idToken,
@@ -1863,7 +1941,7 @@
   }
 
   function ensureWritableSession() {
-    if (state.idToken) {
+    if (state.idToken || state.accessToken) {
       return true;
     }
     setError('LINE認証が完了していないため更新できません。LINEから開き直してください。');
@@ -2885,6 +2963,9 @@
         message: error && error.message ? String(error.message) : 'sync failed',
         elapsedMs: Date.now() - syncStartedAtMs
       });
+      if (renewLiffSessionForAuthError(error)) {
+        return;
+      }
       setError(buildApiErrorMessage(error, 'チェック更新に失敗しました'));
     }).finally(function () {
       actionState.inFlight = false;
@@ -3182,6 +3263,7 @@
       restartSync: refreshOptions.restartSync !== false,
       source: refreshOptions.source || 'gas.api'
     });
+    clearLiffSessionRenewalAttempt();
   }
 
   function startConsistencyRefresh() {
@@ -3196,6 +3278,9 @@
         return;
       }
       refreshChecklist({ restartSync: false }).catch(function (error) {
+        if (renewLiffSessionForAuthError(error)) {
+          return;
+        }
         console.error('[sync] consistency refresh failed', error);
       });
     }, state.config.consistencyRefreshSeconds * 1000);
@@ -3204,6 +3289,9 @@
       document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'visible') {
           refreshChecklist({ restartSync: false }).catch(function (error) {
+            if (renewLiffSessionForAuthError(error)) {
+              return;
+            }
             console.error('[sync] refresh on visible failed', error);
           });
         }
@@ -3290,14 +3378,24 @@
           timingName: 'gas.today.background',
           timingLabel: 'GAS API再取得'
         }).catch(function (error) {
+          if (renewLiffSessionForAuthError(error)) {
+            return;
+          }
           console.error('[sync] background api refresh failed', error);
         });
       } else {
-        await refreshChecklist({
-          source: 'gas.api.blocking',
-          timingName: 'gas.today.blocking',
-          timingLabel: 'GAS API初回取得'
-        });
+        try {
+          await refreshChecklist({
+            source: 'gas.api.blocking',
+            timingName: 'gas.today.blocking',
+            timingLabel: 'GAS API初回取得'
+          });
+        } catch (error) {
+          if (renewLiffSessionForAuthError(error)) {
+            return;
+          }
+          throw error;
+        }
       }
       startConsistencyRefresh();
     } catch (error) {
@@ -3328,6 +3426,9 @@
         refreshChecklist({ restartSync: false }).then(function () {
           clearStatus();
         }).catch(function (error) {
+          if (renewLiffSessionForAuthError(error)) {
+            return;
+          }
           setError(buildApiErrorMessage(error, 'チェックリスト取得に失敗しました'));
         });
       });

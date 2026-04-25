@@ -311,6 +311,11 @@ function createFixedDate(isoText) {
   };
 }
 
+function createIdToken(payload) {
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  return `${encode({ alg: 'none' })}.${encode(payload)}.signature`;
+}
+
 function createFakeFirestore(writes, options = {}) {
   const addImpl = options.addImpl || ((payload) => {
     writes.push(payload);
@@ -403,6 +408,9 @@ async function loadPagesApp(fetchHandler, options = {}) {
       },
       setItem(key, value) {
         this.values[key] = String(value);
+      },
+      removeItem(key) {
+        delete this.values[key];
       }
     },
     liff: hasLiffOption ? options.liff : {
@@ -416,6 +424,9 @@ async function loadPagesApp(fetchHandler, options = {}) {
     },
     firebase: options.firebase,
     fetch: fetchHandler,
+    atob(value) {
+      return Buffer.from(value, 'base64').toString('binary');
+    },
     setTimeout(handler, ms) {
       const timer = setTimeout(handler, ms);
       timer.unref();
@@ -446,6 +457,195 @@ async function loadPagesApp(fetchHandler, options = {}) {
     document: documentRef
   };
 }
+
+test('GitHub Pages app は期限切れ ID token を検知したら LIFF session を1回だけ更新する', async () => {
+  const expiredToken = createIdToken({
+    sub: 'line-user-001',
+    name: '田中LINE',
+    aud: '2009859108',
+    exp: Math.floor(Date.now() / 1000) - 60
+  });
+  let gasCalls = 0;
+  let logoutCalls = 0;
+  let reloadCalls = 0;
+  const location = {
+    href: 'https://tapioka0112.github.io/ogawaya/?debugTiming=1',
+    search: '?debugTiming=1',
+    reload() {
+      reloadCalls += 1;
+    }
+  };
+
+  const { context } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2009859108-sJ31BCFx',
+        allowAnonymousAccess: false
+      });
+    }
+    gasCalls += 1;
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    location,
+    liff: {
+      async init() {},
+      isLoggedIn() {
+        return true;
+      },
+      isInClient() {
+        return true;
+      },
+      getIDToken() {
+        return expiredToken;
+      },
+      getAccessToken() {
+        return 'revoked-access-token';
+      },
+      logout() {
+        logoutCalls += 1;
+      }
+    }
+  });
+
+  assert.equal(logoutCalls, 1);
+  assert.equal(reloadCalls, 1);
+  assert.equal(gasCalls, 0);
+  assert.ok(Number(context.localStorage.values['ogawaya:liff-reauth-attempted-at']) > 0);
+});
+
+test('GitHub Pages app は LIFF session 更新済みなら access token 経路を継続する', async () => {
+  const expiredToken = createIdToken({
+    sub: 'line-user-001',
+    name: '田中LINE',
+    aud: '2009859108',
+    exp: Math.floor(Date.now() / 1000) - 60
+  });
+  let reloadCalls = 0;
+  let todayRequestBody = null;
+  const { document } = await loadPagesApp(async (url, options = {}) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2009859108-sJ31BCFx',
+        allowAnonymousAccess: false
+      });
+    }
+    if (String(url).startsWith('https://gas.example/exec?')) {
+      todayRequestBody = JSON.parse(options.body);
+      return response(createChecklistPayload({
+        id: 'run-item-001',
+        title: '開店準備',
+        description: '',
+        status: 'unchecked',
+        checkedBy: '',
+        checkedByUserId: '',
+        checkedAt: '',
+        updatedAt: '2026-04-24T10:00:00Z'
+      }));
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    localStorageValues: {
+      'ogawaya:liff-reauth-attempted-at': String(Date.now())
+    },
+    location: {
+      href: 'https://tapioka0112.github.io/ogawaya/',
+      search: '',
+      reload() {
+        reloadCalls += 1;
+      }
+    },
+    liff: {
+      async init() {},
+      isLoggedIn() {
+        return true;
+      },
+      isInClient() {
+        return true;
+      },
+      getIDToken() {
+        return expiredToken;
+      },
+      getAccessToken() {
+        return 'valid-access-token';
+      },
+      logout() {
+        throw new Error('logout should not run twice');
+      }
+    }
+  });
+
+  assert.equal(reloadCalls, 0);
+  assert.equal(todayRequestBody.authToken, expiredToken);
+  assert.equal(todayRequestBody.accessToken, 'valid-access-token');
+  assert.equal(document.elements['checklist-items'].children.length, 1);
+});
+
+test('GitHub Pages app は GAS 認証 401 でも LIFF session を更新する', async () => {
+  const validToken = createIdToken({
+    sub: 'line-user-001',
+    name: '田中LINE',
+    aud: '2009859108',
+    exp: Math.floor(Date.now() / 1000) + 3600
+  });
+  let logoutCalls = 0;
+  let reloadCalls = 0;
+  const { context } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2009859108-sJ31BCFx',
+        allowAnonymousAccess: false
+      });
+    }
+    if (String(url).startsWith('https://gas.example/exec?')) {
+      return responseWithStatus(200, {
+        ok: false,
+        statusCode: 401,
+        code: 'unauthorized',
+        message: 'LIFF access token の検証に失敗しました',
+        details: {
+          accessTokenVerifyStatus: 400
+        }
+      });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    location: {
+      href: 'https://tapioka0112.github.io/ogawaya/',
+      search: '',
+      reload() {
+        reloadCalls += 1;
+      }
+    },
+    liff: {
+      async init() {},
+      isLoggedIn() {
+        return true;
+      },
+      isInClient() {
+        return true;
+      },
+      getIDToken() {
+        return validToken;
+      },
+      getAccessToken() {
+        return 'revoked-access-token';
+      },
+      logout() {
+        logoutCalls += 1;
+      }
+    }
+  });
+
+  assert.equal(logoutCalls, 1);
+  assert.equal(reloadCalls, 1);
+  assert.ok(Number(context.localStorage.values['ogawaya:liff-reauth-attempted-at']) > 0);
+});
 
 test('GitHub Pages app は全件完了済みでも外部エフェクトに依存せず描画する', async () => {
   const checkedItem = {

@@ -51,6 +51,7 @@
    - `ADMIN_LOGIN_PASSWORD`
    - LIFF の `idToken` 検証は `LINE_LOGIN_CHANNEL_ID` を優先し、`LIFF_ID` 先頭10桁、`LINE_CHANNEL_ID` の順に fallback する。
    - `idToken` が期限切れの場合は、LIFF の `accessToken` を LINE Login API で検証し、同一 channel の token だけを認証に使う。
+   - LIFF の `idToken` または `accessToken` が期限切れ・取り消し済みの場合は、画面側で LIFF session を1回だけ更新する。
    - GitHub Pages 版は `pages/config.json` の `liffId` も GAS に送る。GAS Script Properties の `LIFF_ID` がある場合はそちらを優先する。
 2. `pages/config.json` を設定する。
    - `gasApiBaseUrl`

@@ -182,13 +182,13 @@ test('ID token が期限切れでも access token が有効なら認証できる
           scope: 'openid profile'
         });
       }
-      if (url === 'https://api.line.me/oauth2/v2.1/userinfo') {
+      if (url === 'https://api.line.me/v2/profile') {
         assert.equal(requestOptions.method, 'get');
         assert.equal(requestOptions.muteHttpExceptions, true);
         assert.equal(requestOptions.headers.Authorization, 'Bearer valid-access-token');
         return createVerifyResponse(200, {
-          sub: 'line-user-001',
-          name: '田中LINE'
+          userId: 'line-user-001',
+          displayName: '田中LINE'
         });
       }
       throw new Error(`unexpected fetch: ${url}`);
@@ -215,7 +215,7 @@ test('ID token が期限切れでも access token が有効なら認証できる
   assert.deepEqual(fetchUrls, [
     'https://api.line.me/oauth2/v2.1/verify',
     'https://api.line.me/oauth2/v2.1/verify?access_token=valid-access-token',
-    'https://api.line.me/oauth2/v2.1/userinfo'
+    'https://api.line.me/v2/profile'
   ]);
 });
 

@@ -142,12 +142,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
   }
 
-  function buildAccessTokenFailureDetails(accessToken, responseCode, lineError, lineErrorDescription) {
+  function buildAccessTokenFailureDetails(accessToken, responseCode, lineError, lineErrorDescription, responseText) {
     return {
       accessTokenLength: String(accessToken || '').length,
       accessTokenVerifyStatus: responseCode,
       accessTokenError: lineError,
-      accessTokenDescription: lineErrorDescription
+      accessTokenDescription: lineErrorDescription,
+      accessTokenResponse: sanitizeDiagnosticText(responseText || '')
     };
   }
 
@@ -200,7 +201,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         tokenText,
         verifyResponseCode,
         verifyError.error,
-        verifyError.description
+        verifyError.description,
+        verifyResponseText
       );
       throw verifyFailure;
     }
@@ -218,7 +220,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       throw clientError;
     }
 
-    var profileResponse = UrlFetchApp.fetch('https://api.line.me/oauth2/v2.1/userinfo', {
+    var profileResponse = UrlFetchApp.fetch('https://api.line.me/v2/profile', {
       method: 'get',
       muteHttpExceptions: true,
       headers: {
@@ -234,22 +236,23 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         tokenText,
         profileResponseCode,
         profileError.error,
-        profileError.description
+        profileError.description,
+        profileResponseText
       );
       throw profileFailure;
     }
-    var profilePayload = parseLineJson(profileResponseText, 'LINE userinfo 応答の解析に失敗しました');
-    ns.assert(profilePayload.sub, 'internal_error', 'LINE userinfo 応答に sub が含まれていません', 500);
+    var profilePayload = parseLineJson(profileResponseText, 'LINE profile 応答の解析に失敗しました');
+    ns.assert(profilePayload.userId, 'internal_error', 'LINE profile 応答に userId が含まれていません', 500);
     ns.logEvent('info', 'auth.verify.success', {
-      lineUserId: summarizeId(profilePayload.sub),
-      hasDisplayName: !!profilePayload.name,
+      lineUserId: summarizeId(profilePayload.userId),
+      hasDisplayName: !!profilePayload.displayName,
       cacheHit: false,
       method: 'access_token',
       verifyMs: nowMillis() - verifyStartedAt
     });
     return {
-      lineUserId: profilePayload.sub,
-      displayName: profilePayload.name || ''
+      lineUserId: profilePayload.userId,
+      displayName: profilePayload.displayName || ''
     };
   }
 
