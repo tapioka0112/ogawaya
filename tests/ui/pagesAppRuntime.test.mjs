@@ -939,8 +939,11 @@ test('GitHub Pages app は GAS API の snapshot 同期状態を debugTiming に�
     if (path === 'api/checklists/today') {
       return response(Object.assign(createChecklistPayload(item), {
         snapshotSync: {
-          status: 'ok',
-          responseCode: 200
+          status: 'error',
+          responseCode: 502,
+          statusCode: 502,
+          message: 'Firestore snapshot の保存に失敗しました',
+          response: 'bad gateway from firestore'
         }
       }));
     }
@@ -966,7 +969,13 @@ test('GitHub Pages app は GAS API の snapshot 同期状態を debugTiming に�
   await wait(80);
 
   assert.ok(
-    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotSync=ok'))
+    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotSync=error'))
+  );
+  assert.ok(
+    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotHttpStatus=502'))
+  );
+  assert.ok(
+    flattenElements(document.body).some((node) => String(node.textContent || '').includes('snapshotResponse=bad gateway from firestore'))
   );
 });
 

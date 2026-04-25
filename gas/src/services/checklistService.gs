@@ -696,30 +696,46 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           run.target_date,
           payload
         );
+        var responseCode = Number(result && result.responseCode ? result.responseCode : 0);
+        if (responseCode < 200 || responseCode >= 300) {
+          var writeError = ns.createError('external_api_error', 'Firestore snapshot の保存に失敗しました', 502);
+          writeError.details = {
+            responseCode: responseCode,
+            response: result && result.response ? sanitizeDiagnosticText(result.response) : ''
+          };
+          throw writeError;
+        }
         ns.logEvent('info', 'firestore.snapshot.write.success', {
           storeId: store.id,
           targetDate: run.target_date,
           durationMs: nowMillis() - startedAt,
-          responseCode: result.responseCode
+          responseCode: responseCode
         });
         return {
           status: 'ok',
-          responseCode: result.responseCode
+          responseCode: responseCode
         };
       } catch (error) {
+        var errorDetails = error && error.details ? error.details : {};
+        var errorResponseCode = errorDetails.responseCode ? Number(errorDetails.responseCode) : 0;
+        var errorResponse = errorDetails.response ? sanitizeDiagnosticText(errorDetails.response) : '';
         ns.logEvent('warn', 'firestore.snapshot.write.failed', {
           storeId: store.id,
           targetDate: run.target_date,
           durationMs: nowMillis() - startedAt,
           code: error && error.code ? String(error.code) : '',
           statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
-          message: error && error.message ? String(error.message) : ''
+          message: error && error.message ? String(error.message) : '',
+          responseCode: errorResponseCode,
+          response: errorResponse
         });
         return {
           status: 'error',
           code: error && error.code ? String(error.code) : '',
           statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
-          message: error && error.message ? String(error.message) : ''
+          responseCode: errorResponseCode,
+          message: error && error.message ? String(error.message) : '',
+          response: errorResponse
         };
       }
     }

@@ -860,7 +860,8 @@
     return {
       snapshotSync: sync.status || '',
       snapshotHttpStatus: sync.responseCode || sync.statusCode || '',
-      snapshotMessage: sync.message || ''
+      snapshotMessage: sync.message || '',
+      snapshotResponse: sync.response || ''
     };
   }
 
