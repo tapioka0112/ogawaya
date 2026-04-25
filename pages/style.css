@@ -413,6 +413,10 @@
     --u-ink: #1f2b25;
     --u-muted: #7a857f;
     --u-line: rgba(31, 43, 37, 0.08);
+    --u-success: #2e8b68;
+    --u-success-strong: #176347;
+    --u-success-soft: #e6f5ed;
+    --u-success-line: rgba(46, 139, 104, 0.26);
     --u-shadow: 0 4px 14px rgba(31, 43, 37, 0.06);
     --u-radius: 14px;
     background:
@@ -1231,12 +1235,21 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative;
+    min-width: 0;
+    padding: 0;
     border-radius: 50%;
     font-size: 12px;
     font-weight: 500;
+    line-height: 1;
     color: var(--u-muted);
-    border: none;
+    border: 1px solid transparent;
     background: transparent;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      box-shadow 120ms ease,
+      color 120ms ease;
   }
 
   .stats-cal-day[data-date] {
@@ -1248,25 +1261,65 @@
     outline-offset: 1px;
   }
 
+  .stats-cal-day[data-date]:hover {
+    border-color: rgba(31, 43, 37, 0.16);
+  }
+
+  .stats-cal-day__number {
+    position: relative;
+    z-index: 1;
+  }
+
+  .stats-cal-day__status {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--u-accent-strong);
+    box-shadow: 0 0 0 2px var(--u-surface);
+  }
+
   .stats-cal-day--achieved {
-    background: var(--u-accent);
-    color: #fff;
+    background: var(--u-success-soft);
+    border-color: var(--u-success-line);
+    color: var(--u-success-strong);
     font-weight: 700;
   }
 
+  .stats-cal-day--achieved .stats-cal-day__status {
+    right: 1px;
+    bottom: 1px;
+    width: 15px;
+    height: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--u-success);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
   .stats-cal-day--partial {
-    background: var(--u-accent-soft);
+    background: rgba(244, 122, 57, 0.12);
+    border-color: rgba(217, 101, 40, 0.22);
     color: var(--u-accent-strong);
     font-weight: 600;
   }
 
-  .stats-cal-day--today {
-    outline: 2px solid var(--u-accent);
-    outline-offset: 1px;
+  .stats-cal-day--today:not(.stats-cal-day--selected) {
+    box-shadow: inset 0 0 0 1px rgba(31, 43, 37, 0.18);
   }
 
   .stats-cal-day--selected {
-    box-shadow: 0 0 0 2px var(--u-accent-strong);
+    border-color: var(--u-ink);
+    box-shadow:
+      0 0 0 2px var(--u-surface),
+      0 0 0 4px var(--u-ink);
+    color: var(--u-ink);
   }
 
   .stats-day-card {

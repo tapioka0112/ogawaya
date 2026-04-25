@@ -83,6 +83,24 @@ class FakeElement {
     return Object.prototype.hasOwnProperty.call(this._attributes, name) ? this._attributes[name] : null;
   }
 
+  matches(selector) {
+    if (selector === '.stats-cal-day[data-date]') {
+      return String(this.className || '').split(/\s+/).includes('stats-cal-day') && Boolean(this.dataset.date);
+    }
+    return false;
+  }
+
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (typeof node.matches === 'function' && node.matches(selector)) {
+        return node;
+      }
+      node = node.parentNode || null;
+    }
+    return null;
+  }
+
   removeAttribute(name) {
     delete this._attributes[name];
   }
@@ -208,6 +226,10 @@ function findByClassName(root, className) {
 
 function datasetValues(root, key) {
   return flattenElements(root).map((node) => node.dataset[key]).filter(Boolean);
+}
+
+function childByClassName(root, className) {
+  return flattenElements(root).find((node) => String(node.className || '').split(/\s+/).includes(className)) ?? null;
 }
 
 function response(payload) {
@@ -582,6 +604,114 @@ test('GitHub Pages app は LIFF session 更新済みなら access token 経路�
   assert.equal(todayRequestBody.authToken, expiredToken);
   assert.equal(todayRequestBody.accessToken, 'valid-access-token');
   assert.equal(document.elements['checklist-items'].children.length, 1);
+});
+
+test('GitHub Pages app の統計カレンダーは凡例なしで日付セル自体に状態を表示する', async () => {
+  const fixedDate = createFixedDate('2026-04-25T10:00:00+09:00');
+  const snapshotDocs = {
+    '2026-04-21': createChecklistPayload({
+      id: 'run-item-partial',
+      title: '店内清掃',
+      description: '',
+      status: 'unchecked',
+      checkedBy: '',
+      checkedByUserId: '',
+      checkedAt: '',
+      updatedAt: '2026-04-21T10:00:00Z'
+    }),
+    '2026-04-22': createChecklistPayload({
+      id: 'run-item-achieved',
+      title: '券売機確認',
+      description: '',
+      status: 'checked',
+      checkedBy: '田中LINE',
+      checkedByUserId: 'line-user-001',
+      checkedAt: '2026-04-22T10:05:00Z',
+      updatedAt: '2026-04-22T10:05:00Z'
+    })
+  };
+  snapshotDocs['2026-04-21'].targetDate = '2026-04-21';
+  snapshotDocs['2026-04-22'].targetDate = '2026-04-22';
+
+  const { document } = await loadPagesApp(async (url, options = {}) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: { projectId: 'test-project', apiKey: 'test-key', appId: 'test-app' }
+      });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      const payload = createChecklistPayload({
+        id: 'run-item-today',
+        title: '開店準備',
+        description: '',
+        status: 'unchecked',
+        checkedBy: '',
+        checkedByUserId: '',
+        checkedAt: '',
+        updatedAt: '2026-04-25T10:00:00Z'
+      });
+      payload.targetDate = '2026-04-25';
+      return response(payload);
+    }
+    throw new Error(`unexpected request: ${url} ${JSON.stringify(options)}`);
+  }, {
+    Date: fixedDate,
+    firebase: createFakeFirebase([], {
+      getImpl(pathParts) {
+        const targetDate = pathParts[3];
+        const payload = snapshotDocs[targetDate];
+        return Promise.resolve({
+          exists: Boolean(payload),
+          data() {
+            return payload || null;
+          }
+        });
+      }
+    }),
+    liff: {
+      async init() {},
+      isLoggedIn() {
+        return true;
+      },
+      getIDToken() {
+        return 'token';
+      },
+      getAccessToken() {
+        return 'access-token';
+      }
+    }
+  });
+
+  document.elements['tab-stats'].click();
+  await wait(30);
+
+  const partialDay = findByDataset(document.elements['stats-calendar'], 'date', '2026-04-21');
+  const achievedDay = findByDataset(document.elements['stats-calendar'], 'date', '2026-04-22');
+  assert.ok(partialDay);
+  assert.ok(achievedDay);
+  assert.ok(String(partialDay.className).split(/\s+/).includes('stats-cal-day--partial'));
+  assert.ok(String(achievedDay.className).split(/\s+/).includes('stats-cal-day--achieved'));
+  assert.equal(childByClassName(partialDay, 'stats-cal-day__status').textContent, '');
+  assert.equal(childByClassName(achievedDay, 'stats-cal-day__status').textContent, '✓');
+
+  document.elements['stats-calendar'].listeners.click({
+    preventDefault() {},
+    target: achievedDay
+  });
+
+  const selectedDay = findByDataset(document.elements['stats-calendar'], 'date', '2026-04-22');
+  assert.ok(String(selectedDay.className).split(/\s+/).includes('stats-cal-day--selected'));
+  assert.equal(selectedDay.getAttribute('aria-current'), 'date');
 });
 
 test('GitHub Pages app は GAS 認証 401 でも LIFF session を更新する', async () => {

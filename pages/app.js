@@ -1144,6 +1144,7 @@
         return;
       }
       state.statsSelectedDate = date;
+      renderCurrentStatsCalendar();
       loadDailyStats(date);
     }
 
@@ -1212,6 +1213,49 @@
     });
   }
 
+  function buildStatsCalendarAriaLabel(dateStr, item, isSelected) {
+    var parts = [dateStr];
+    var total = item ? Number(item.total || 0) : 0;
+    var checked = item ? Number(item.checked || 0) : 0;
+    if (total > 0) {
+      parts.push('タスクあり');
+      parts.push(String(checked) + '/' + String(total) + '件完了');
+      parts.push(item.achieved ? '達成済み' : '未達成');
+    } else {
+      parts.push('タスクなし');
+    }
+    if (isSelected) {
+      parts.push('表示中');
+    }
+    return parts.join(' ');
+  }
+
+  function appendStatsCalendarDayContent(dayCell, day, item) {
+    var dayNumber = document.createElement('span');
+    dayNumber.className = 'stats-cal-day__number';
+    dayNumber.textContent = String(day);
+    dayCell.appendChild(dayNumber);
+
+    if (!item || Number(item.total || 0) <= 0) {
+      return;
+    }
+    var statusMarker = document.createElement('span');
+    statusMarker.className = 'stats-cal-day__status';
+    statusMarker.setAttribute('aria-hidden', 'true');
+    if (item.achieved) {
+      statusMarker.textContent = '✓';
+    }
+    dayCell.appendChild(statusMarker);
+  }
+
+  function renderCurrentStatsCalendar() {
+    if (state.statsData) {
+      renderCalendar(state.statsData.year, state.statsData.month, state.statsData.calendar);
+      return;
+    }
+    renderCalendar(state.statsYear, state.statsMonth, []);
+  }
+
   function renderCalendar(year, month, calendarItems) {
     if (!elements.statsCalendar) {
       return;
@@ -1254,24 +1298,29 @@
       var dateStr = year + '-' + mm + '-' + dd;
       var item = calMap[dateStr];
       var dayCell = item ? document.createElement('button') : document.createElement('div');
+      var total = item ? Number(item.total || 0) : 0;
+      var isSelected = state.statsSelectedDate === dateStr;
       if (item) {
         dayCell.type = 'button';
         dayCell.dataset.date = dateStr;
-        dayCell.setAttribute('aria-label', dateStr + ' ' + String(item.checked || 0) + '/' + String(item.total || 0) + '件完了');
+        dayCell.setAttribute('aria-label', buildStatsCalendarAriaLabel(dateStr, item, isSelected));
+        if (isSelected) {
+          dayCell.setAttribute('aria-current', 'date');
+        }
       }
-      dayCell.textContent = String(day);
+      appendStatsCalendarDayContent(dayCell, day, item);
       var classes = ['stats-cal-day'];
       if (item) {
         if (item.achieved) {
           classes.push('stats-cal-day--achieved');
-        } else if (item.total > 0) {
+        } else if (total > 0) {
           classes.push('stats-cal-day--partial');
         }
       }
       if (dateStr === todayStr) {
         classes.push('stats-cal-day--today');
       }
-      if (state.statsSelectedDate === dateStr) {
+      if (isSelected) {
         classes.push('stats-cal-day--selected');
       }
       dayCell.className = classes.join(' ');
