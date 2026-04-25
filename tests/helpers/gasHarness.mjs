@@ -172,6 +172,9 @@ export async function loadGasRuntime(options = {}) {
       }
     },
     ScriptApp: {
+      getOAuthToken() {
+        return options.oauthToken ?? 'test-oauth-token';
+      },
       getService() {
         return {
           getUrl() {

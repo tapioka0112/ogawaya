@@ -50,6 +50,22 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   }
 
+  function createFirestoreSnapshotClient(projectId) {
+    var normalizedProjectId = String(projectId || '').trim();
+    if (!normalizedProjectId) {
+      return null;
+    }
+    return ns.createFirestoreSnapshotClient({
+      projectId: normalizedProjectId,
+      fetch: function (url, requestOptions) {
+        return UrlFetchApp.fetch(url, requestOptions);
+      },
+      getOAuthToken: function () {
+        return ScriptApp.getOAuthToken();
+      }
+    });
+  }
+
   function routeApiRequest(service, request) {
     var method = request.method;
     var path = request.path;
@@ -225,7 +241,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       allowAnonymousAccess: allowAnonymousAccess,
       adminLoginId: options.adminLoginId || scriptProperties.getProperty('ADMIN_LOGIN_ID'),
       adminLoginPassword: options.adminLoginPassword || scriptProperties.getProperty('ADMIN_LOGIN_PASSWORD'),
-      adminSessionTtlSeconds: options.adminSessionTtlSeconds || scriptProperties.getProperty('ADMIN_SESSION_TTL_SECONDS')
+      adminSessionTtlSeconds: options.adminSessionTtlSeconds || scriptProperties.getProperty('ADMIN_SESSION_TTL_SECONDS'),
+      snapshotClient: typeof options.snapshotClient !== 'undefined'
+        ? options.snapshotClient
+        : createFirestoreSnapshotClient(options.firebaseProjectId || scriptProperties.getProperty('FIREBASE_PROJECT_ID'))
     });
     var webhookHandler = ns.createWebhookHandler({
       appBaseUrl: appBaseUrl,

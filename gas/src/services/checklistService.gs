@@ -30,6 +30,104 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return new Date().getTime();
   }
 
+  function encodeFirestoreFields(value) {
+    var fields = {};
+    Object.keys(value || {}).forEach(function (key) {
+      fields[key] = encodeFirestoreValue(value[key]);
+    });
+    return fields;
+  }
+
+  function encodeFirestoreValue(value) {
+    if (value === null || typeof value === 'undefined') {
+      return { nullValue: null };
+    }
+    if (Array.isArray(value)) {
+      return {
+        arrayValue: {
+          values: value.map(encodeFirestoreValue)
+        }
+      };
+    }
+    if (typeof value === 'object') {
+      return {
+        mapValue: {
+          fields: encodeFirestoreFields(value)
+        }
+      };
+    }
+    if (typeof value === 'boolean') {
+      return { booleanValue: value };
+    }
+    if (typeof value === 'number') {
+      return Number(value) === Math.floor(value)
+        ? { integerValue: String(value) }
+        : { doubleValue: value };
+    }
+    return { stringValue: String(value) };
+  }
+
+  function buildFirestoreSnapshotDocumentUrl(projectId, storeId, targetDate) {
+    var path = [
+      'stores',
+      storeId,
+      'runs',
+      targetDate,
+      'snapshots',
+      'today'
+    ].map(encodeURIComponent).join('/');
+    return 'https://firestore.googleapis.com/v1/projects/' +
+      encodeURIComponent(projectId) +
+      '/databases/(default)/documents/' +
+      path;
+  }
+
+  ns.createFirestoreSnapshotClient = function (options) {
+    var safeOptions = options || {};
+    var projectId = String(safeOptions.projectId || '').trim();
+    ns.assert(projectId, 'config_error', 'FIREBASE_PROJECT_ID が未設定です', 500);
+    var fetchFn = safeOptions.fetch || function (url, requestOptions) {
+      return UrlFetchApp.fetch(url, requestOptions);
+    };
+    var getOAuthToken = safeOptions.getOAuthToken || function () {
+      return ScriptApp.getOAuthToken();
+    };
+
+    return {
+      writeTodaySnapshot: function (storeId, targetDate, payload) {
+        var token = String(getOAuthToken() || '');
+        ns.assert(token, 'config_error', 'Firestore snapshot 用 OAuth token を取得できません', 500);
+        var response = fetchFn(buildFirestoreSnapshotDocumentUrl(projectId, storeId, targetDate), {
+          method: 'patch',
+          contentType: 'application/json',
+          headers: {
+            Authorization: 'Bearer ' + token
+          },
+          payload: JSON.stringify({
+            fields: encodeFirestoreFields(payload)
+          }),
+          muteHttpExceptions: true
+        });
+        var responseCode = Number(response.getResponseCode());
+        var responseText = response.getContentText();
+        if (responseCode < 200 || responseCode >= 300) {
+          var error = ns.createError('external_api_error', 'Firestore snapshot の保存に失敗しました', 502);
+          error.details = {
+            projectId: projectId,
+            storeId: storeId,
+            targetDate: targetDate,
+            responseCode: responseCode,
+            response: sanitizeDiagnosticText(responseText || '')
+          };
+          throw error;
+        }
+        return {
+          responseCode: responseCode
+        };
+      }
+    };
+  };
+
   function isBusinessDayCutoverPassed(date) {
     var isoString = Utilities.formatDate(date, ns.TIMEZONE, "yyyy-MM-dd'T'HH:mm:ss'Z'");
     var timeMatch = isoString.match(/T(\d{2}):(\d{2}):\d{2}Z$/);
@@ -489,6 +587,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     var appBaseUrl = options.appBaseUrl || '';
     var checklistAppUrl = options.checklistAppUrl || appBaseUrl;
     var allowAnonymousAccess = options.allowAnonymousAccess === true;
+    var snapshotClient = options.snapshotClient || null;
     function normalizeAdminCredential(value) {
       var normalized = String(value || '').trim();
       if (normalized.length >= 2) {
@@ -559,6 +658,60 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         user: user,
         store: store
       };
+    }
+
+    function buildSnapshotUserContext(store) {
+      return {
+        user: {
+          id: '',
+          store_id: store.id,
+          name: '',
+          role: ''
+        },
+        store: store
+      };
+    }
+
+    function buildChecklistSnapshot(store, run, items) {
+      var payload = buildChecklistResponse(repository, buildSnapshotUserContext(store), run, items);
+      payload.ok = true;
+      payload.statusCode = 200;
+      payload.snapshotUpdatedAt = ns.toIsoString(clock.now());
+      return payload;
+    }
+
+    function writeChecklistSnapshot(run, items) {
+      if (!snapshotClient) {
+        return null;
+      }
+      var store = repository.findStoreById(run.store_id);
+      ns.assert(store, 'config_error', '店舗が見つかりません', 500);
+      var payload = buildChecklistSnapshot(store, run, items);
+      var startedAt = nowMillis();
+      try {
+        var result = snapshotClient.writeTodaySnapshot(
+          store.id,
+          run.target_date,
+          payload
+        );
+        ns.logEvent('info', 'firestore.snapshot.write.success', {
+          storeId: store.id,
+          targetDate: run.target_date,
+          durationMs: nowMillis() - startedAt,
+          responseCode: result.responseCode
+        });
+        return result;
+      } catch (error) {
+        ns.logEvent('warn', 'firestore.snapshot.write.failed', {
+          storeId: store.id,
+          targetDate: run.target_date,
+          durationMs: nowMillis() - startedAt,
+          code: error && error.code ? String(error.code) : '',
+          statusCode: error && error.statusCode ? Number(error.statusCode) : 0,
+          message: error && error.message ? String(error.message) : ''
+        });
+        return null;
+      }
     }
 
     function registerNotificationRecipient(currentUser) {
@@ -1124,11 +1277,15 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var buildStartedAt = nowMillis();
         var response = buildChecklistResponse(repository, currentUser, run, items);
         var buildMs = nowMillis() - buildStartedAt;
+        var snapshotStartedAt = nowMillis();
+        writeChecklistSnapshot(run, items);
+        var snapshotMs = nowMillis() - snapshotStartedAt;
         ns.logEvent('info', 'api.today.breakdown', {
           authMs: authMs,
           runMs: runMs,
           itemsMs: itemsMs,
           buildMs: buildMs,
+          snapshotMs: snapshotMs,
           totalMs: nowMillis() - startedAt,
           itemsCount: items.length
         });
@@ -1366,6 +1523,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             updated_at: now
           }
         ])[0];
+        writeChecklistSnapshot(run, repository.listRunItems(run.id));
         return {
           item: buildRunItemResponse(createdItem, buildTemplateItemDescriptionMap(repository, [createdItem]))
         };
@@ -1424,6 +1582,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         });
         var insertedItems = newItems.length > 0 ? repository.createRunItems(newItems) : [];
         var descriptionByTemplateItemId = buildTemplateItemDescriptionMap(repository, insertedItems);
+        writeChecklistSnapshot(run, repository.listRunItems(run.id));
         return {
           insertedCount: insertedItems.length,
           items: insertedItems.map(function (item) {
@@ -1451,6 +1610,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         });
         ns.assert(filteredRunItems.length !== allRunItems.length, 'not_found', '削除対象のタスクが見つかりません', 404);
         repository.replaceTable('checklist_run_items', filteredRunItems);
+        writeChecklistSnapshot(run, repository.listRunItems(run.id));
         return {
           deletedRunItemId: runItemId
         };
@@ -1465,6 +1625,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
         if (item.status === ns.ITEM_STATUS.CHECKED) {
           logCheckMutationBreakdown('api.check_item.breakdown', startedAt, authMs, 0, true);
+          writeChecklistSnapshot(scopedRunItem.run, repository.listRunItems(scopedRunItem.run.id));
           return {
             item: buildSingleRunItemResponse(repository, item)
           };
@@ -1482,6 +1643,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var updatedItem = repository.updateRunItem(item.id, changes);
         var storageWriteMs = nowMillis() - writeStartedAt;
         logCheckMutationBreakdown('api.check_item.breakdown', startedAt, authMs, storageWriteMs, false);
+        writeChecklistSnapshot(scopedRunItem.run, repository.listRunItems(scopedRunItem.run.id));
         return {
           item: buildSingleRunItemResponse(repository, updatedItem),
           comment: body.comment || ''
@@ -1497,6 +1659,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
         if (item.status === ns.ITEM_STATUS.UNCHECKED) {
           logCheckMutationBreakdown('api.uncheck_item.breakdown', startedAt, authMs, 0, true);
+          writeChecklistSnapshot(scopedRunItem.run, repository.listRunItems(scopedRunItem.run.id));
           return {
             item: buildSingleRunItemResponse(repository, item)
           };
@@ -1514,6 +1677,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var updatedItem = repository.updateRunItem(item.id, changes);
         var storageWriteMs = nowMillis() - writeStartedAt;
         logCheckMutationBreakdown('api.uncheck_item.breakdown', startedAt, authMs, storageWriteMs, false);
+        writeChecklistSnapshot(scopedRunItem.run, repository.listRunItems(scopedRunItem.run.id));
         return {
           item: buildSingleRunItemResponse(repository, updatedItem),
           reason: body.reason || ''
@@ -1804,6 +1968,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             ns.NOTIFICATION_TYPES.DAILY_START,
             buildDailyStartMessage(repository.findStoreById(template.store_id), run)
           );
+          writeChecklistSnapshot(run, repository.listRunItems(run.id));
           createdRuns.push(run);
         });
         return { createdRuns: createdRuns };
@@ -1827,10 +1992,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
               buildIncompleteMessage(store, run, items)
             ));
           }
-          return repository.updateRun(run.id, {
+          var closedRun = repository.updateRun(run.id, {
             status: ns.RUN_STATUS.CLOSED,
             closed_at: ns.toIsoString(clock.now())
           });
+          writeChecklistSnapshot(closedRun, repository.listRunItems(closedRun.id));
+          return closedRun;
         });
         return {
           closedRuns: closedRuns,

@@ -3,8 +3,22 @@ import assert from 'node:assert/strict';
 import { loadGasRuntime } from '../helpers/gasHarness.mjs';
 import { createBaseDataset } from '../helpers/fixtures.mjs';
 
-async function createChecklistApp() {
-  const runtime = await loadGasRuntime();
+function createFetchResponse(status = 200, payload = {}) {
+  return {
+    getResponseCode() {
+      return status;
+    },
+    getContentText() {
+      return JSON.stringify(payload);
+    }
+  };
+}
+
+async function createChecklistApp(options = {}) {
+  const runtime = await loadGasRuntime({
+    fetch: options.fetch,
+    oauthToken: options.oauthToken
+  });
   const seed = createBaseDataset();
   seed.checklist_template_items[0].description = '券売機と入口を確認する';
   seed.checklist_template_items[1].description = '客席と厨房の床を確認する';
@@ -67,6 +81,8 @@ async function createChecklistApp() {
         return map[idToken];
       }
     },
+    firebaseProjectId: options.firebaseProjectId,
+    snapshotClient: options.snapshotClient,
     clock: {
       now() {
         return new Date('2026-04-21T02:00:00Z');
@@ -289,6 +305,62 @@ test('同日チェックリストを返す', async () => {
   assert.equal(response.body.currentUser.name, '田中LINE');
 });
 
+test('GET /api/checklists/today は Firestore snapshot を保存する', async () => {
+  const firestoreWrites = [];
+  const app = await createChecklistApp({
+    firebaseProjectId: 'test-project',
+    fetch(url, requestOptions) {
+      firestoreWrites.push({ url, requestOptions });
+      return createFetchResponse(200, { name: 'snapshot' });
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/today',
+    query: { idToken: 'valid-pt' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(firestoreWrites.length, 1);
+  assert.match(
+    firestoreWrites[0].url,
+    /\/projects\/test-project\/databases\/\(default\)\/documents\/stores\/store-001\/runs\/2026-04-21\/snapshots\/today$/
+  );
+  assert.equal(firestoreWrites[0].requestOptions.method, 'patch');
+  assert.equal(firestoreWrites[0].requestOptions.headers.Authorization, 'Bearer test-oauth-token');
+
+  const payload = JSON.parse(firestoreWrites[0].requestOptions.payload);
+  assert.equal(payload.fields.currentUser.mapValue.fields.userId.stringValue, '');
+  assert.equal(payload.fields.currentUser.mapValue.fields.name.stringValue, '');
+  assert.equal(payload.fields.currentUser.mapValue.fields.store.mapValue.fields.id.stringValue, 'store-001');
+  assert.equal(payload.fields.progress.mapValue.fields.total.integerValue, '2');
+  assert.equal(payload.fields.items.arrayValue.values[0].mapValue.fields.description.stringValue, '券売機と入口を確認する');
+});
+
+test('Firestore snapshot 保存失敗時もチェックリスト取得は成功する', async () => {
+  const firestoreWrites = [];
+  const app = await createChecklistApp({
+    firebaseProjectId: 'test-project',
+    fetch(url, requestOptions) {
+      firestoreWrites.push({ url, requestOptions });
+      return createFetchResponse(500, { error: { message: 'firestore unavailable' } });
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/today',
+    query: { idToken: 'valid-pt' },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.items.length, 2);
+  assert.equal(firestoreWrites.length, 1);
+});
+
 test('10:30 前は前日の運用日チェックリストを返す', async () => {
   const runtime = await loadGasRuntime();
   const seed = createBaseDataset();
@@ -404,6 +476,35 @@ test('check 後に checked へ遷移し、チェック者は LINE 表示名で�
   assert.equal(response.body.item.checkedByUserId, 'line-user-001');
   assert.match(response.body.item.checkedAt, /2026-04-21T02:00:00Z/);
   assert.match(response.body.item.updatedAt, /2026-04-21T02:00:00Z/);
+});
+
+test('check 後に Firestore snapshot も checked に更新する', async () => {
+  const firestoreWrites = [];
+  const app = await createChecklistApp({
+    firebaseProjectId: 'test-project',
+    fetch(url, requestOptions) {
+      firestoreWrites.push({ url, requestOptions });
+      return createFetchResponse(200, { name: 'snapshot' });
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/checklist-items/run-item-001/check',
+    query: { idToken: 'valid-pt' },
+    body: {
+      comment: '確認済み'
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(firestoreWrites.length, 1);
+  const payload = JSON.parse(firestoreWrites[0].requestOptions.payload);
+  const firstItemFields = payload.fields.items.arrayValue.values[0].mapValue.fields;
+  assert.equal(firstItemFields.status.stringValue, 'checked');
+  assert.equal(firstItemFields.checkedBy.stringValue, '田中LINE');
+  assert.equal(firstItemFields.checkedByUserId.stringValue, 'line-user-001');
+  assert.equal(payload.fields.progress.mapValue.fields.checked.integerValue, '1');
 });
 
 test('再チェックは冪等に扱い、チェック状態を維持する', async () => {
