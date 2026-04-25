@@ -294,6 +294,23 @@ function wait(ms) {
   });
 }
 
+function createFixedDate(isoText) {
+  const fixedMs = new Date(isoText).getTime();
+  return class FixedDate extends Date {
+    constructor(...args) {
+      if (args.length === 0) {
+        super(fixedMs);
+        return;
+      }
+      super(...args);
+    }
+
+    static now() {
+      return fixedMs;
+    }
+  };
+}
+
 function createFakeFirestore(writes, options = {}) {
   const addImpl = options.addImpl || ((payload) => {
     writes.push(payload);
@@ -380,7 +397,7 @@ async function loadPagesApp(fetchHandler, options = {}) {
     document: documentRef,
     location: { href: '' },
     localStorage: {
-      values: {},
+      values: Object.assign({}, options.localStorageValues || {}),
       getItem(key) {
         return this.values[key] || '';
       },
@@ -418,7 +435,7 @@ async function loadPagesApp(fetchHandler, options = {}) {
     addEventListener() {},
     console,
     Intl,
-    Date
+    Date: options.Date || Date
   };
   context.globalThis = context;
   vm.createContext(context);
@@ -514,9 +531,12 @@ test('GitHub Pages app は外部SDK未ロードでも Firestore REST snapshot �
       });
     }
     if (String(url).startsWith('https://firestore.googleapis.com/')) {
-      firestoreSnapshotRequestCount += 1;
-      assert.match(String(url), /projects\/test-project\/databases\/\(default\)\/documents\/stores\/store-hashimoto\/runs\//);
-      return firestoreRestDocument(createChecklistPayload(snapshotItem));
+      if (String(url).includes('/snapshots/')) {
+        firestoreSnapshotRequestCount += 1;
+        assert.match(String(url), /projects\/test-project\/databases\/\(default\)\/documents\/stores\/store-hashimoto\/runs\//);
+        return firestoreRestDocument(createChecklistPayload(snapshotItem));
+      }
+      return response({ documents: [] });
     }
     const path = new URL(url).searchParams.get('path');
     if (path === 'api/checklists/today') {
@@ -534,6 +554,77 @@ test('GitHub Pages app は外部SDK未ロードでも Firestore REST snapshot �
 
   assert.equal(document.elements['progress-summary'].textContent, '1 / 1');
   assert.equal(document.elements['progress-ring-label'].textContent, '完了');
+  assert.equal(firestoreSnapshotRequestCount, 1);
+  assert.equal(todayRequestCount, 0);
+});
+
+test('GitHub Pages app は Firestore snapshot が未作成でも同日端末キャッシュでホームを描画する', async () => {
+  const cachedItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  let firestoreSnapshotRequestCount = 0;
+  let todayRequestCount = 0;
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: false,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'app'
+        }
+      });
+    }
+    if (String(url).startsWith('https://firestore.googleapis.com/')) {
+      if (String(url).includes('/snapshots/')) {
+        firestoreSnapshotRequestCount += 1;
+        return responseWithStatus(404, { error: { code: 404, message: 'not found' } });
+      }
+      return response({ documents: [] });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      todayRequestCount += 1;
+      return response(createChecklistPayload(cachedItem));
+    }
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, {
+    Date: createFixedDate('2026-04-24T02:00:00Z'),
+    liff: null,
+    firebase: null,
+    localStorageValues: {
+      'ogawaya:checklist-cache:v1': JSON.stringify({
+        storeId: 'store-hashimoto',
+        targetDate: '2026-04-24',
+        checklist: createChecklistPayload(cachedItem)
+      })
+    }
+  });
+
+  assert.equal(document.elements['progress-summary'].textContent, '0 / 1');
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'status', 'unchecked')?.dataset.status,
+    'unchecked'
+  );
   assert.equal(firestoreSnapshotRequestCount, 1);
   assert.equal(todayRequestCount, 0);
 });
@@ -774,6 +865,82 @@ test('GitHub Pages app は Firestore 直接書き込み成功時にGAS保存完�
     JSON.stringify({ requestedPaths, statuses: datasetValues(document.elements['checklist-items'], 'status') })
   );
   assert.equal(requestedPaths.includes('api/checklist-items/run-item-001/check'), false);
+});
+
+test('GitHub Pages app は sourceClientId 未許可Rulesでも旧payloadでFirestore同期する', async () => {
+  const initialItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const firestoreWrites = [];
+  const requestedPaths = [];
+  const firebase = createFakeFirebase(firestoreWrites, {
+    addImpl(payload) {
+      if (Object.prototype.hasOwnProperty.call(payload, 'sourceClientId')) {
+        const error = new Error('sourceClientId is not allowed by deployed rules');
+        error.code = 'permission-denied';
+        return Promise.reject(error);
+      }
+      firestoreWrites.push(payload);
+      return Promise.resolve({ id: `event-${firestoreWrites.length}` });
+    }
+  });
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      requestedPaths.push(url);
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: true,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'test-app'
+        }
+      });
+    }
+    const path = new URL(url).searchParams.get('path');
+    requestedPaths.push(path || url);
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    if (path === 'api/checklists/today') {
+      return response(createChecklistPayload(initialItem));
+    }
+    if (path === 'api/checklist-items/run-item-001/check') {
+      throw new Error('旧Rules互換のFirestore再試行に成功するためGAS同期へfallbackしない');
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, { firebase });
+
+  const checkButton = findByDataset(document.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  checkButton.click();
+  await wait(300);
+
+  assert.equal(firestoreWrites.length, 1);
+  assert.equal(firestoreWrites[0].itemId, 'run-item-001');
+  assert.equal(firestoreWrites[0].status, 'checked');
+  assert.equal(Object.prototype.hasOwnProperty.call(firestoreWrites[0], 'sourceClientId'), false);
+  assert.equal(requestedPaths.includes('api/checklist-items/run-item-001/check'), false);
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'status', 'checked')?.dataset.status,
+    'checked',
+    JSON.stringify({ requestedPaths, statuses: datasetValues(document.elements['checklist-items'], 'status') })
+  );
 });
 
 test('GitHub Pages app は Firestore 直接書き込み失敗時にGAS同期へfallbackする', async () => {

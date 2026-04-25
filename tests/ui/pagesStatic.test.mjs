@@ -112,7 +112,8 @@ test('GitHub Pages の check/uncheck は Firestore 直接書き込み成功時�
     /var optimisticItemForDispatch = desiredStatus === 'checked'\s*\?\s*buildOptimisticCheckedItem\(currentItem\)\s*:\s*buildOptimisticUncheckedItem\(currentItem\);/
   );
   assert.match(appJs, /var requestPromiseWithFallback = writeRealtimeEvent\(optimisticItemForDispatch\)\.then\(function \(\) \{/);
-  assert.match(appJs, /sourceClientId:\s*getClientInstanceId\(\)/);
+  assert.match(appJs, /payload\.sourceClientId = getClientInstanceId\(\);/);
+  assert.match(appJs, /buildRealtimeEventPayload\(updatedItem,\s*\{\s*includeSourceClientId:\s*false\s*\}\)/);
   assert.match(appJs, /syncItemStatusViaGasInBackground\(runItemId,\s*desiredStatus,\s*optimisticItemForDispatch\.updatedAt\);/);
   assert.doesNotMatch(appJs, /applyChecklistItemUpdate\(actionState\.confirmedItem\);/);
   assert.match(appJs, /return syncItemStatusViaGas\(runItemId,\s*desiredStatus,\s*ITEM_ACTION_REQUEST_TIMEOUT_MS\);/);

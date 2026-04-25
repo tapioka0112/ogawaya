@@ -113,6 +113,7 @@
 
   var LAST_STORE_ID_STORAGE_KEY = 'ogawaya:last-store-id';
   var CLIENT_ID_STORAGE_KEY = 'ogawaya:client-id';
+  var CHECKLIST_CACHE_STORAGE_KEY = 'ogawaya:checklist-cache:v1';
   var SNAPSHOT_DOC_ID = 'today';
   // 統計タブは Firestore snapshot をクライアント集計して表示する。
   var LIFF_SDK_URL = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
@@ -460,6 +461,7 @@
     realtimeEnabled: false,
     syncUnsubscribe: null,
     syncStartRequestId: 0,
+    syncRestBootstrapKey: '',
     consistencyTimerId: null,
     visibilityHandlerBound: false,
     statsYear: new Date().getFullYear(),
@@ -1327,15 +1329,64 @@
     return normalized;
   }
 
-  function rememberStoreIdFromChecklist(checklist) {
+  function resolveChecklistStoreId(checklist) {
     if (!checklist || !checklist.currentUser || !checklist.currentUser.store) {
-      return;
+      return '';
     }
-    var storeId = String(checklist.currentUser.store.id || '');
+    return String(checklist.currentUser.store.id || '');
+  }
+
+  function rememberStoreIdFromChecklist(checklist) {
+    var storeId = resolveChecklistStoreId(checklist);
     if (!storeId) {
       return;
     }
     writeStorageValue(LAST_STORE_ID_STORAGE_KEY, storeId);
+  }
+
+  function writeChecklistCache(checklist) {
+    var normalizedChecklist = normalizeChecklistPayload(checklist);
+    var storeId = resolveChecklistStoreId(normalizedChecklist);
+    var targetDate = String(normalizedChecklist.targetDate || '');
+    if (!storeId || !targetDate || !normalizedChecklist.runId) {
+      return;
+    }
+    writeStorageValue(CHECKLIST_CACHE_STORAGE_KEY, JSON.stringify({
+      storeId: storeId,
+      targetDate: targetDate,
+      cachedAt: new Date().toISOString(),
+      checklist: normalizedChecklist
+    }));
+  }
+
+  function readChecklistCache(storeId, targetDate) {
+    var rawValue = readStorageValue(CHECKLIST_CACHE_STORAGE_KEY);
+    if (!rawValue) {
+      return null;
+    }
+    var parsed = null;
+    try {
+      parsed = JSON.parse(rawValue);
+    } catch (error) {
+      console.warn('[sync] ignored invalid checklist cache', error);
+      return null;
+    }
+    if (
+      !parsed ||
+      String(parsed.storeId || '') !== String(storeId || '') ||
+      String(parsed.targetDate || '') !== String(targetDate || '')
+    ) {
+      return null;
+    }
+    var cachedChecklist = normalizeChecklistPayload(parsed.checklist || {});
+    if (
+      !cachedChecklist.runId ||
+      String(cachedChecklist.targetDate || '') !== String(targetDate || '') ||
+      resolveChecklistStoreId(cachedChecklist) !== String(storeId || '')
+    ) {
+      return null;
+    }
+    return cachedChecklist;
   }
 
   function applyChecklistPayload(checklist, options) {
@@ -1353,6 +1404,7 @@
     renderSelectedTaskDetail({ focus: false });
     renderIncomplete();
     rememberStoreIdFromChecklist(state.checklist);
+    writeChecklistCache(state.checklist);
     if (applyOptions.restartSync !== false) {
       startRealtimeSync();
     }
@@ -1437,6 +1489,7 @@
     renderSelectedTaskDetail({ focus: false });
     renderOverview();
     renderIncomplete();
+    writeChecklistCache(state.checklist);
     onChecklistMutation(previousItem, cloneChecklistItem(target));
   }
 
@@ -1773,6 +1826,30 @@
     );
   }
 
+  function buildFirestoreRestEventsUrl(storeId, targetDate) {
+    if (!state.config || !state.config.firebase || !state.config.firebase.projectId || !state.config.firebase.apiKey) {
+      return '';
+    }
+    var path = [
+      'stores',
+      storeId,
+      'runs',
+      targetDate,
+      'events'
+    ].map(encodeURIComponent).join('/');
+    return appendQuery(
+      'https://firestore.googleapis.com/v1/projects/' +
+        encodeURIComponent(state.config.firebase.projectId) +
+        '/databases/(default)/documents/' +
+        path,
+      {
+        key: state.config.firebase.apiKey,
+        pageSize: '40',
+        orderBy: 'emittedAt desc'
+      }
+    );
+  }
+
   function decodeFirestoreRestValue(value) {
     if (!value || typeof value !== 'object') {
       return null;
@@ -1841,16 +1918,7 @@
     return normalizeChecklistPayload(doc.data() || {});
   }
 
-  async function loadChecklistFromSnapshot() {
-    var storeId = readStorageValue(LAST_STORE_ID_STORAGE_KEY);
-    if (!storeId && state.config && state.config.defaultStoreId) {
-      storeId = String(state.config.defaultStoreId);
-      writeStorageValue(LAST_STORE_ID_STORAGE_KEY, storeId);
-    }
-    if (!storeId) {
-      return null;
-    }
-    var targetDate = getTodayDateInJst();
+  async function loadChecklistFromRemoteSnapshot(storeId, targetDate) {
     if (isFirebaseSdkReady()) {
       return loadChecklistFromSnapshotSdk(storeId, targetDate);
     }
@@ -1863,6 +1931,80 @@
       return null;
     }
     return loadChecklistFromSnapshotSdk(storeId, targetDate);
+  }
+
+  function refreshRemoteSnapshotInBackground(storeId, targetDate) {
+    loadChecklistFromRemoteSnapshot(storeId, targetDate).then(function (snapshotChecklist) {
+      if (!snapshotChecklist || !snapshotChecklist.runId) {
+        return;
+      }
+      applyChecklistPayload(snapshotChecklist, {
+        restartSync: true
+      });
+    }).catch(function (error) {
+      console.error('[sync] failed to refresh checklist snapshot in background', error);
+    });
+  }
+
+  async function loadRecentRealtimeEventsFromRest(targetInfo) {
+    var url = buildFirestoreRestEventsUrl(targetInfo.storeId, targetInfo.targetDate);
+    if (!url) {
+      return [];
+    }
+    var response = await fetch(url, { cache: 'no-store' });
+    if (response.status === 404) {
+      return [];
+    }
+    if (!response.ok) {
+      throw new Error('Firestore events の読み込みに失敗しました');
+    }
+    var payload = await response.json();
+    return (payload.documents || []).map(function (doc) {
+      return decodeFirestoreRestFields((doc.fields || {}));
+    });
+  }
+
+  function bootstrapRealtimeEventsFromRest(targetInfo) {
+    if (!targetInfo || !state.config || !state.config.enableRealtimeSync || !state.config.firebase) {
+      return;
+    }
+    if (isFirebaseSdkReady()) {
+      return;
+    }
+    var bootstrapKey = [
+      targetInfo.storeId,
+      targetInfo.targetDate,
+      targetInfo.runId
+    ].join(':');
+    if (state.syncRestBootstrapKey === bootstrapKey) {
+      return;
+    }
+    state.syncRestBootstrapKey = bootstrapKey;
+    loadRecentRealtimeEventsFromRest(targetInfo).then(function (events) {
+      events.forEach(function (eventPayload) {
+        applyRealtimeEvent(eventPayload, parseTimestampMillis(eventPayload.emittedAt));
+      });
+    }).catch(function (error) {
+      console.error('[sync] failed to bootstrap realtime events via rest', error);
+    });
+  }
+
+  async function loadChecklistFromSnapshot() {
+    var storeId = readStorageValue(LAST_STORE_ID_STORAGE_KEY);
+    if (!storeId && state.config && state.config.defaultStoreId) {
+      storeId = String(state.config.defaultStoreId);
+      writeStorageValue(LAST_STORE_ID_STORAGE_KEY, storeId);
+    }
+    if (!storeId) {
+      return null;
+    }
+    var targetDate = getTodayDateInJst();
+    var cachedChecklist = readChecklistCache(storeId, targetDate);
+    if (cachedChecklist) {
+      refreshRemoteSnapshotInBackground(storeId, targetDate);
+      return cachedChecklist;
+    }
+    return loadChecklistFromRemoteSnapshot(storeId, targetDate);
   }
 
   function isFirestoreWriteSuspended() {
@@ -1882,7 +2024,8 @@
     }
   }
 
-  function buildRealtimeEventPayload(updatedItem) {
+  function buildRealtimeEventPayload(updatedItem, options) {
+    var buildOptions = options || {};
     var targetInfo = ensureSyncTargetInfo();
     if (!targetInfo) {
       throw new Error('Firestore 同期対象が未確定です');
@@ -1891,7 +2034,7 @@
       ? String(state.checklist.currentUser.userId || '')
       : '';
 
-    return {
+    var payload = {
       runId: targetInfo.runId,
       targetDate: targetInfo.targetDate,
       storeId: targetInfo.storeId,
@@ -1902,9 +2045,17 @@
       checkedAt: updatedItem.checkedAt || '',
       updatedAt: global.firebase.firestore.FieldValue.serverTimestamp(),
       sourceUserId: sourceUserId,
-      sourceClientId: getClientInstanceId(),
       emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
     };
+    if (buildOptions.includeSourceClientId !== false) {
+      payload.sourceClientId = getClientInstanceId();
+    }
+    return payload;
+  }
+
+  function shouldRetryWithoutSourceClientId(error) {
+    var code = error && error.code ? String(error.code) : '';
+    return code === 'permission-denied';
   }
 
   function normalizeTemplateInsertEventItem(item) {
@@ -1942,7 +2093,19 @@
         .collection('runs')
         .doc(targetInfo.targetDate)
         .collection('events')
-        .add(buildRealtimeEventPayload(updatedItem));
+        .add(buildRealtimeEventPayload(updatedItem, { includeSourceClientId: true }))
+        .catch(function (error) {
+          if (!shouldRetryWithoutSourceClientId(error)) {
+            throw error;
+          }
+          return state.firestore
+            .collection('stores')
+            .doc(targetInfo.storeId)
+            .collection('runs')
+            .doc(targetInfo.targetDate)
+            .collection('events')
+            .add(buildRealtimeEventPayload(updatedItem, { includeSourceClientId: false }));
+        });
     }).catch(function (error) {
       suspendFirestoreWrites(error);
       throw error;
@@ -2042,6 +2205,7 @@
     renderSelectedTaskDetail({ focus: false });
     renderOverview();
     renderIncomplete();
+    writeChecklistCache(state.checklist);
     updateStatsFromCurrentChecklist();
   }
 
@@ -2066,6 +2230,7 @@
     if (!targetInfo) {
       return;
     }
+    bootstrapRealtimeEventsFromRest(targetInfo);
 
     ensureRealtimeClientReady().then(function () {
       if (state.syncStartRequestId !== requestId) {

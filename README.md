@@ -65,6 +65,7 @@
 - `clientFirestoreWriteEnabled=true` のとき、チェック操作は Firestore `events` へ先に書き込み、GAS API は保存用にバックグラウンド同期する。
 - イベント作成・読取: `stores/{storeId}/runs/{targetDate}/events/*`
 - スナップショット読取: `stores/{storeId}/runs/{targetDate}/snapshots/today`
+- `snapshots/today` が未作成の運用日でも、LIFF は同日分の端末キャッシュを先に描画し、Firestore `events` とGAS APIで追従する。
 - 統計タブは `snapshots/today` をクライアント集計する。
 - Firestore 直接書き込みには Firebase Authentication の匿名ログインを使う。
 - Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。
