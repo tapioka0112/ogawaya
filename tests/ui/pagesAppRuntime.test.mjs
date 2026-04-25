@@ -223,6 +223,52 @@ function response(payload) {
   };
 }
 
+function responseWithStatus(status, payload) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async json() {
+      return payload;
+    },
+    async text() {
+      return JSON.stringify(payload);
+    }
+  };
+}
+
+function toFirestoreRestValue(value) {
+  if (value === null || value === undefined) {
+    return { nullValue: null };
+  }
+  if (Array.isArray(value)) {
+    return {
+      arrayValue: {
+        values: value.map(toFirestoreRestValue)
+      }
+    };
+  }
+  if (typeof value === 'object') {
+    return {
+      mapValue: {
+        fields: Object.fromEntries(Object.entries(value).map(([key, childValue]) => [key, toFirestoreRestValue(childValue)]))
+      }
+    };
+  }
+  if (typeof value === 'boolean') {
+    return { booleanValue: value };
+  }
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  }
+  return { stringValue: String(value) };
+}
+
+function firestoreRestDocument(payload) {
+  return response({
+    fields: Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, toFirestoreRestValue(value)]))
+  });
+}
+
 function createChecklistPayload(item) {
   return {
     ok: true,
@@ -275,6 +321,9 @@ function createFakeFirestore(writes, options = {}) {
         return this;
       },
       onSnapshot() {
+        if (options.onSnapshotImpl) {
+          return options.onSnapshotImpl(pathParts, ...arguments);
+        }
         return function unsubscribe() {};
       },
       get() {
@@ -325,6 +374,7 @@ function createFakeFirebase(writes, options = {}) {
 async function loadPagesApp(fetchHandler, options = {}) {
   const documentRef = createFakeDocument();
   const appJs = await readFile('pages/app.js', 'utf8');
+  const hasLiffOption = Object.prototype.hasOwnProperty.call(options, 'liff');
   const context = {
     globalThis: {},
     document: documentRef,
@@ -338,7 +388,7 @@ async function loadPagesApp(fetchHandler, options = {}) {
         this.values[key] = String(value);
       }
     },
-    liff: options.liff || {
+    liff: hasLiffOption ? options.liff : {
       async init() {},
       isLoggedIn() {
         return true;
@@ -430,7 +480,7 @@ test('GitHub Pages app は全件完了済みでも外部エフェクトに依存
   assert.equal(confettiCalls, 0);
 });
 
-test('GitHub Pages app は LIFF 認証完了前に Firestore snapshot でホームを描画する', async () => {
+test('GitHub Pages app は外部SDK未ロードでも Firestore REST snapshot でホームを描画する', async () => {
   const snapshotItem = {
     id: 'run-item-001',
     title: '開店準備',
@@ -441,26 +491,8 @@ test('GitHub Pages app は LIFF 認証完了前に Firestore snapshot でホー�
     checkedAt: '2026-04-24T10:05:00Z',
     updatedAt: '2026-04-24T10:05:00Z'
   };
-  let resolveLiffInit;
   let todayRequestCount = 0;
-  const firebase = createFakeFirebase([], {
-    getImpl(pathParts) {
-      if (pathParts.at(-2) !== 'snapshots' || pathParts.at(-1) !== 'today') {
-        return Promise.resolve({
-          exists: false,
-          data() {
-            return null;
-          }
-        });
-      }
-      return Promise.resolve({
-        exists: true,
-        data() {
-          return createChecklistPayload(snapshotItem);
-        }
-      });
-    }
-  });
+  let firestoreSnapshotRequestCount = 0;
   const { document } = await loadPagesApp(async (url) => {
     if (url === './config.json') {
       return response({
@@ -474,12 +506,17 @@ test('GitHub Pages app は LIFF 認証完了前に Firestore snapshot でホー�
         clientFirestoreWriteEnabled: false,
         consistencyRefreshSeconds: 999,
         firebase: {
-          apiKey: 'test',
+          apiKey: 'test-key',
           authDomain: 'test.firebaseapp.com',
-          projectId: 'test',
+          projectId: 'test-project',
           appId: 'app'
         }
       });
+    }
+    if (String(url).startsWith('https://firestore.googleapis.com/')) {
+      firestoreSnapshotRequestCount += 1;
+      assert.match(String(url), /projects\/test-project\/databases\/\(default\)\/documents\/stores\/store-hashimoto\/runs\//);
+      return firestoreRestDocument(createChecklistPayload(snapshotItem));
     }
     const path = new URL(url).searchParams.get('path');
     if (path === 'api/checklists/today') {
@@ -491,29 +528,14 @@ test('GitHub Pages app は LIFF 認証完了前に Firestore snapshot でホー�
     }
     throw new Error(`unexpected request: ${url}`);
   }, {
-    firebase,
-    liff: {
-      init() {
-        return new Promise((resolve) => {
-          resolveLiffInit = resolve;
-        });
-      },
-      isLoggedIn() {
-        return true;
-      },
-      getIDToken() {
-        return 'token';
-      }
-    }
+    liff: null,
+    firebase: null
   });
 
   assert.equal(document.elements['progress-summary'].textContent, '1 / 1');
   assert.equal(document.elements['progress-ring-label'].textContent, '完了');
+  assert.equal(firestoreSnapshotRequestCount, 1);
   assert.equal(todayRequestCount, 0);
-
-  resolveLiffInit();
-  await wait(30);
-  assert.equal(todayRequestCount, 1);
 });
 
 test('GitHub Pages app は古い再取得レスポンスで新しいチェック状態を戻さない', async () => {
@@ -595,6 +617,96 @@ test('GitHub Pages app は古い再取得レスポンスで新しいチェック
   assert.deepEqual(requestedPaths.filter((path) => path === 'api/checklists/today').length, 2);
 });
 
+test('GitHub Pages app は同じLINEユーザーの別端末 realtime event を反映する', async () => {
+  const initialItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  let realtimeListener = null;
+  const firebase = createFakeFirebase([], {
+    onSnapshotImpl(pathParts, next) {
+      if (pathParts.at(-1) === 'events') {
+        realtimeListener = next;
+      }
+      return function unsubscribe() {};
+    }
+  });
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: true,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'test-app'
+        }
+      });
+    }
+    if (String(url).startsWith('https://firestore.googleapis.com/')) {
+      return responseWithStatus(404, { error: { code: 404, message: 'not found' } });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      return response(createChecklistPayload(initialItem));
+    }
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, { firebase });
+
+  assert.equal(typeof realtimeListener, 'function');
+  realtimeListener({
+    docChanges() {
+      return [
+        {
+          type: 'added',
+          doc: {
+            data() {
+              return {
+                runId: 'run-001',
+                targetDate: '2026-04-24',
+                storeId: 'store-hashimoto',
+                itemId: 'run-item-001',
+                status: 'checked',
+                checkedBy: '田中LINE',
+                checkedByUserId: 'line-user-001',
+                checkedAt: '2026-04-24T10:05:00Z',
+                updatedAt: '2026-04-24T10:05:00Z',
+                emittedAt: '2026-04-24T10:05:01Z',
+                sourceUserId: 'line-user-001',
+                sourceClientId: 'other-client'
+              };
+            }
+          }
+        }
+      ];
+    }
+  });
+  await wait(30);
+
+  assert.equal(
+    findByDataset(document.elements['checklist-items'], 'status', 'checked')?.dataset.status,
+    'checked',
+    JSON.stringify({ statuses: datasetValues(document.elements['checklist-items'], 'status') })
+  );
+});
+
 test('GitHub Pages app は Firestore 直接書き込み成功時にGAS保存完了を待たずに表示を確定する', async () => {
   const initialItem = {
     id: 'run-item-001',
@@ -653,6 +765,7 @@ test('GitHub Pages app は Firestore 直接書き込み成功時にGAS保存完�
   assert.equal(firestoreWrites[0].itemId, 'run-item-001');
   assert.equal(firestoreWrites[0].status, 'checked');
   assert.equal(firestoreWrites[0].checkedBy, '田中LINE');
+  assert.match(firestoreWrites[0].sourceClientId, /^client-/);
   assert.deepEqual(firestoreWrites[0].updatedAt, { __type: 'serverTimestamp' });
   assert.deepEqual(firestoreWrites[0].emittedAt, { __type: 'serverTimestamp' });
   assert.equal(

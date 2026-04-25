@@ -28,6 +28,7 @@ service cloud.firestore {
           'checkedAt',
           'updatedAt',
           'sourceUserId',
+          'sourceClientId',
           'emittedAt'
         ])
         && data.storeId == storeId
@@ -41,6 +42,8 @@ service cloud.firestore {
         && data.updatedAt == request.time
         && isSafeText(data.sourceUserId, 128)
         && data.sourceUserId != ''
+        && isSafeText(data.sourceClientId, 128)
+        && data.sourceClientId != ''
         && data.emittedAt == request.time
         && (
           (data.status == 'checked'
@@ -65,6 +68,7 @@ service cloud.firestore {
           'templateId',
           'items',
           'sourceUserId',
+          'sourceClientId',
           'emittedAt'
         ])
         && data.type == 'template_insert'
@@ -77,6 +81,8 @@ service cloud.firestore {
         && data.items.size() <= 30
         && isSafeText(data.sourceUserId, 128)
         && data.sourceUserId != ''
+        && isSafeText(data.sourceClientId, 128)
+        && data.sourceClientId != ''
         && data.emittedAt == request.time;
     }
 

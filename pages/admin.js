@@ -1,5 +1,6 @@
 (function (global) {
   var ADMIN_SESSION_STORAGE_KEY = 'ogawaya:admin:session-token';
+  var CLIENT_ID_STORAGE_KEY = 'ogawaya:client-id';
   var JST_OFFSET_MS = 9 * 60 * 60 * 1000;
   var TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS = 5;
   var TEMPLATE_GAS_SYNC_BASE_DELAY_MS = 1000;
@@ -20,7 +21,8 @@
     runItemsLoading: false,
     firebaseApp: null,
     firestore: null,
-    firebaseAuthPromise: null
+    firebaseAuthPromise: null,
+    clientInstanceId: ''
   };
 
   var elements = {
@@ -71,6 +73,31 @@
       return url;
     }
     return url + (url.indexOf('?') >= 0 ? '&' : '?') + pairs.join('&');
+  }
+
+  function getClientInstanceId() {
+    if (state.clientInstanceId) {
+      return state.clientInstanceId;
+    }
+    try {
+      if (global.localStorage && typeof global.localStorage.getItem === 'function') {
+        state.clientInstanceId = String(global.localStorage.getItem(CLIENT_ID_STORAGE_KEY) || '');
+      }
+    } catch (error) {
+      state.clientInstanceId = '';
+    }
+    if (state.clientInstanceId) {
+      return state.clientInstanceId;
+    }
+    state.clientInstanceId = 'client-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    try {
+      if (global.localStorage && typeof global.localStorage.setItem === 'function') {
+        global.localStorage.setItem(CLIENT_ID_STORAGE_KEY, state.clientInstanceId);
+      }
+    } catch (error) {
+      // localStorage が使えない環境ではセッション内IDで同期する。
+    }
+    return state.clientInstanceId;
   }
 
   function setBoxMessage(element, message) {
@@ -715,6 +742,7 @@
         };
       }),
       sourceUserId: 'admin:' + state.storeId,
+      sourceClientId: getClientInstanceId(),
       emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
     };
   }

@@ -112,8 +112,15 @@
   }
 
   var LAST_STORE_ID_STORAGE_KEY = 'ogawaya:last-store-id';
+  var CLIENT_ID_STORAGE_KEY = 'ogawaya:client-id';
   var SNAPSHOT_DOC_ID = 'today';
   // 統計タブは Firestore snapshot をクライアント集計して表示する。
+  var LIFF_SDK_URL = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
+  var FIREBASE_SDK_URLS = [
+    'https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/11.0.1/firebase-auth-compat.js',
+    'https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js'
+  ];
   var ITEM_ACTION_DISPATCH_DEBOUNCE_MS = 120;
   var ITEM_ACTION_REQUEST_TIMEOUT_MS = 2500;
   var ITEM_ACTION_RETRY_MAX_ATTEMPTS = 6;
@@ -132,6 +139,7 @@
     minute: '2-digit',
     hour12: false
   });
+  var scriptLoadPromises = {};
 
   function getTodayDateInJst() {
     var now = new Date();
@@ -166,6 +174,90 @@
     } catch (error) {
       // noop
     }
+  }
+
+  function getClientInstanceId() {
+    if (state.clientInstanceId) {
+      return state.clientInstanceId;
+    }
+    var storedClientId = readStorageValue(CLIENT_ID_STORAGE_KEY);
+    if (storedClientId) {
+      state.clientInstanceId = storedClientId;
+      return state.clientInstanceId;
+    }
+    state.clientInstanceId = 'client-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    writeStorageValue(CLIENT_ID_STORAGE_KEY, state.clientInstanceId);
+    return state.clientInstanceId;
+  }
+
+  function loadExternalScript(url) {
+    if (scriptLoadPromises[url]) {
+      return scriptLoadPromises[url];
+    }
+    scriptLoadPromises[url] = new Promise(function (resolve, reject) {
+      if (!global.document || typeof global.document.createElement !== 'function') {
+        reject(new Error('外部SDKを読み込むための document がありません'));
+        return;
+      }
+      var script = global.document.createElement('script');
+      script.src = url;
+      script.async = true;
+      script.onload = function () {
+        resolve();
+      };
+      script.onerror = function () {
+        reject(new Error('外部SDKの読み込みに失敗しました: ' + url));
+      };
+      var parent = global.document.head || global.document.body || global.document.documentElement;
+      if (!parent || typeof parent.appendChild !== 'function') {
+        reject(new Error('外部SDKを追加するDOMがありません'));
+        return;
+      }
+      parent.appendChild(script);
+    });
+    return scriptLoadPromises[url];
+  }
+
+  function loadExternalScriptsInOrder(urls) {
+    return urls.reduce(function (promise, url) {
+      return promise.then(function () {
+        return loadExternalScript(url);
+      });
+    }, Promise.resolve());
+  }
+
+  function isLiffSdkReady() {
+    return !!(global.liff && typeof global.liff.init === 'function');
+  }
+
+  function ensureLiffSdkReady() {
+    if (isLiffSdkReady()) {
+      return Promise.resolve();
+    }
+    return loadExternalScript(LIFF_SDK_URL).then(function () {
+      if (!isLiffSdkReady()) {
+        throw new Error('LIFF SDK が読み込まれていません');
+      }
+    });
+  }
+
+  function isFirebaseSdkReady() {
+    return !!(
+      global.firebase &&
+      typeof global.firebase.initializeApp === 'function' &&
+      typeof global.firebase.firestore === 'function'
+    );
+  }
+
+  function ensureFirebaseSdkReady() {
+    if (isFirebaseSdkReady()) {
+      return Promise.resolve();
+    }
+    return loadExternalScriptsInOrder(FIREBASE_SDK_URLS).then(function () {
+      if (!isFirebaseSdkReady()) {
+        throw new Error('Firebase SDK が読み込まれていません');
+      }
+    });
   }
 
   function decodeBase64Url(value) {
@@ -327,9 +419,7 @@
   }
 
   async function initializeAuth(liffId) {
-    if (!global.liff || typeof global.liff.init !== 'function') {
-      throw new Error('LIFF SDK が読み込まれていません');
-    }
+    await ensureLiffSdkReady();
 
     await withTimeout(
       global.liff.init({
@@ -362,12 +452,14 @@
     api: null,
     config: null,
     itemActions: {},
+    clientInstanceId: '',
     firebaseApp: null,
     firestore: null,
     firebaseAuthPromise: null,
     firestoreWriteSuspendedUntilMs: 0,
     realtimeEnabled: false,
     syncUnsubscribe: null,
+    syncStartRequestId: 0,
     consistencyTimerId: null,
     visibilityHandlerBound: false,
     statsYear: new Date().getFullYear(),
@@ -987,7 +1079,9 @@
       state.statsDailyData = null;
       return;
     }
-    if (!initializeRealtimeClient()) {
+    try {
+      await ensureRealtimeClientReady();
+    } catch (error) {
       setError('統計データの読み込みに失敗しました。Firebase 設定を確認してください。');
       return;
     }
@@ -1045,7 +1139,9 @@
   }
 
   async function loadMonthlyStatsFromSnapshots(year, month) {
-    if (!initializeRealtimeClient()) {
+    try {
+      await ensureRealtimeClientReady();
+    } catch (error) {
       setError('統計データの読み込みに失敗しました。Firebase 設定を確認してください。');
       return;
     }
@@ -1472,26 +1568,39 @@
     }
   }
 
+  function ensureRealtimeClientReady() {
+    if (!state.config || !state.config.enableRealtimeSync || !state.config.firebase) {
+      return Promise.reject(new Error('Firebase 設定がありません'));
+    }
+    if (isFirebaseSdkReady() && initializeRealtimeClient()) {
+      return Promise.resolve();
+    }
+    return ensureFirebaseSdkReady().then(function () {
+      if (!initializeRealtimeClient()) {
+        throw new Error('Firebase が初期化されていません');
+      }
+    });
+  }
+
   function ensureFirebaseAuthSession() {
-    if (!initializeRealtimeClient()) {
-      return Promise.reject(new Error('Firebase が初期化されていません'));
-    }
-    if (!global.firebase || typeof global.firebase.auth !== 'function') {
-      return Promise.reject(new Error('Firebase Auth SDK が読み込まれていません'));
-    }
-    var auth = global.firebase.auth();
-    if (auth.currentUser) {
-      return Promise.resolve(auth.currentUser);
-    }
-    if (!state.firebaseAuthPromise) {
-      state.firebaseAuthPromise = auth.signInAnonymously().then(function (result) {
-        return result && result.user ? result.user : auth.currentUser;
-      }).catch(function (error) {
-        state.firebaseAuthPromise = null;
-        throw error;
-      });
-    }
-    return state.firebaseAuthPromise;
+    return ensureRealtimeClientReady().then(function () {
+      if (!global.firebase || typeof global.firebase.auth !== 'function') {
+        throw new Error('Firebase Auth SDK が読み込まれていません');
+      }
+      var auth = global.firebase.auth();
+      if (auth.currentUser) {
+        return auth.currentUser;
+      }
+      if (!state.firebaseAuthPromise) {
+        state.firebaseAuthPromise = auth.signInAnonymously().then(function (result) {
+          return result && result.user ? result.user : auth.currentUser;
+        }).catch(function (error) {
+          state.firebaseAuthPromise = null;
+          throw error;
+        });
+      }
+      return state.firebaseAuthPromise;
+    });
   }
 
   function buildSnapshotDocRef(storeId, targetDate) {
@@ -1642,10 +1751,97 @@
     };
   }
 
-  async function loadChecklistFromSnapshot() {
+  function buildFirestoreRestDocumentUrl(storeId, targetDate) {
+    if (!state.config || !state.config.firebase || !state.config.firebase.projectId || !state.config.firebase.apiKey) {
+      return '';
+    }
+    var path = [
+      'stores',
+      storeId,
+      'runs',
+      targetDate,
+      'snapshots',
+      SNAPSHOT_DOC_ID
+    ].map(encodeURIComponent).join('/');
+    return (
+      'https://firestore.googleapis.com/v1/projects/' +
+      encodeURIComponent(state.config.firebase.projectId) +
+      '/databases/(default)/documents/' +
+      path +
+      '?key=' +
+      encodeURIComponent(state.config.firebase.apiKey)
+    );
+  }
+
+  function decodeFirestoreRestValue(value) {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'nullValue')) {
+      return null;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'stringValue')) {
+      return String(value.stringValue);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'timestampValue')) {
+      return String(value.timestampValue);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'booleanValue')) {
+      return value.booleanValue === true;
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'integerValue')) {
+      return Number(value.integerValue);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, 'doubleValue')) {
+      return Number(value.doubleValue);
+    }
+    if (value.arrayValue) {
+      return (value.arrayValue.values || []).map(function (item) {
+        return decodeFirestoreRestValue(item);
+      });
+    }
+    if (value.mapValue) {
+      return decodeFirestoreRestFields(value.mapValue.fields || {});
+    }
+    return null;
+  }
+
+  function decodeFirestoreRestFields(fields) {
+    var decoded = {};
+    Object.keys(fields || {}).forEach(function (key) {
+      decoded[key] = decodeFirestoreRestValue(fields[key]);
+    });
+    return decoded;
+  }
+
+  async function loadChecklistFromSnapshotRest(storeId, targetDate) {
+    var url = buildFirestoreRestDocumentUrl(storeId, targetDate);
+    if (!url) {
+      return null;
+    }
+    var response = await fetch(url, { cache: 'no-store' });
+    if (response.status === 404) {
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error('Firestore snapshot の読み込みに失敗しました');
+    }
+    var payload = await response.json();
+    return normalizeChecklistPayload(decodeFirestoreRestFields(payload.fields || {}));
+  }
+
+  async function loadChecklistFromSnapshotSdk(storeId, targetDate) {
     if (!initializeRealtimeClient()) {
       return null;
     }
+    var doc = await buildSnapshotDocRef(storeId, targetDate).get();
+    if (!doc.exists) {
+      return null;
+    }
+    return normalizeChecklistPayload(doc.data() || {});
+  }
+
+  async function loadChecklistFromSnapshot() {
     var storeId = readStorageValue(LAST_STORE_ID_STORAGE_KEY);
     if (!storeId && state.config && state.config.defaultStoreId) {
       storeId = String(state.config.defaultStoreId);
@@ -1655,11 +1851,18 @@
       return null;
     }
     var targetDate = getTodayDateInJst();
-    var doc = await buildSnapshotDocRef(storeId, targetDate).get();
-    if (!doc.exists) {
+    if (isFirebaseSdkReady()) {
+      return loadChecklistFromSnapshotSdk(storeId, targetDate);
+    }
+    try {
+      return await loadChecklistFromSnapshotRest(storeId, targetDate);
+    } catch (restError) {
+      console.error('[sync] failed to load checklist snapshot via rest', restError);
+    }
+    if (!isFirebaseSdkReady()) {
       return null;
     }
-    return normalizeChecklistPayload(doc.data() || {});
+    return loadChecklistFromSnapshotSdk(storeId, targetDate);
   }
 
   function isFirestoreWriteSuspended() {
@@ -1699,6 +1902,7 @@
       checkedAt: updatedItem.checkedAt || '',
       updatedAt: global.firebase.firestore.FieldValue.serverTimestamp(),
       sourceUserId: sourceUserId,
+      sourceClientId: getClientInstanceId(),
       emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
     };
   }
@@ -1760,11 +1964,9 @@
       applyTemplateInsertRealtimeEvent(eventPayload);
       return;
     }
-    var currentUserId = state.checklist && state.checklist.currentUser
-      ? String(state.checklist.currentUser.userId || '')
-      : '';
-    if (currentUserId && String(eventPayload.sourceUserId || '') === currentUserId) {
-      console.debug('[sync] ignore realtime event: self_event');
+    var sourceClientId = String(eventPayload.sourceClientId || '');
+    if (sourceClientId && sourceClientId === getClientInstanceId()) {
+      console.debug('[sync] ignore realtime event: self_client_event');
       return;
     }
     var runItemId = String(eventPayload.itemId || '');
@@ -1844,6 +2046,7 @@
   }
 
   function stopRealtimeSync() {
+    state.syncStartRequestId += 1;
     if (typeof state.syncUnsubscribe === 'function') {
       state.syncUnsubscribe();
     }
@@ -1853,7 +2056,9 @@
 
   function startRealtimeSync() {
     stopRealtimeSync();
-    if (!initializeRealtimeClient()) {
+    var requestId = state.syncStartRequestId + 1;
+    state.syncStartRequestId = requestId;
+    if (!state.config || !state.config.enableRealtimeSync || !state.config.firebase) {
       return;
     }
 
@@ -1862,7 +2067,19 @@
       return;
     }
 
-    try {
+    ensureRealtimeClientReady().then(function () {
+      if (state.syncStartRequestId !== requestId) {
+        return;
+      }
+      var latestTargetInfo = ensureSyncTargetInfo();
+      if (
+        !latestTargetInfo ||
+        latestTargetInfo.storeId !== targetInfo.storeId ||
+        latestTargetInfo.targetDate !== targetInfo.targetDate ||
+        latestTargetInfo.runId !== targetInfo.runId
+      ) {
+        return;
+      }
       var query = state.firestore
         .collection('stores')
         .doc(targetInfo.storeId)
@@ -1886,10 +2103,10 @@
       });
 
       state.realtimeEnabled = true;
-    } catch (error) {
+    }).catch(function (error) {
       console.error('[sync] failed to initialize realtime sync', error);
       stopRealtimeSync();
-    }
+    });
   }
 
   function mergeChecklistPreservingInFlight(serverChecklist) {
@@ -2206,9 +2423,6 @@
     setText(elements.progressRingLabel, isComplete ? '完了' : pct + '%');
     if (isComplete && !wasComplete) {
       triggerCompletionConfetti();
-      if (global.navigator && typeof global.navigator.vibrate === 'function') {
-        global.navigator.vibrate([10, 50, 30]);
-      }
     }
   }
 
