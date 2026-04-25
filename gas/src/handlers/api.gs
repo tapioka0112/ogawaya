@@ -99,6 +99,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return ns.createJsonResponse(200, service.syncFirestoreEventsFromFirestore(request.query, request.body));
     }
 
+    if (method === 'POST' && path === '/api/internal/scheduled-items:repair') {
+      return ns.createJsonResponse(200, service.repairScheduledItemsForExistingRun(request.query, request.body));
+    }
+
     if (method === 'POST' && path === '/api/internal/firestore-events:install-trigger') {
       var triggerSecret = String(
         PropertiesService.getScriptProperties().getProperty('FIRESTORE_EVENT_SYNC_SECRET') || ''

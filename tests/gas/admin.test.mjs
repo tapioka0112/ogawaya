@@ -1184,3 +1184,89 @@ test('Firestore events 定期同期は reader から取得した template_insert
   assert.equal(secondResponse.body.appliedCount, 0);
   assert.equal(secondResponse.body.skippedCount, 1);
 });
+
+test('scheduled-items repair は既存 run に日間予定タスクだけを補修する', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      FIRESTORE_EVENT_SYNC_SECRET: 'sync-secret'
+    }
+  });
+  const seed = createBaseDataset();
+  seed.checklist_runs = [
+    {
+      id: 'run-empty-day',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-25',
+      status: 'open',
+      notified_at: '2026-04-25T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-25T01:30:00Z'
+    }
+  ];
+  seed.checklist_run_items = [];
+  seed.checklist_template_items = [
+    {
+      id: 'tmpl-item-daily',
+      template_id: 'tmpl-001',
+      title: '日間確認',
+      description: '',
+      period: 'daily',
+      sort_order: '1',
+      is_required: 'true',
+      is_active: 'true',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-20T00:00:00Z'
+    },
+    {
+      id: 'tmpl-item-weekly',
+      template_id: 'tmpl-001',
+      title: '週間確認',
+      description: '',
+      period: 'weekly',
+      sort_order: '2',
+      is_required: 'true',
+      is_active: 'true',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-20T00:00:00Z'
+    }
+  ];
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    snapshotClient: {
+      writeTodaySnapshot() {
+        return { responseCode: 200 };
+      }
+    }
+  });
+
+  const response = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/internal/scheduled-items:repair',
+    query: {},
+    body: {
+      syncSecret: 'sync-secret',
+      storeId: 'store-001',
+      targetDate: '2026-04-25'
+    }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.insertedCount, 1);
+  assert.equal(response.body.items[0].title, '日間確認');
+  assert.equal(app.repository.listRunItems('run-empty-day').length, 1);
+
+  const secondResponse = app.handleApiRequest({
+    method: 'POST',
+    path: '/api/internal/scheduled-items:repair',
+    query: {},
+    body: {
+      syncSecret: 'sync-secret',
+      storeId: 'store-001',
+      targetDate: '2026-04-25'
+    }
+  });
+
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(secondResponse.body.insertedCount, 0);
+});

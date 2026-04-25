@@ -1675,6 +1675,33 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       };
     }
 
+    function addMissingScheduledTemplateItemsToRun(template, run, targetDate, now) {
+      var existingItems = repository.listRunItems(run.id);
+      var existingTemplateItemIds = {};
+      existingItems.forEach(function (runItem) {
+        if (runItem.template_item_id) {
+          existingTemplateItemIds[runItem.template_item_id] = true;
+        }
+      });
+      var maxSortOrder = existingItems.reduce(function (maxValue, runItem) {
+        return Math.max(maxValue, Number(runItem.sort_order || 0));
+      }, 0);
+      var missingItems = listScheduledTemplateItems(repository.listTemplateItems(template.id), targetDate)
+        .filter(function (templateItem) {
+          return !existingTemplateItemIds[templateItem.id];
+        })
+        .map(function (templateItem, index) {
+          return buildRunItemPayloadFromTemplateItem(
+            templateItem,
+            run.id,
+            Utilities.getUuid(),
+            maxSortOrder + index + 1,
+            now
+          );
+        });
+      return missingItems.length > 0 ? repository.createRunItems(missingItems) : [];
+    }
+
     function applyTemplateToPeriodRuns(storeId, targetDate, templateId, body, options) {
       var applyOptions = options || {};
       var normalizedTemplateId = String(templateId || '').trim();
@@ -2292,6 +2319,32 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         return syncFirestoreEventsFromReader(safeBody);
       },
 
+      repairScheduledItemsForExistingRun: function (query, body) {
+        var safeBody = body || {};
+        requireFirestoreEventSyncSecret(safeBody);
+        var storeId = String(safeBody.storeId || '').trim();
+        ns.assert(repository.findStoreById(storeId), 'invalid_request', 'storeId の店舗が見つかりません', 400);
+        var targetDate = parseAdminTargetDate(safeBody.targetDate);
+        var template = repository.listActiveTemplates().find(function (activeTemplate) {
+          return activeTemplate.store_id === storeId;
+        });
+        ns.assert(template, 'not_found', '有効なチェックリストテンプレートがありません', 404);
+        var run = repository.findRunByStoreAndDate(storeId, targetDate);
+        ns.assert(run, 'not_found', '補修対象のチェックリストがありません', 404);
+        var insertedItems = addMissingScheduledTemplateItemsToRun(template, run, targetDate, ns.toIsoString(clock.now()));
+        var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, insertedItems);
+        return {
+          storeId: storeId,
+          targetDate: targetDate,
+          runId: run.id,
+          insertedCount: insertedItems.length,
+          items: insertedItems.map(function (item) {
+            return buildRunItemResponse(item, metadataByTemplateItemId);
+          }),
+          snapshotSync: writeChecklistSnapshotForTargetDate(storeId, targetDate)
+        };
+      },
+
       runFirestoreEventSync: function (options) {
         return syncFirestoreEventsFromReader(options || {});
       },
@@ -2675,32 +2728,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             );
             createdRuns.push(run);
           } else {
-            var existingItems = repository.listRunItems(run.id);
-            var existingTemplateItemIds = {};
-            existingItems.forEach(function (runItem) {
-              if (runItem.template_item_id) {
-                existingTemplateItemIds[runItem.template_item_id] = true;
-              }
-            });
-            var maxSortOrder = existingItems.reduce(function (maxValue, runItem) {
-              return Math.max(maxValue, Number(runItem.sort_order || 0));
-            }, 0);
-            var missingItems = listScheduledTemplateItems(repository.listTemplateItems(template.id), targetDate)
-              .filter(function (templateItem) {
-                return !existingTemplateItemIds[templateItem.id];
-              })
-              .map(function (templateItem, index) {
-                return buildRunItemPayloadFromTemplateItem(
-                  templateItem,
-                  run.id,
-                  Utilities.getUuid(),
-                  maxSortOrder + index + 1,
-                  now
-                );
-              });
-            if (missingItems.length > 0) {
-              repository.createRunItems(missingItems);
-            }
+            addMissingScheduledTemplateItemsToRun(template, run, targetDate, now);
           }
 
           var snapshotSync = writeChecklistSnapshotForTargetDate(template.store_id, targetDate);

@@ -143,6 +143,7 @@ Firestore 直接書き込みを使う場合、GAS に time-driven trigger を設
 3. `syncFirestoreEventsToSpreadsheet` が5分おきに `stores/{storeId}/runs/{targetDate}/events/*` を取得し、スプレッドシートへ後追い反映する。
 
 手動修復する場合は、secret 付きで `POST /api/internal/firestore-events:sync` を実行し、`storeId` と `targetDate` を指定します。
+既存 run に日間予定タスクが欠けている場合は、secret 付きで `POST /api/internal/scheduled-items:repair` を実行し、`storeId` と `targetDate` を指定します。この補修は既存 run だけを対象にし、LINE 通知は送りません。
 
 Firebase Functions の `syncFirestoreEventToGas` も実装されていますが、Firebase project が Blaze plan の場合だけ利用できます。利用時は Functions の `GAS_API_BASE_URL` と secret `FIRESTORE_EVENT_SYNC_SECRET` を設定します。Spark plan では GAS trigger を使用します。
 
