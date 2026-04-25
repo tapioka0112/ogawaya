@@ -524,6 +524,150 @@ test('管理者の日付別タスク一覧は従業員ホームと同じ期間�
   assert.equal(app.repository.findRunItemById('run-item-weekly'), null);
 });
 
+test('管理者の日付別タスク一覧は 2026-04-25 の期間内タスクを従業員ホームと同じ内容で返す', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      ADMIN_LOGIN_ID: 'admin-login',
+      ADMIN_LOGIN_PASSWORD: 'admin-password'
+    },
+    enableCacheService: true
+  });
+  const seed = createBaseDataset();
+  seed.line_accounts = [
+    {
+      id: 'line-002',
+      user_id: 'user-mg-001',
+      line_user_id: 'line-user-002',
+      display_name: '山田LINE',
+      linked_at: '2026-04-20T00:00:00Z'
+    }
+  ];
+  seed.checklist_runs = [
+    {
+      id: 'run-month',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-01',
+      status: 'open',
+      notified_at: '2026-04-01T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-01T01:30:00Z'
+    },
+    {
+      id: 'run-week',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-19',
+      status: 'open',
+      notified_at: '2026-04-19T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-19T01:30:00Z'
+    },
+    {
+      id: 'run-day',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-25',
+      status: 'open',
+      notified_at: '2026-04-25T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-25T01:30:00Z'
+    }
+  ];
+  seed.checklist_run_items = [
+    {
+      id: 'run-item-daily',
+      run_id: 'run-day',
+      template_item_id: 'tmpl-item-001',
+      title: '厨房内床清掃',
+      period: 'daily',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-25T01:30:00Z'
+    },
+    {
+      id: 'run-item-weekly',
+      run_id: 'run-week',
+      template_item_id: 'tmpl-item-002',
+      title: 'バーナー・コンロの清掃',
+      period: 'weekly',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-19T01:30:00Z'
+    },
+    {
+      id: 'run-item-monthly',
+      run_id: 'run-month',
+      template_item_id: 'tmpl-item-monthly',
+      title: '換気扇の清掃',
+      period: 'monthly',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-01T01:30:00Z'
+    }
+  ];
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    identityClient: {
+      verifyIdToken(idToken) {
+        if (idToken !== 'valid-manager') {
+          throw new Error('invalid token');
+        }
+        return { lineUserId: 'line-user-002', displayName: '山田LINE' };
+      }
+    },
+    clock: {
+      now() {
+        return new Date('2026-04-25T03:00:00Z');
+      },
+      today() {
+        return '2026-04-25';
+      },
+      yesterday() {
+        return '2026-04-24';
+      }
+    }
+  });
+  const token = loginAsAdmin(app);
+
+  const adminRun = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/admin/runs/2026-04-25',
+    query: { adminToken: token },
+    body: {}
+  });
+  const employeeRun = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/checklists/today',
+    query: { idToken: 'valid-manager' },
+    body: {}
+  });
+
+  assert.equal(adminRun.statusCode, 200);
+  assert.equal(employeeRun.statusCode, 200);
+  assert.equal(
+    JSON.stringify(adminRun.body.checklist.items.map((item) => [item.id, item.period])),
+    JSON.stringify(employeeRun.body.items.map((item) => [item.id, item.period]))
+  );
+  assert.equal(
+    JSON.stringify(adminRun.body.checklist.items.map((item) => [item.id, item.period])),
+    JSON.stringify([
+      ['run-item-daily', 'daily'],
+      ['run-item-weekly', 'weekly'],
+      ['run-item-monthly', 'monthly']
+    ])
+  );
+});
+
 test('管理者テンプレート一覧は挿入用にテンプレート項目を返す', async () => {
   const app = await createAdminApp();
   const token = loginAsAdmin(app);
