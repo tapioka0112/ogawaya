@@ -115,6 +115,30 @@ test('POST body の authToken は query.idToken に復元される', async () =>
   assert.deepEqual(request.body, {});
 });
 
+test('POST body の liffId は query に復元される', async () => {
+  const runtime = await loadGasRuntime();
+  const request = runtime.Ogawaya.extractRequest({
+    parameter: {
+      path: 'api/checklists/today',
+      _method: 'GET'
+    },
+    postData: {
+      contents: JSON.stringify({
+        authToken: 'valid-pt',
+        liffId: '2009859108-sJ31BCFx'
+      })
+    }
+  }, 'POST');
+
+  assert.equal(request.method, 'GET');
+  assert.equal(request.path, '/api/checklists/today');
+  assert.deepEqual(request.query, {
+    idToken: 'valid-pt',
+    liffId: '2009859108-sJ31BCFx'
+  });
+  assert.deepEqual(request.body, {});
+});
+
 test('GET の不正な _payload は invalid_request として 400 を返す', async () => {
   const runtime = await loadGasRuntime();
 

@@ -180,6 +180,75 @@ test('LIFF_ID が設定済みなら LIFF channel ID を verify に使う', async
   assert.deepEqual(verifyClientIds, ['2009859108']);
 });
 
+test('LIFF_ID 未設定なら request liffId の channel ID を verify に使う', async () => {
+  const verifyClientIds = [];
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      LINE_CHANNEL_ID: 'wrong-channel'
+    },
+    fetch(url, requestOptions) {
+      assert.equal(url, 'https://api.line.me/oauth2/v2.1/verify');
+      verifyClientIds.push(requestOptions.payload.client_id);
+      return createVerifyResponse(200, {
+        sub: 'line-user-001',
+        name: '田中LINE',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      });
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: {
+      idToken: 'valid-pt',
+      liffId: '2009859108-sJ31BCFx'
+    },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(verifyClientIds, ['2009859108']);
+});
+
+test('Script Properties の LIFF_ID は request liffId より優先される', async () => {
+  const verifyClientIds = [];
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      LIFF_ID: '2009859108-sJ31BCFx',
+      LINE_CHANNEL_ID: 'wrong-channel'
+    },
+    fetch(url, requestOptions) {
+      assert.equal(url, 'https://api.line.me/oauth2/v2.1/verify');
+      verifyClientIds.push(requestOptions.payload.client_id);
+      return createVerifyResponse(200, {
+        sub: 'line-user-001',
+        name: '田中LINE',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      });
+    }
+  });
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(createBaseDataset())
+  });
+
+  const response = app.handleApiRequest({
+    method: 'GET',
+    path: '/api/me',
+    query: {
+      idToken: 'valid-pt',
+      liffId: '2999999999-other'
+    },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(verifyClientIds, ['2009859108']);
+});
+
 test('LIFF channel ID で失敗したら LINE_CHANNEL_ID で verify を再試行する', async () => {
   const verifyClientIds = [];
   const runtime = await loadGasRuntime({

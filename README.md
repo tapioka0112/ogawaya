@@ -49,6 +49,7 @@
    - `ADMIN_LOGIN_ID`
    - `ADMIN_LOGIN_PASSWORD`
    - LIFF の `idToken` 検証は `LIFF_ID` 先頭10桁の LINE Login channel ID を優先し、`LINE_CHANNEL_ID` を fallback として使う。
+   - GitHub Pages 版は `pages/config.json` の `liffId` も GAS に送る。GAS Script Properties の `LIFF_ID` がある場合はそちらを優先する。
 2. `pages/config.json` を設定する。
    - `gasApiBaseUrl`
    - `liffId`

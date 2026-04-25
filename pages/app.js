@@ -320,12 +320,16 @@
     var normalizedGasBaseUrl = normalizeBaseUrl(options && options.gasApiBaseUrl ? options.gasApiBaseUrl : '');
     var normalizedFunctionsBaseUrl = normalizeBaseUrl(options && options.functionsApiBaseUrl ? options.functionsApiBaseUrl : '');
     var defaultStoreId = String(options && options.defaultStoreId ? options.defaultStoreId : '');
+    var liffId = String(options && options.liffId ? options.liffId : '').trim();
     var useFunctionsApi = normalizedFunctionsBaseUrl !== '';
 
     function buildLegacyBody(idToken, body) {
       var requestBody = Object.assign({}, body || {});
       if (idToken) {
         requestBody.authToken = idToken;
+      }
+      if (liffId) {
+        requestBody.liffId = liffId;
       }
       return requestBody;
     }
@@ -3166,7 +3170,8 @@
       state.api = createApi({
         gasApiBaseUrl: config.gasApiBaseUrl,
         functionsApiBaseUrl: config.functionsApiBaseUrl,
-        defaultStoreId: config.defaultStoreId
+        defaultStoreId: config.defaultStoreId,
+        liffId: config.liffId
       });
       var loadedFromSnapshot = false;
       var snapshotLoadPromise = loadChecklistFromSnapshot().then(function (snapshotChecklist) {

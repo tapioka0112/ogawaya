@@ -88,9 +88,11 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     return match && match[1] ? match[1] : '';
   }
 
-  function normalizeVerifyChannelIds(liffId, channelId) {
+  function normalizeVerifyChannelIds(configuredLiffId, channelId, requestLiffId) {
     var ids = [];
-    [extractLiffChannelId(liffId), channelId].forEach(function (candidate) {
+    var configuredLiffChannelId = extractLiffChannelId(configuredLiffId);
+    var requestLiffChannelId = configuredLiffChannelId ? '' : extractLiffChannelId(requestLiffId);
+    [configuredLiffChannelId, requestLiffChannelId, channelId].forEach(function (candidate) {
       var normalized = String(candidate || '').trim();
       if (normalized && ids.indexOf(normalized) === -1) {
         ids.push(normalized);
@@ -100,9 +102,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
   }
 
   function buildDefaultIdentityClient(liffId, channelId) {
-    var verifyChannelIds = normalizeVerifyChannelIds(liffId, channelId);
     return {
-      verifyIdToken: function (idToken) {
+      verifyIdToken: function (idToken, requestLiffId) {
+        var verifyChannelIds = normalizeVerifyChannelIds(liffId, channelId, requestLiffId);
         var verifyStartedAt = nowMillis();
         ns.logEvent('info', 'auth.verify.request', {
           channelConfigured: verifyChannelIds.length > 0,
@@ -319,7 +321,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
     function resolveIdentity(query) {
       try {
-        var identity = identityClient.verifyIdToken(query.idToken);
+        var identity = identityClient.verifyIdToken(query.idToken, query.liffId);
         ns.logEvent('info', 'auth.resolve.success', {
           lineUserId: summarizeId(identity.lineUserId)
         });

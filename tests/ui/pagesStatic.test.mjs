@@ -114,6 +114,8 @@ test('GitHub Pages の GAS API 呼び出しは idToken を POST body に載せ�
 
   assert.match(appJs, /function buildLegacyBody\(idToken,\s*body\)/);
   assert.match(appJs, /requestBody\.authToken = idToken;/);
+  assert.match(appJs, /requestBody\.liffId = liffId;/);
+  assert.match(appJs, /liffId:\s*config\.liffId/);
   assert.match(appJs, /if\s*\(method === 'GET' && idToken\)\s*\{\s*actualMethod = 'POST';\s*query\._method = 'GET';/);
 });
 

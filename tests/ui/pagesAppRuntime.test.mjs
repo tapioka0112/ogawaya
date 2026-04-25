@@ -459,7 +459,8 @@ test('GitHub Pages app は全件完了済みでも外部エフェクトに依存
     updatedAt: '2026-04-24T10:05:00Z'
   };
   let confettiCalls = 0;
-  const { document } = await loadPagesApp(async (url) => {
+  let todayRequestBody = null;
+  const { document } = await loadPagesApp(async (url, options = {}) => {
     if (url === './config.json') {
       return response({
         gasApiBaseUrl: 'https://gas.example/exec',
@@ -476,6 +477,7 @@ test('GitHub Pages app は全件完了済みでも外部エフェクトに依存
     }
     const path = new URL(url).searchParams.get('path');
     if (path === 'api/checklists/today') {
+      todayRequestBody = JSON.parse(options.body);
       return response(createChecklistPayload(checkedItem));
     }
     throw new Error(`unexpected request: ${url}`);
@@ -495,6 +497,8 @@ test('GitHub Pages app は全件完了済みでも外部エフェクトに依存
     'checked'
   );
   assert.equal(confettiCalls, 0);
+  assert.equal(todayRequestBody.authToken, 'token');
+  assert.equal(todayRequestBody.liffId, '2000000000-test');
 });
 
 test('GitHub Pages app は外部SDK未ロードでも Firestore REST snapshot でホームを描画する', async () => {

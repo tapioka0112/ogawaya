@@ -360,8 +360,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       delete query._method;
     }
     var requestIdToken = query.idToken || query.authToken || (body && (body.idToken || body.authToken));
+    var requestLiffId = query.liffId || (body && body.liffId);
     if (!query.idToken && requestIdToken) {
       query.idToken = requestIdToken;
+    }
+    if (!query.liffId && requestLiffId) {
+      query.liffId = requestLiffId;
     }
     if (query.authToken) {
       delete query.authToken;
@@ -371,6 +375,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     }
     if (body && body.authToken) {
       delete body.authToken;
+    }
+    if (body && body.liffId) {
+      delete body.liffId;
     }
     delete query.path;
     return {
