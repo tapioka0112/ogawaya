@@ -1432,22 +1432,61 @@
     return now.getFullYear() === Number(year) && (now.getMonth() + 1) === Number(month);
   }
 
-  function updateStatsFromCurrentChecklist() {
-    if (!state.statsData || !shouldLoadStatsForChecklistMonth() || !state.checklist) {
-      return false;
+  function getCurrentStatsUserId() {
+    return state.checklist && state.checklist.currentUser
+      ? String(state.checklist.currentUser.userId || '')
+      : '';
+  }
+
+  function resolveStatsItemFreshnessMs(item) {
+    return Math.max(
+      parseTimestampMillis(item && item.updatedAt),
+      parseTimestampMillis(item && item.checkedAt)
+    );
+  }
+
+  function resolveDailyStatsFreshnessMs(dailyStats) {
+    var items = dailyStats && Array.isArray(dailyStats.items) ? dailyStats.items : [];
+    return items.reduce(function (latestMs, item) {
+      return Math.max(latestMs, resolveStatsItemFreshnessMs(item));
+    }, 0);
+  }
+
+  function mergeCurrentChecklistIntoStatsMonthlySnapshots() {
+    if (!state.checklist || !shouldLoadStatsForChecklistMonth()) {
+      return '';
     }
     var targetDate = String(state.checklist.targetDate || '');
     if (!targetDate) {
-      return false;
+      return '';
     }
-    state.statsMonthlySnapshots[targetDate] = buildDailyStatsFromChecklist(state.checklist, targetDate);
-    var currentUserId = state.checklist.currentUser ? String(state.checklist.currentUser.userId || '') : '';
+    var currentDailyStats = buildDailyStatsFromChecklist(state.checklist, targetDate);
+    var existingDailyStats = state.statsMonthlySnapshots[targetDate];
+    if (
+      existingDailyStats
+      && resolveDailyStatsFreshnessMs(existingDailyStats) > resolveDailyStatsFreshnessMs(currentDailyStats)
+    ) {
+      return targetDate;
+    }
+    state.statsMonthlySnapshots[targetDate] = currentDailyStats;
+    return targetDate;
+  }
+
+  function rebuildStatsDataFromMonthlySnapshots() {
     state.statsData = buildMonthlyStatsFromDailyStats(
       state.statsMonthlySnapshots,
       state.statsYear,
       state.statsMonth,
-      currentUserId
+      getCurrentStatsUserId()
     );
+  }
+
+  function updateStatsFromCurrentChecklist() {
+    var targetDate = mergeCurrentChecklistIntoStatsMonthlySnapshots();
+    if (!targetDate || !state.statsData) {
+      return false;
+    }
+    rebuildStatsDataFromMonthlySnapshots();
     if (state.statsSelectedDate === targetDate) {
       state.statsDailyData = state.statsMonthlySnapshots[targetDate];
       state.statsDailyLoading = false;
@@ -1512,15 +1551,8 @@
       } else {
         delete state.statsMonthlySnapshots[targetDate];
       }
-      var currentUserId = state.checklist && state.checklist.currentUser
-        ? String(state.checklist.currentUser.userId || '')
-        : '';
-      state.statsData = buildMonthlyStatsFromDailyStats(
-        state.statsMonthlySnapshots,
-        state.statsYear,
-        state.statsMonth,
-        currentUserId
-      );
+      mergeCurrentChecklistIntoStatsMonthlySnapshots();
+      rebuildStatsDataFromMonthlySnapshots();
       if (state.statsSelectedDate === targetDate) {
         state.statsDailyData = state.statsMonthlySnapshots[targetDate] || {
           date: targetDate,
@@ -1561,6 +1593,13 @@
     state.statsDailyLoading = true;
     state.statsDailyData = null;
     renderStatsDayDetails();
+    var localTargetDate = mergeCurrentChecklistIntoStatsMonthlySnapshots();
+    if (localTargetDate === targetDate && state.statsMonthlySnapshots[targetDate]) {
+      state.statsDailyData = state.statsMonthlySnapshots[targetDate];
+      state.statsDailyLoading = false;
+      renderStatsDayDetails();
+      return;
+    }
     if (state.statsMonthlySnapshots[targetDate]) {
       state.statsDailyData = state.statsMonthlySnapshots[targetDate];
       state.statsDailyLoading = false;
@@ -1648,10 +1687,8 @@
         snapshotMap[entry.targetDate] = entry.daily;
       });
       state.statsMonthlySnapshots = snapshotMap;
-      var userId = state.checklist && state.checklist.currentUser
-        ? String(state.checklist.currentUser.userId || '')
-        : '';
-      state.statsData = buildMonthlyStatsFromDailyStats(snapshotMap, year, month, userId);
+      mergeCurrentChecklistIntoStatsMonthlySnapshots();
+      rebuildStatsDataFromMonthlySnapshots();
       renderStats();
       startStatsTodaySnapshotSubscription();
       if (state.statsSelectedDate) {
@@ -2181,7 +2218,8 @@
       status: String(item && item.status ? item.status : 'unchecked') === 'checked' ? 'checked' : 'unchecked',
       checkedBy: item && item.checkedBy ? String(item.checkedBy) : null,
       checkedByUserId: item && item.checkedByUserId ? String(item.checkedByUserId) : null,
-      checkedAt: item && item.checkedAt ? String(item.checkedAt) : null
+      checkedAt: item && item.checkedAt ? String(item.checkedAt) : null,
+      updatedAt: item && item.updatedAt ? String(item.updatedAt) : null
     };
   }
 

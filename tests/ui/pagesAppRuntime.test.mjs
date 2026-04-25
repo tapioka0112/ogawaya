@@ -1285,6 +1285,93 @@ test('GitHub Pages app は同じLINEユーザーの別端末 realtime event を�
   );
 });
 
+test('GitHub Pages app は統計初回表示でもホームのチェック済み状態を自分の完了数へ反映する', async () => {
+  const initialItem = {
+    id: 'run-item-001',
+    title: '開店準備',
+    description: '券売機を確認する',
+    status: 'unchecked',
+    checkedBy: null,
+    checkedByUserId: null,
+    checkedAt: null,
+    updatedAt: '2026-04-24T10:00:00Z'
+  };
+  const staleSnapshot = createChecklistPayload(initialItem);
+  staleSnapshot.targetDate = '2026-04-24';
+  const checkedItem = {
+    ...initialItem,
+    status: 'checked',
+    checkedBy: '田中LINE',
+    checkedByUserId: 'line-user-001',
+    checkedAt: '2026-04-24T10:05:00Z',
+    updatedAt: '2026-04-24T10:05:00Z'
+  };
+  const firebase = createFakeFirebase([], {
+    getImpl(pathParts) {
+      const targetDate = pathParts[3];
+      return Promise.resolve({
+        exists: targetDate === '2026-04-24',
+        data() {
+          return targetDate === '2026-04-24' ? staleSnapshot : null;
+        }
+      });
+    }
+  });
+  const { document } = await loadPagesApp(async (url) => {
+    if (url === './config.json') {
+      return response({
+        gasApiBaseUrl: 'https://gas.example/exec',
+        functionsApiBaseUrl: '',
+        liffId: '2000000000-test',
+        defaultStoreId: 'store-hashimoto',
+        allowAnonymousAccess: false,
+        tryLiffAuthInAnonymous: false,
+        enableRealtimeSync: true,
+        clientFirestoreWriteEnabled: true,
+        consistencyRefreshSeconds: 999,
+        firebase: {
+          apiKey: 'test-key',
+          authDomain: 'test.firebaseapp.com',
+          projectId: 'test-project',
+          appId: 'test-app'
+        }
+      });
+    }
+    const path = new URL(url).searchParams.get('path');
+    if (path === 'api/checklists/today') {
+      return response(createChecklistPayload(initialItem));
+    }
+    if (path === 'api/client-events') {
+      return response({ ok: true, statusCode: 200 });
+    }
+    if (path === 'api/checklist-items/run-item-001/check') {
+      return response({
+        ok: true,
+        statusCode: 200,
+        item: checkedItem
+      });
+    }
+    throw new Error(`unexpected request: ${url}`);
+  }, { firebase });
+
+  const checkButton = findByDataset(document.elements['checklist-items'], 'action', 'check');
+  assert.ok(checkButton);
+  checkButton.click();
+  await wait(30);
+
+  document.elements['tab-stats'].click();
+  await wait(60);
+
+  assert.equal(
+    findByClassName(document.elements['stats-mine-info'], 'stats-info-main').innerHTML,
+    '1<em>件 / 1件</em>'
+  );
+  assert.equal(
+    findByClassName(document.elements['stats-mine-info'], 'stats-info-sub').innerHTML,
+    '達成率 <strong>100%</strong>'
+  );
+});
+
 test('GitHub Pages app は Firestore 直接書き込み成功時にGAS保存完了を待たずに表示を確定する', async () => {
   const initialItem = {
     id: 'run-item-001',
