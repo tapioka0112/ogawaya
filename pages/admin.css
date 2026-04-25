@@ -263,6 +263,7 @@ button:disabled {
 .run-item-main {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .run-item-title {
@@ -276,9 +277,19 @@ button:disabled {
 }
 
 .run-item-delete {
+  flex: 0 0 72px;
+  width: 72px;
+  min-height: 48px;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
   border: 1px solid #fca5a5;
   color: #dc2626;
   background: #fff;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .date-input-wrap {
