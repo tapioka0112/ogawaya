@@ -89,6 +89,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     if (sheetName === 'checklist_templates') {
       validateTimestamp(row.created_at, 'checklist_templates.created_at');
       validateTimestamp(row.updated_at, 'checklist_templates.updated_at');
+      ns.normalizeTaskPeriod(row.period);
       ns.assert(ns.isTimeString(row.notify_time), 'invalid_data', 'notify_time の形式が不正です', 400);
       ns.assert(ns.isTimeString(row.closing_time), 'invalid_data', 'closing_time の形式が不正です', 400);
     }

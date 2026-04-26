@@ -718,10 +718,57 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
     };
   }
 
+  var TASK_PERIOD_LABELS = {
+    daily: '日間',
+    weekly: '週間',
+    monthly: '月間'
+  };
+
+  function requireTaskPeriod(value, fieldName) {
+    var rawPeriod = String(value || '').trim();
+    ns.assert(rawPeriod, 'invalid_request', fieldName + ' は必須です', 400);
+    return ns.normalizeTaskPeriod(rawPeriod, 'invalid_request');
+  }
+
+  function listTemplateItemPeriods(items) {
+    var periodMap = {};
+    (items || []).forEach(function (item) {
+      periodMap[ns.normalizeTaskPeriod(item.period)] = true;
+    });
+    return ns.TASK_PERIOD_VALUES.filter(function (period) {
+      return !!periodMap[period];
+    });
+  }
+
+  function resolveTemplatePeriod(template, items) {
+    var rawPeriod = String(template && template.period ? template.period : '').trim();
+    if (rawPeriod) {
+      return ns.normalizeTaskPeriod(rawPeriod, 'invalid_data');
+    }
+    var periods = listTemplateItemPeriods(items || []);
+    if (periods.length === 1) {
+      return periods[0];
+    }
+    return ns.TASK_PERIODS.DAILY;
+  }
+
+  function assertTemplateItemsMatchPeriod(period, items) {
+    var normalizedPeriod = ns.normalizeTaskPeriod(period, 'invalid_request');
+    (items || []).forEach(function (item) {
+      ns.assert(
+        ns.normalizeTaskPeriod(item.period, 'invalid_request') === normalizedPeriod,
+        'invalid_request',
+        'テンプレートには同じ期間のタスクだけを含めてください',
+        400
+      );
+    });
+  }
+
   function buildTemplateResponse(template, items) {
     return {
       id: template.id,
       name: template.name,
+      period: resolveTemplatePeriod(template, items),
       notifyTime: template.notify_time,
       closingTime: template.closing_time,
       isActive: ns.parseBoolean(template.is_active),
@@ -1564,6 +1611,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         id: catalogTemplateId,
         store_id: storeId,
         name: 'タスクカタログ',
+        period: ns.TASK_PERIODS.DAILY,
         notify_time: '10:30',
         closing_time: '00:00',
         is_active: 'false',
@@ -1586,6 +1634,110 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         period: ns.normalizeTaskPeriod(item.period),
         sortOrder: Number(item.sort_order)
       };
+    }
+
+    function buildAdminTemplateResponse(template, items) {
+      var response = buildTemplateResponse(template, items);
+      response.itemCount = items.length;
+      return response;
+    }
+
+    function buildSplitTemplateId(templateId, period) {
+      return String(templateId || '') + '-' + ns.normalizeTaskPeriod(period);
+    }
+
+    function buildSplitTemplateItemId(itemId, period) {
+      return String(itemId || '') + '-' + ns.normalizeTaskPeriod(period);
+    }
+
+    function buildSplitTemplateName(name, period) {
+      return String(name || '') + '（' + TASK_PERIOD_LABELS[ns.normalizeTaskPeriod(period)] + '）';
+    }
+
+    function groupTemplateItemsByPeriod(items) {
+      var grouped = {};
+      ns.TASK_PERIOD_VALUES.forEach(function (period) {
+        grouped[period] = [];
+      });
+      (items || []).forEach(function (item) {
+        grouped[ns.normalizeTaskPeriod(item.period)].push(item);
+      });
+      return grouped;
+    }
+
+    function ensureSplitTemplateItems(templateId, period, items, now) {
+      (items || []).forEach(function (item, index) {
+        var splitItemId = buildSplitTemplateItemId(item.id, period);
+        if (repository.findRowById('checklist_template_items', splitItemId)) {
+          return;
+        }
+        repository.createTemplateItem({
+          id: splitItemId,
+          template_id: templateId,
+          title: item.title,
+          description: item.description,
+          period: ns.normalizeTaskPeriod(period),
+          sort_order: String(index + 1),
+          is_required: item.is_required,
+          is_active: 'true',
+          created_at: now,
+          updated_at: now
+        });
+      });
+    }
+
+    function normalizePeriodTemplatesForStore(storeId) {
+      var now = ns.toIsoString(clock.now());
+      repository.listActiveTemplatesWithItems(storeId).forEach(function (entry) {
+        var template = entry.template;
+        var items = entry.items;
+        var itemPeriods = listTemplateItemPeriods(items);
+        var rawPeriod = String(template.period || '').trim();
+        if (itemPeriods.length <= 1) {
+          var nextPeriod = itemPeriods[0] || (rawPeriod ? ns.normalizeTaskPeriod(rawPeriod, 'invalid_data') : ns.TASK_PERIODS.DAILY);
+          if (rawPeriod !== nextPeriod) {
+            repository.updateTemplate(template.id, {
+              period: nextPeriod,
+              updated_at: now
+            });
+          }
+          return;
+        }
+
+        var groupedItems = groupTemplateItemsByPeriod(items);
+        itemPeriods.forEach(function (period) {
+          var splitTemplateId = buildSplitTemplateId(template.id, period);
+          var splitTemplate = repository.findTemplateById(splitTemplateId);
+          if (splitTemplate) {
+            repository.updateTemplate(splitTemplateId, {
+              name: buildSplitTemplateName(template.name, period),
+              period: period,
+              notify_time: template.notify_time,
+              closing_time: template.closing_time,
+              is_active: 'true',
+              updated_at: now
+            });
+          } else {
+            repository.createTemplate({
+              id: splitTemplateId,
+              store_id: template.store_id,
+              name: buildSplitTemplateName(template.name, period),
+              period: period,
+              notify_time: template.notify_time,
+              closing_time: template.closing_time,
+              is_active: 'true',
+              created_by: template.created_by,
+              created_at: now,
+              updated_at: now
+            });
+          }
+          ensureSplitTemplateItems(splitTemplateId, period, groupedItems[period], now);
+        });
+        repository.updateTemplate(template.id, {
+          is_active: 'false',
+          updated_at: now
+        });
+      });
     }
 
     function buildClientRunItemIdByTemplateItemId(body) {
@@ -1715,16 +1867,27 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         return !allowedTemplateItemIds || !!allowedTemplateItemIds[templateItem.id];
       });
       ns.assert(templateItems.length > 0, 'invalid_request', 'テンプレートに項目がありません', 400);
+      var templatePeriod = resolveTemplatePeriod(template, templateItems);
+      assertTemplateItemsMatchPeriod(templatePeriod, templateItems);
+      if (applyOptions.templatePeriod) {
+        ns.assert(
+          ns.normalizeTaskPeriod(applyOptions.templatePeriod, 'invalid_request') === templatePeriod,
+          'invalid_request',
+          'event.period とテンプレート期間が一致しません',
+          400
+        );
+      }
+      var effectiveTargetDate = resolveRunTargetDateForPeriod(templatePeriod, targetDate);
 
       var clientRunItemIdByTemplateItemId = buildClientRunItemIdByTemplateItemId(body);
-      var baseRun = ensureRunForDate(storeId, targetDate);
+      var baseRun = ensureRunForDate(storeId, effectiveTargetDate);
       var contextByTargetDate = {};
       var affectedRunById = {};
       var now = ns.toIsoString(clock.now());
 
       function getContext(runTargetDate) {
         if (!contextByTargetDate[runTargetDate]) {
-          var run = runTargetDate === targetDate ? baseRun : ensureRunForDate(storeId, runTargetDate);
+          var run = runTargetDate === effectiveTargetDate ? baseRun : ensureRunForDate(storeId, runTargetDate);
           contextByTargetDate[runTargetDate] = buildTemplateApplyRunContext(run, repository.listRunItems(run.id));
         }
         return contextByTargetDate[runTargetDate];
@@ -1801,7 +1964,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         writeRunAndCurrentSnapshots(affectedRunById[runId]);
       });
       if (!affectedRunById[baseRun.id]) {
-        writeChecklistSnapshotForTargetDate(storeId, targetDate);
+        writeChecklistSnapshotForTargetDate(storeId, effectiveTargetDate);
       }
 
       var responseItems = insertedItems.concat(changedItems);
@@ -1893,7 +2056,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
             targetDate,
             eventPayload.templateId,
             buildFirestoreTemplateClientBody(eventPayload),
-            { templateItemIds: templateItemIds }
+            {
+              templateItemIds: templateItemIds,
+              templatePeriod: String(eventPayload.period || '').trim()
+            }
           )
         };
       }
@@ -2166,14 +2332,10 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
       listAdminTemplates: function (query, body) {
         var session = requireAdminSession(query, body);
+        normalizePeriodTemplatesForStore(session.storeId);
         return {
           templates: repository.listActiveTemplatesWithItems(session.storeId).map(function (entry) {
-            return {
-              id: entry.template.id,
-              name: entry.template.name,
-              itemCount: entry.items.length,
-              items: entry.items.map(buildTemplateItemResponse)
-            };
+            return buildAdminTemplateResponse(entry.template, entry.items);
           })
         };
       },
@@ -2182,6 +2344,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var session = requireAdminSession(query, body);
         var safeBody = body || {};
         var name = ns.requireString(safeBody.name, 'name');
+        var templatePeriod = requireTaskPeriod(safeBody.period, 'period');
         var rawTaskIds = Array.isArray(safeBody.taskIds) ? safeBody.taskIds.map(function (taskId) {
           return String(taskId || '').trim();
         }).filter(function (taskId) {
@@ -2207,12 +2370,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           ns.assert(task, 'not_found', '指定された taskId が見つかりません', 404);
           return task;
         });
+        assertTemplateItemsMatchPeriod(templatePeriod, selectedTasks);
 
         var now = ns.toIsoString(clock.now());
         var template = repository.createTemplate({
           id: Utilities.getUuid(),
           store_id: session.storeId,
           name: name,
+          period: templatePeriod,
           notify_time: '10:30',
           closing_time: '00:00',
           is_active: 'true',
@@ -2235,12 +2400,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           });
         });
         return {
-          template: {
-            id: template.id,
-            name: template.name,
-            itemCount: createdItems.length,
-            items: createdItems.map(buildTemplateItemResponse)
-          }
+          template: buildAdminTemplateResponse(template, createdItems)
         };
       },
 
@@ -2301,7 +2461,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       applyAdminTemplateToRun: function (query, body, targetDateRaw, templateId) {
         var session = requireAdminSession(query, body);
         var targetDate = parseAdminTargetDate(targetDateRaw);
-        return applyTemplateToPeriodRuns(session.storeId, targetDate, templateId, body, {});
+        return applyTemplateToPeriodRuns(session.storeId, targetDate, templateId, body, {
+          templatePeriod: String((body && body.period) || '').trim()
+        });
       },
 
       applyFirestoreEventSync: function (query, body) {
@@ -2454,11 +2616,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var currentUser = requireAuthenticatedWriteUser(query);
         ensureManager(currentUser.user);
         var name = ns.requireString(body.name, 'name');
+        var templatePeriod = requireTaskPeriod(body.period, 'period');
         var now = ns.toIsoString(clock.now());
         var template = repository.createTemplate({
           id: Utilities.getUuid(),
           store_id: currentUser.user.store_id,
           name: name,
+          period: templatePeriod,
           notify_time: '10:30',
           closing_time: '00:00',
           is_active: 'true',
@@ -2466,12 +2630,13 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           created_at: now,
           updated_at: now
         });
-        return { template: template };
+        return { template: buildTemplateResponse(template, []) };
       },
 
       listTemplates: function (query) {
         var currentUser = requireAuthenticatedUser(query);
         ensureManager(currentUser.user);
+        normalizePeriodTemplatesForStore(currentUser.user.store_id);
         return {
           templates: repository.listActiveTemplatesWithItems(currentUser.user.store_id).map(function (entry) {
             return buildTemplateResponse(entry.template, entry.items);
@@ -2498,6 +2663,9 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var template = repository.findTemplateById(templateId);
         ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
         ensureStoreScope(repository, currentUser.user, template.store_id);
+        var templatePeriod = resolveTemplatePeriod(template, repository.listTemplateItems(template.id));
+        var itemPeriod = requireTaskPeriod(body.period, 'period');
+        ns.assert(itemPeriod === templatePeriod, 'invalid_request', 'テンプレート期間と項目タグが一致しません', 400);
 
         var now = ns.toIsoString(clock.now());
         var item = repository.createTemplateItem({
@@ -2505,7 +2673,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           template_id: templateId,
           title: ns.requireString(body.title, 'title'),
           description: body.description || '',
-          period: ns.normalizeTaskPeriod(body.period, 'invalid_request'),
+          period: itemPeriod,
           sort_order: String(body.sortOrder),
           is_required: ns.boolToString(body.isRequired),
           is_active: 'true',
@@ -2521,11 +2689,14 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         var template = repository.findTemplateById(templateId);
         ns.assert(template, 'not_found', 'テンプレートが見つかりません', 404);
         ensureStoreScope(repository, currentUser.user, template.store_id);
+        var templatePeriod = resolveTemplatePeriod(template, repository.listTemplateItems(template.id));
+        var itemPeriod = requireTaskPeriod(body.period, 'period');
+        ns.assert(itemPeriod === templatePeriod, 'invalid_request', 'テンプレート期間と項目タグが一致しません', 400);
 
         var updatedItem = repository.updateTemplateItem(itemId, {
           title: ns.requireString(body.title, 'title'),
           description: body.description || '',
-          period: ns.normalizeTaskPeriod(body.period, 'invalid_request'),
+          period: itemPeriod,
           sort_order: String(body.sortOrder),
           is_required: ns.boolToString(body.isRequired),
           updated_at: ns.toIsoString(clock.now())

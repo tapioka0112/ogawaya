@@ -88,6 +88,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       'id',
       'store_id',
       'name',
+      'period',
       'notify_time',
       'closing_time',
       'is_active',

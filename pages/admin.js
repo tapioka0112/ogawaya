@@ -48,9 +48,15 @@
     insertPeriodFields: document.querySelectorAll('[data-insert-period-field]'),
     insertTaskButton: document.getElementById('insert-task-button'),
     templateNameInput: document.getElementById('template-name-input'),
+    templatePeriodInput: document.getElementById('template-period-input'),
     templateTaskList: document.getElementById('template-task-list'),
     createTemplateButton: document.getElementById('create-template-button'),
     templateSelect: document.getElementById('template-select'),
+    templateDailyDateInput: document.getElementById('template-daily-date-input'),
+    templateWeekMonthInput: document.getElementById('template-week-month-input'),
+    templateWeekSelect: document.getElementById('template-week-select'),
+    templateMonthInput: document.getElementById('template-month-input'),
+    templatePeriodFields: document.querySelectorAll('[data-template-period-field]'),
     applyTemplateButton: document.getElementById('apply-template-button'),
     dateInput: document.getElementById('admin-date-input'),
     runItems: document.getElementById('admin-run-items'),
@@ -468,6 +474,11 @@
       return;
     }
     elements.templateTaskList.innerHTML = '';
+    var templatePeriod = getTemplateCreatePeriod();
+    var templateTasks = (state.tasks || []).filter(function (task) {
+      var taskPeriod = normalizeTaskPeriod(task && task.period);
+      return taskPeriod === templatePeriod;
+    });
     if (!Array.isArray(state.tasks) || state.tasks.length === 0) {
       var empty = document.createElement('li');
       empty.className = 'template-task-empty';
@@ -475,7 +486,14 @@
       elements.templateTaskList.appendChild(empty);
       return;
     }
-    state.tasks.forEach(function (task) {
+    if (templateTasks.length === 0) {
+      var periodEmpty = document.createElement('li');
+      periodEmpty.className = 'template-task-empty';
+      periodEmpty.textContent = getTaskPeriodLabel(templatePeriod) + 'タスクがありません';
+      elements.templateTaskList.appendChild(periodEmpty);
+      return;
+    }
+    templateTasks.forEach(function (task) {
       var li = document.createElement('li');
       var checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
@@ -517,14 +535,14 @@
     }) || null;
   }
 
-  function fillWeekOptions() {
-    if (!elements.insertWeekMonthInput || !elements.insertWeekSelect) {
+  function fillWeekSelect(monthInput, weekSelect) {
+    if (!monthInput || !weekSelect) {
       return;
     }
-    var monthValue = elements.insertWeekMonthInput.value || formatMonthValue(state.selectedDate);
-    var selectedValue = elements.insertWeekSelect.value;
+    var monthValue = monthInput.value || formatMonthValue(state.selectedDate);
+    var selectedValue = weekSelect.value;
     fillSelectOptions(
-      elements.insertWeekSelect,
+      weekSelect,
       listWeeksForMonth(monthValue).map(function (week) {
         return {
           value: week.startDate,
@@ -533,11 +551,19 @@
       })
     );
     if (selectedValue) {
-      elements.insertWeekSelect.value = selectedValue;
+      weekSelect.value = selectedValue;
     }
-    if (!elements.insertWeekSelect.value && elements.insertWeekSelect.options.length > 0) {
-      elements.insertWeekSelect.value = elements.insertWeekSelect.options[0].value;
+    if (!weekSelect.value && weekSelect.options.length > 0) {
+      weekSelect.value = weekSelect.options[0].value;
     }
+  }
+
+  function fillWeekOptions() {
+    fillWeekSelect(elements.insertWeekMonthInput, elements.insertWeekSelect);
+  }
+
+  function fillTemplateWeekOptions() {
+    fillWeekSelect(elements.templateWeekMonthInput, elements.templateWeekSelect);
   }
 
   function updateInsertPeriodFields() {
@@ -576,6 +602,10 @@
     return parts.year + '-' + String(parts.month).padStart(2, '0') + '-01';
   }
 
+  function getTemplateCreatePeriod() {
+    return normalizeTaskPeriod(elements.templatePeriodInput && elements.templatePeriodInput.value);
+  }
+
   function getInsertTargetDateForTask(task) {
     switch (normalizeTaskPeriod(task && task.period)) {
       case 'weekly':
@@ -595,12 +625,69 @@
     fillSelectOptions(
       elements.templateSelect,
       (state.templates || []).map(function (template) {
+        var period = normalizeTaskPeriod(template && template.period);
         return {
           value: template.id,
-          label: template.name
+          label: '[' + getTaskPeriodLabel(period) + '] ' + template.name
         };
       })
     );
+    updateTemplatePeriodFields();
+  }
+
+  function getSelectedTemplatePeriod(template) {
+    return normalizeTaskPeriod(template && template.period);
+  }
+
+  function updateTemplatePeriodFields() {
+    var template = getSelectedTemplate();
+    var period = getSelectedTemplatePeriod(template);
+    elements.templatePeriodFields.forEach(function (field) {
+      field.hidden = field.dataset.templatePeriodField !== period;
+    });
+    if (elements.templateDailyDateInput && !elements.templateDailyDateInput.value) {
+      elements.templateDailyDateInput.value = state.selectedDate;
+    }
+    if (elements.templateWeekMonthInput && !elements.templateWeekMonthInput.value) {
+      elements.templateWeekMonthInput.value = formatMonthValue(state.selectedDate);
+    }
+    if (elements.templateMonthInput && !elements.templateMonthInput.value) {
+      elements.templateMonthInput.value = formatMonthValue(state.selectedDate);
+    }
+    if (period === 'weekly') {
+      fillTemplateWeekOptions();
+    }
+  }
+
+  function getSelectedTemplateWeekStartDate() {
+    if (!elements.templateWeekSelect || !elements.templateWeekSelect.value) {
+      fillTemplateWeekOptions();
+    }
+    var selectedWeekStart = elements.templateWeekSelect ? String(elements.templateWeekSelect.value || '') : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedWeekStart)) {
+      throw new Error('対象週を選択してください');
+    }
+    return selectedWeekStart;
+  }
+
+  function getSelectedTemplateMonthStartDate() {
+    var parts = parseMonthValue(elements.templateMonthInput && elements.templateMonthInput.value);
+    return parts.year + '-' + String(parts.month).padStart(2, '0') + '-01';
+  }
+
+  function getTemplateApplyTargetDate(template) {
+    switch (getSelectedTemplatePeriod(template)) {
+      case 'weekly':
+        return getSelectedTemplateWeekStartDate();
+      case 'monthly':
+        return getSelectedTemplateMonthStartDate();
+      default:
+        var targetDate = elements.templateDailyDateInput ? String(elements.templateDailyDateInput.value || '') : '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+          throw new Error('対象日を選択してください');
+        }
+        return targetDate;
+    }
   }
 
   function renderRunItems() {
@@ -906,6 +993,7 @@
 
   function buildOptimisticTemplateRunItems(template) {
     var templateItems = template && Array.isArray(template.items) ? template.items : [];
+    var templatePeriod = getSelectedTemplatePeriod(template);
     var existingTemplateItemIds = getExistingTemplateItemIdSet();
     var existingItems = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
     var maxSortOrder = existingItems.reduce(function (maxValue, item) {
@@ -913,7 +1001,7 @@
     }, 0);
     var now = new Date().toISOString();
     return templateItems.filter(function (item) {
-      return item && item.id && !existingTemplateItemIds[item.id];
+      return item && item.id && normalizeTaskPeriod(item.period) === templatePeriod && !existingTemplateItemIds[item.id];
     }).map(function (item, index) {
       return {
         id: createClientRunItemId(item.id),
@@ -934,7 +1022,7 @@
     });
   }
 
-  function buildTemplateInsertEventPayload(targetDate, templateId, items) {
+  function buildTemplateInsertEventPayload(targetDate, templateId, period, items) {
     var runId = state.checklist && state.checklist.runId ? String(state.checklist.runId) : '';
     if (!runId) {
       throw new Error('Firestore同期用のrunIdが未確定です');
@@ -945,6 +1033,7 @@
       targetDate: targetDate,
       runId: runId,
       templateId: templateId,
+      period: normalizeTaskPeriod(period),
       items: items.map(function (item) {
         return {
           id: item.id,
@@ -962,7 +1051,7 @@
     };
   }
 
-  function writeTemplateInsertEvent(targetDate, templateId, items) {
+  function writeTemplateInsertEvent(targetDate, templateId, period, items) {
     if (!state.config || state.config.clientFirestoreWriteEnabled !== true) {
       return Promise.reject(new Error('Firestore直接書き込みは無効です'));
     }
@@ -976,7 +1065,7 @@
         .collection('runs')
         .doc(targetDate)
         .collection('events')
-        .add(buildTemplateInsertEventPayload(targetDate, templateId, items));
+        .add(buildTemplateInsertEventPayload(targetDate, templateId, period, items));
     });
   }
 
@@ -1157,7 +1246,13 @@
         if (eventPayload.type === 'template_insert') {
           var addedItems = applyTemplateInsertEventToRunItems(eventPayload, targetDate);
           if (addedItems.length > 0 && eventPayload.templateId) {
-            syncTemplateInsertViaGasInBackground(targetDate, String(eventPayload.templateId), addedItems, 0);
+            syncTemplateInsertViaGasInBackground(
+              targetDate,
+              String(eventPayload.templateId),
+              normalizeTaskPeriod(eventPayload.period),
+              addedItems,
+              0
+            );
           }
           return;
         }
@@ -1175,12 +1270,13 @@
     });
   }
 
-  function syncTemplateInsertViaGasInBackground(targetDate, templateId, items, attempt) {
+  function syncTemplateInsertViaGasInBackground(targetDate, templateId, period, items, attempt) {
     var currentAttempt = Number(attempt || 0);
     apiRequest(
       'POST',
       '/api/admin/runs/' + encodeURIComponent(targetDate) + '/templates/' + encodeURIComponent(templateId) + ':apply',
       {
+        period: normalizeTaskPeriod(period),
         clientItems: buildTemplateClientItems(items)
       }
     ).then(function (response) {
@@ -1197,7 +1293,7 @@
     }).catch(function (error) {
       if (currentAttempt + 1 < TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS) {
         global.setTimeout(function () {
-          syncTemplateInsertViaGasInBackground(targetDate, templateId, items, currentAttempt + 1);
+          syncTemplateInsertViaGasInBackground(targetDate, templateId, period, items, currentAttempt + 1);
         }, TEMPLATE_GAS_SYNC_BASE_DELAY_MS * Math.pow(2, currentAttempt));
         return;
       }
@@ -1327,12 +1423,14 @@
     if (!templateName) {
       throw new Error('テンプレート名を入力してください');
     }
+    var templatePeriod = getTemplateCreatePeriod();
     var taskIds = readSelectedTemplateTaskIds();
     if (taskIds.length === 0) {
       throw new Error('テンプレートへ含めるタスクを1件以上選択してください');
     }
     var response = await apiRequest('POST', '/api/admin/templates', {
       name: templateName,
+      period: templatePeriod,
       taskIds: taskIds
     });
     if (elements.templateNameInput) {
@@ -1353,6 +1451,11 @@
     if (!template) {
       throw new Error('テンプレートを選択してください');
     }
+    var targetDate = getTemplateApplyTargetDate(template);
+    if (targetDate !== state.selectedDate) {
+      await selectDate(targetDate);
+    }
+    var templatePeriod = getSelectedTemplatePeriod(template);
     var optimisticItems = buildOptimisticTemplateRunItems(template);
     if (optimisticItems.length === 0) {
       setStatus('このテンプレートのタスクはすでに挿入済みです');
@@ -1360,10 +1463,10 @@
     }
     appendCurrentRunItems(optimisticItems);
     setStatus('テンプレートを挿入しました。保存しています...');
-    writeTemplateInsertEvent(state.selectedDate, template.id, optimisticItems).catch(function (error) {
+    writeTemplateInsertEvent(targetDate, template.id, templatePeriod, optimisticItems).catch(function (error) {
       console.error('[admin-sync] template_insert realtime write failed', error);
     });
-    syncTemplateInsertViaGasInBackground(state.selectedDate, template.id, optimisticItems, 0);
+    syncTemplateInsertViaGasInBackground(targetDate, template.id, templatePeriod, optimisticItems, 0);
   }
 
   async function deleteRunItem(runItemId) {
@@ -1397,6 +1500,9 @@
     }
     if (elements.insertDailyDateInput) {
       elements.insertDailyDateInput.value = normalized;
+    }
+    if (elements.templateDailyDateInput) {
+      elements.templateDailyDateInput.value = normalized;
     }
     var year = Number(normalized.slice(0, 4));
     var month = Number(normalized.slice(5, 7));
@@ -1512,6 +1618,15 @@
     if (elements.insertWeekMonthInput) {
       elements.insertWeekMonthInput.addEventListener('change', fillWeekOptions);
     }
+    if (elements.templatePeriodInput) {
+      elements.templatePeriodInput.addEventListener('change', renderTemplateTaskChecklist);
+    }
+    if (elements.templateSelect) {
+      elements.templateSelect.addEventListener('change', updateTemplatePeriodFields);
+    }
+    if (elements.templateWeekMonthInput) {
+      elements.templateWeekMonthInput.addEventListener('change', fillTemplateWeekOptions);
+    }
 
     if (elements.dateInput) {
       elements.dateInput.addEventListener('change', function () {
@@ -1543,13 +1658,23 @@
     if (elements.insertDailyDateInput) {
       elements.insertDailyDateInput.value = state.selectedDate;
     }
+    if (elements.templateDailyDateInput) {
+      elements.templateDailyDateInput.value = state.selectedDate;
+    }
     if (elements.insertWeekMonthInput) {
       elements.insertWeekMonthInput.value = formatMonthValue(state.selectedDate);
+    }
+    if (elements.templateWeekMonthInput) {
+      elements.templateWeekMonthInput.value = formatMonthValue(state.selectedDate);
     }
     if (elements.insertMonthInput) {
       elements.insertMonthInput.value = formatMonthValue(state.selectedDate);
     }
+    if (elements.templateMonthInput) {
+      elements.templateMonthInput.value = formatMonthValue(state.selectedDate);
+    }
     updateInsertPeriodFields();
+    updateTemplatePeriodFields();
     setCalendarMonth(Number(state.selectedDate.slice(0, 4)), Number(state.selectedDate.slice(5, 7)));
     bindEvents();
     setActiveFlow(state.activeFlow);

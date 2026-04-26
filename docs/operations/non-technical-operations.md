@@ -221,7 +221,7 @@ Apps Scriptの「トリガー」画面で確認します。
 | `checklist_runs` | 毎日のチェックリスト本体です。 |
 | `checklist_run_items` | 各タスクのチェック状態です。 |
 | `checklist_item_logs` | 操作履歴です。 |
-| `checklist_templates` | 管理者画面から作るテンプレート本体です。 |
+| `checklist_templates` | 管理者画面から作るテンプレート本体です。`period` で日間 / 週間 / 月間を分けます。 |
 | `checklist_template_items` | テンプレート内のタスクです。`period` は `daily` / `weekly` / `monthly` のいずれかです。 |
 | `line_accounts` | 旧連携用です。通常は使いません。 |
 | `users` | 旧ユーザー管理用です。通常は使いません。 |

@@ -172,6 +172,7 @@ function createFakeDocument() {
     ['input', 'template-name-input'],
     ['button', 'update-template-button'],
     ['input', 'new-template-name-input'],
+    ['select', 'new-template-period-input'],
     ['button', 'create-template-button'],
     ['ul', 'template-items'],
     ['select', 'template-item-select'],
@@ -208,6 +209,7 @@ function createFakeDocument() {
   elements['new-item-required-input'].type = 'checkbox';
   elements['template-item-period-input'].value = 'daily';
   elements['new-item-period-input'].value = 'daily';
+  elements['new-template-period-input'].value = 'daily';
   elements['period-tab-daily'].dataset.period = 'daily';
   elements['period-tab-weekly'].dataset.period = 'weekly';
   elements['period-tab-monthly'].dataset.period = 'monthly';
@@ -349,6 +351,7 @@ function createTemplatesPayload() {
       {
         id: 'tmpl-001',
         name: '日次チェックリスト',
+        period: 'daily',
         notifyTime: '10:30',
         closingTime: '00:00',
         isActive: true,

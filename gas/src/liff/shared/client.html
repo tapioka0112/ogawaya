@@ -411,6 +411,7 @@
         templateNameInput: documentRef.getElementById('template-name-input'),
         updateTemplateButton: documentRef.getElementById('update-template-button'),
         newTemplateNameInput: documentRef.getElementById('new-template-name-input'),
+        newTemplatePeriodInput: documentRef.getElementById('new-template-period-input'),
         createTemplateButton: documentRef.getElementById('create-template-button'),
         templateItems: documentRef.getElementById('template-items'),
         templateItemSelect: documentRef.getElementById('template-item-select'),
@@ -1567,6 +1568,7 @@
         }
         if (elements.templateItemPeriodInput) {
           elements.templateItemPeriodInput.value = 'daily';
+          elements.templateItemPeriodInput.disabled = true;
         }
         if (elements.templateItemSortOrderInput) {
           elements.templateItemSortOrderInput.value = '';
@@ -1619,7 +1621,7 @@
         appendSelectOptions(elements.templateSelect, normalizeArray(state.templates).map(function (template) {
           return {
             value: template.id,
-            label: template.name
+            label: '[' + getTaskPeriodLabel(template.period) + '] ' + template.name
           };
         }), state.selectedTemplateId);
         state.selectedTemplateId = elements.templateSelect.value || '';
@@ -1631,6 +1633,10 @@
             elements.templateNameInput.value = '';
           }
           resetTemplateItemEditor();
+          if (elements.newItemPeriodInput) {
+            elements.newItemPeriodInput.value = 'daily';
+            elements.newItemPeriodInput.disabled = true;
+          }
           if (elements.templateItems) {
             elements.templateItems.appendChild(createMessageListItem('テンプレートはまだありません。', 'empty-item'));
           }
@@ -1643,6 +1649,14 @@
         }
         if (elements.templateNameInput) {
           elements.templateNameInput.value = template.name;
+        }
+        if (elements.templateItemPeriodInput) {
+          elements.templateItemPeriodInput.value = normalizeTaskPeriod(template.period);
+          elements.templateItemPeriodInput.disabled = true;
+        }
+        if (elements.newItemPeriodInput) {
+          elements.newItemPeriodInput.value = normalizeTaskPeriod(template.period);
+          elements.newItemPeriodInput.disabled = true;
         }
         normalizeArray(template.items).forEach(function (item) {
           elements.templateItems.appendChild(createMessageListItem(
@@ -1767,10 +1781,14 @@
 
       async function createTemplate() {
         var response = await api.createTemplate(state.idToken, {
-          name: requireStringValue(elements.newTemplateNameInput, '新規テンプレート名')
+          name: requireStringValue(elements.newTemplateNameInput, '新規テンプレート名'),
+          period: normalizeTaskPeriod(elements.newTemplatePeriodInput && elements.newTemplatePeriodInput.value)
         });
         if (elements.newTemplateNameInput) {
           elements.newTemplateNameInput.value = '';
+        }
+        if (elements.newTemplatePeriodInput) {
+          elements.newTemplatePeriodInput.value = 'daily';
         }
         await loadTemplates();
         if (response.template && response.template.id) {
@@ -1800,7 +1818,7 @@
         await api.createTemplateItem(state.idToken, template.id, {
           title: requireStringValue(elements.newItemTitleInput, '新規項目名'),
           description: String((elements.newItemDescriptionInput && elements.newItemDescriptionInput.value) || '').trim(),
-          period: normalizeTaskPeriod(elements.newItemPeriodInput && elements.newItemPeriodInput.value),
+          period: normalizeTaskPeriod(template.period),
           sortOrder: requirePositiveInteger(elements.newItemSortOrderInput, '並び順'),
           isRequired: !!(elements.newItemRequiredInput && elements.newItemRequiredInput.checked)
         });
@@ -1811,7 +1829,7 @@
           elements.newItemDescriptionInput.value = '';
         }
         if (elements.newItemPeriodInput) {
-          elements.newItemPeriodInput.value = 'daily';
+          elements.newItemPeriodInput.value = normalizeTaskPeriod(template.period);
         }
         if (elements.newItemSortOrderInput) {
           elements.newItemSortOrderInput.value = '';
@@ -1832,7 +1850,7 @@
         await api.updateTemplateItem(state.idToken, template.id, item.id, {
           title: requireStringValue(elements.templateItemTitleInput, '項目名'),
           description: String((elements.templateItemDescriptionInput && elements.templateItemDescriptionInput.value) || '').trim(),
-          period: normalizeTaskPeriod(elements.templateItemPeriodInput && elements.templateItemPeriodInput.value),
+          period: normalizeTaskPeriod(template.period),
           sortOrder: requirePositiveInteger(elements.templateItemSortOrderInput, '並び順'),
           isRequired: !!(elements.templateItemRequiredInput && elements.templateItemRequiredInput.checked)
         });

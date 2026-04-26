@@ -364,6 +364,35 @@ test('Spreadsheet 読み込みは period 追加前のヘッダーでも列ずれ
   assert.equal(runItems[0].status, 'unchecked');
 });
 
+test('Spreadsheet 読み込みは template period 追加前のヘッダーでも列ずれしない', async () => {
+  const templatesSheet = createSheet(
+    ['id', 'store_id', 'name', 'notify_time', 'closing_time', 'is_active', 'created_by', 'created_at', 'updated_at'],
+    [
+      ['tmpl-001', 'store-001', '日次チェックリスト', '10:30', '00:00', 'true', 'user-mg-001', '2026-04-22T00:00:00Z', '2026-04-22T00:00:00Z']
+    ]
+  );
+  const runtime = await loadGasRuntime({
+    spreadsheetFactory() {
+      return {
+        getSheetByName(sheetName) {
+          if (sheetName === 'checklist_templates') {
+            return templatesSheet.sheet;
+          }
+          return null;
+        }
+      };
+    }
+  });
+  const repository = runtime.Ogawaya.createSpreadsheetRepository({
+    spreadsheetId: 'spreadsheet-001'
+  });
+
+  const templates = repository.listTable('checklist_templates');
+  assert.equal(templates[0].period, '');
+  assert.equal(templates[0].notify_time, '10:30');
+  assert.equal(templates[0].closing_time, '00:00');
+});
+
 test('テンプレートと項目の一括取得は storage.load を 1 回に抑える', async () => {
   const runtime = await loadGasRuntime();
   let state = createBaseDataset();

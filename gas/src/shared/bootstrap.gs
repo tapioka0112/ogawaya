@@ -51,6 +51,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
         id: 'tmpl-001',
         store_id: 'store-001',
         name: '日次チェックリスト',
+        period: 'daily',
         notify_time: '10:30',
         closing_time: '00:00',
         is_active: 'true',

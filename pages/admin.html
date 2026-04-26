@@ -104,6 +104,14 @@
               <span>新規テンプレート名</span>
               <input id="template-name-input" type="text" placeholder="例: 開店テンプレート" />
             </label>
+            <label class="field">
+              <span>テンプレート種別</span>
+              <select id="template-period-input">
+                <option value="daily">日間</option>
+                <option value="weekly">週間</option>
+                <option value="monthly">月間</option>
+              </select>
+            </label>
           </div>
           <div class="template-task-box">
             <p>テンプレートに含めるタスク</p>
@@ -119,6 +127,22 @@
             <label class="field">
               <span>挿入するテンプレート</span>
               <select id="template-select"></select>
+            </label>
+            <label class="field" data-template-period-field="daily">
+              <span>対象日</span>
+              <input id="template-daily-date-input" type="date" />
+            </label>
+            <label class="field" data-template-period-field="weekly" hidden>
+              <span>対象月</span>
+              <input id="template-week-month-input" type="month" />
+            </label>
+            <label class="field" data-template-period-field="weekly" hidden>
+              <span>対象週</span>
+              <select id="template-week-select"></select>
+            </label>
+            <label class="field" data-template-period-field="monthly" hidden>
+              <span>対象月</span>
+              <input id="template-month-input" type="month" />
             </label>
           </div>
           <div class="button-row">
@@ -156,6 +180,6 @@
     <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
-    <script src="./admin.js?v=admin-event-rest-repair-fix-20260426"></script>
+    <script src="./admin.js?v=admin-period-template-fix-20260426"></script>
   </body>
 </html>
