@@ -10,11 +10,11 @@
 | 従業員がLINEで開く画面 | `https://liff.line.me/2009859108-sJ31BCFx` |
 | 従業員用Web画面 | `https://tapioka0112.github.io/ogawaya/` |
 | 管理者画面 | `https://tapioka0112.github.io/ogawaya/admin.html` |
-| Googleスプレッドシート | `https://docs.google.com/spreadsheets/d/1VBTZaLtSi1FZQnWG-zIDQ1GFpoHilAUpf1R7xcllLP8/edit?gid=2082526106#gid=2082526106` |
+| Googleスプレッドシート | 社内の運用台帳に記載。公開リポジトリにはURLを書かない |
 | GitHubリポジトリ | `https://github.com/tapioka0112/ogawaya` |
 | GitHub Pages設定 | `https://github.com/tapioka0112/ogawaya/settings/pages` |
-| Apps Script編集画面 | `https://script.google.com/d/1q7LLKLs4l_mH2gE9VmaxdX0Ilrbt9BLuOSTZXlOZIPxukh7FH7zHeMHd/edit` |
-| GAS API | `https://script.google.com/macros/s/AKfycbwHus8fdYWaLzkL0qrj6mX2rEDBphVlqWA4IAzETnsNXmanUgD5xLiMZZooGkeLI4pbMg/exec` |
+| Apps Script編集画面 | 社内の運用台帳に記載。公開リポジトリにはURLを書かない |
+| GAS API | GitHub Pagesで公開される `pages/config.json` の `gasApiBaseUrl` を確認する。秘匿値として扱わない |
 | Firebase Console | `https://console.firebase.google.com/project/owagaya-fd93b/overview` |
 | Firestore Rules | `https://console.firebase.google.com/project/owagaya-fd93b/firestore/rules` |
 | LINE Official Account Manager | `https://manager.line.biz/` |
@@ -324,7 +324,7 @@ Googleスプレッドシートの `notification_channel_usage` を見ます。
 8. Webhookを使う運用にしている場合だけ、Webhook URLに次を設定する。
 
 ```text
-https://script.google.com/macros/s/AKfycbwHus8fdYWaLzkL0qrj6mX2rEDBphVlqWA4IAzETnsNXmanUgD5xLiMZZooGkeLI4pbMg/exec?path=/webhook
+https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec?path=/webhook
 ```
 
 9. Webhookを使う運用の場合はWebhook利用を有効にする。リッチメニューのURIだけで運用する場合は必須ではありません。
@@ -374,13 +374,15 @@ Apps Script編集画面で「プロジェクトの設定」を開き、「スク
 | `pages/app.js` | 従業員画面の動き。 |
 | `pages/admin.html` | 管理者画面のHTML。 |
 | `pages/admin.js` | 管理者画面の動き。 |
-| `pages/config.json` | GAS API、LIFF、Firebaseの接続先。 |
+| `pages/config.json` | GAS API、LIFF、Firebaseの公開接続先。秘匿値を置かない。 |
 
-現行 `pages/config.json` の重要値です。
+公開 `pages/config.json` に入る接続先の例です。
+このファイルはGitHub Pagesで配信されるため、値は閲覧者から見えます。
+秘匿が必要な値は、Apps Script の Script Properties または社内の運用台帳で管理します。
 
-| キー | 現行値 |
+| キー | 公開設定の例 |
 | --- | --- |
-| `gasApiBaseUrl` | `https://script.google.com/macros/s/AKfycbwHus8fdYWaLzkL0qrj6mX2rEDBphVlqWA4IAzETnsNXmanUgD5xLiMZZooGkeLI4pbMg/exec` |
+| `gasApiBaseUrl` | `https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec` |
 | `liffId` | `2009859108-sJ31BCFx` |
 | `defaultStoreId` | `store-hashimoto` |
 | `enableRealtimeSync` | `true` |
@@ -410,7 +412,8 @@ Firestoreで使う場所です。
 | `stores/{storeId}/runs/{targetDate}/events/*` | チェックやテンプレート挿入をリアルタイム同期するイベント。 |
 | `stores/{storeId}/runs/{targetDate}/snapshots/today` | 初回表示と統計用の当日snapshot。 |
 
-Firestore Rulesは、`events` の読み取りと認証済み作成、`snapshots/today` の読み取りだけを許可します。それ以外は拒否します。
+Firestore Rulesは、`events` の認証済み読み取りと認証済み作成、`snapshots/today` の読み取りだけを許可します。それ以外は拒否します。
+公開される `snapshots/today` には、チェック者名や LINE userId を含めません。
 
 ## 17. 初期構築で最低限やること
 

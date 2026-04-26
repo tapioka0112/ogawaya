@@ -2265,6 +2265,15 @@
     });
   }
 
+  function getFirebaseIdToken() {
+    return ensureFirebaseAuthSession().then(function (user) {
+      if (!user || typeof user.getIdToken !== 'function') {
+        throw new Error('Firebase ID token を取得できません');
+      }
+      return user.getIdToken();
+    });
+  }
+
   function buildSnapshotDocRef(storeId, targetDate) {
     return state.firestore
       .collection('stores')
@@ -2597,7 +2606,13 @@
       return [];
     }
     return measureTiming('firestore.events.rest', 'Firestore events REST', async function () {
-      var response = await fetch(url, { cache: 'no-store' });
+      var idToken = await getFirebaseIdToken();
+      var response = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          Authorization: 'Bearer ' + idToken
+        }
+      });
       if (response.status === 404) {
         return [];
       }

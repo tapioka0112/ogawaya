@@ -782,8 +782,8 @@ test('check 後に Firestore snapshot も checked に更新する', async () => 
   const payload = JSON.parse(firestoreWrites[0].requestOptions.payload);
   const firstItemFields = payload.fields.items.arrayValue.values[0].mapValue.fields;
   assert.equal(firstItemFields.status.stringValue, 'checked');
-  assert.equal(firstItemFields.checkedBy.stringValue, '田中LINE');
-  assert.equal(firstItemFields.checkedByUserId.stringValue, 'line-user-001');
+  assert.equal(Object.hasOwn(firstItemFields, 'checkedBy'), false);
+  assert.equal(Object.hasOwn(firstItemFields, 'checkedByUserId'), false);
   assert.equal(payload.fields.progress.mapValue.fields.checked.integerValue, '1');
 });
 
