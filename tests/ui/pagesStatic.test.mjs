@@ -8,8 +8,8 @@ test('GitHub Pages 用 LIFF 画面は必要スクリプトと要素を持つ', a
 
   assert.doesNotMatch(html, /<script src="https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js"><\/script>/);
   assert.doesNotMatch(html, /<script src="https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-app-compat\.js"><\/script>/);
-  assert.match(html, /<link rel="stylesheet" href="\.\/style\.css\?v=period-window-20260426" \/>/);
-  assert.match(html, /<script src="\.\/app\.js\?v=period-api-refresh-fix-20260426" defer><\/script>/);
+  assert.match(html, /<link rel="stylesheet" href="\.\/style\.css\?v=period-progress-color-20260426" \/>/);
+  assert.match(html, /<script src="\.\/app\.js\?v=period-progress-color-20260426" defer><\/script>/);
   assert.match(appJs, /var LIFF_SDK_URL = 'https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js';/);
   assert.match(appJs, /firebase-app-compat\.js/);
   assert.match(appJs, /firebase-auth-compat\.js/);
@@ -30,6 +30,20 @@ test('GitHub Pages 用 LIFF 画面は必要スクリプトと要素を持つ', a
   assert.match(html, /id="stats-content"/);
   assert.match(html, /id="stats-day-detail-card"/);
   assert.match(html, /id="stats-day-detail-items"/);
+});
+
+test('GitHub Pages の期間別進捗は選択期間のテーマ色で表示する', async () => {
+  const css = await readFile('pages/style.css', 'utf8');
+  const appJs = await readFile('pages/app.js', 'utf8');
+
+  assert.match(css, /body\.user-mode\[data-task-period='weekly'\]\s*\{[\s\S]*--period-accent:\s*#36a18b;/);
+  assert.match(css, /body\.user-mode\[data-task-period='monthly'\]\s*\{[\s\S]*--period-accent:\s*#7c5ac7;/);
+  assert.match(css, /\.progress-ring-progress\s*\{[\s\S]*stroke:\s*var\(--period-accent\);/);
+  assert.match(css, /\.progress-ring-label\s*\{[\s\S]*color:\s*var\(--period-accent-strong\);/);
+  assert.match(css, /\.progress-title\s*\{[\s\S]*color:\s*var\(--period-accent-strong\);/);
+  assert.match(css, /\.progress-count strong\s*\{[\s\S]*color:\s*var\(--period-accent-strong\);/);
+  assert.match(css, /\.progress-bar-fill\s*\{[\s\S]*linear-gradient\(90deg,\s*var\(--period-accent\),\s*var\(--period-accent-strong\)\)/);
+  assert.doesNotMatch(appJs, /progressRingProgress\.style\.stroke\s*=/);
 });
 
 test('GitHub Pages の config.json は必須キーを持つ', async () => {

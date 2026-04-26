@@ -1456,3 +1456,17 @@ test('管理者モードでもテンプレート管理 API を呼ばない', asy
   await controller.init();
   assert.equal(listTemplatesCallCount, 0);
 });
+
+test('GAS LIFF の期間別進捗は選択期間のテーマ色で表示する', async () => {
+  const css = await readFile('gas/src/liff/shared/style.html', 'utf8');
+  const clientHtml = await readFile('gas/src/liff/shared/client.html', 'utf8');
+
+  assert.match(css, /body\.user-mode\[data-task-period='weekly'\]\s*\{[\s\S]*--period-accent:\s*#36a18b;/);
+  assert.match(css, /body\.user-mode\[data-task-period='monthly'\]\s*\{[\s\S]*--period-accent:\s*#7c5ac7;/);
+  assert.match(css, /\.progress-ring-progress\s*\{[\s\S]*stroke:\s*var\(--period-accent\);/);
+  assert.match(css, /\.progress-ring-label\s*\{[\s\S]*color:\s*var\(--period-accent-strong\);/);
+  assert.match(css, /\.progress-title\s*\{[\s\S]*color:\s*var\(--period-accent-strong\);/);
+  assert.match(css, /\.progress-count strong\s*\{[\s\S]*color:\s*var\(--period-accent-strong\);/);
+  assert.match(css, /\.progress-bar-fill\s*\{[\s\S]*linear-gradient\(90deg,\s*var\(--period-accent\),\s*var\(--period-accent-strong\)\)/);
+  assert.doesNotMatch(clientHtml, /progressRingProgress\.style\.stroke\s*=/);
+});

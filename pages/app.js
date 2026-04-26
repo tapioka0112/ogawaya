@@ -3272,9 +3272,6 @@
     var isComplete = pct === 100 && total > 0;
     var wasComplete = state.previousProgressPct === 100;
     state.previousProgressPct = pct;
-    if (elements.progressRingProgress) {
-      elements.progressRingProgress.style.stroke = isComplete ? '#d4a017' : '';
-    }
     if (elements.progressRingLabel) {
       if (isComplete) {
         elements.progressRingLabel.classList.add('celebrating');
