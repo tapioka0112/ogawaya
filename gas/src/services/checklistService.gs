@@ -1043,6 +1043,12 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
     function buildChecklistSnapshot(store, run, items) {
       var payload = buildChecklistResponse(repository, buildSnapshotUserContext(store), run, items);
+      payload.items = payload.items.map(function (item) {
+        var snapshotItem = ns.clone(item);
+        delete snapshotItem.checkedBy;
+        delete snapshotItem.checkedByUserId;
+        return snapshotItem;
+      });
       payload.ok = true;
       payload.statusCode = 200;
       payload.snapshotUpdatedAt = ns.toIsoString(clock.now());

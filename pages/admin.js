@@ -409,6 +409,15 @@
     return state.firebaseAuthPromise;
   }
 
+  function getFirebaseIdToken() {
+    return ensureFirebaseAuthSession().then(function (user) {
+      if (!user || typeof user.getIdToken !== 'function') {
+        throw new Error('Firebase ID token を取得できません');
+      }
+      return user.getIdToken();
+    });
+  }
+
   function createApiError(message, statusCode, code) {
     var error = new Error(message);
     error.statusCode = Number(statusCode || 500);
@@ -1140,27 +1149,35 @@
       return Promise.resolve([]);
     }
     var events = [];
-    function loadPage(pageToken) {
-      var url = buildFirestoreRestEventsUrl(targetDate, pageToken);
-      if (!url) {
-        return Promise.resolve(events);
-      }
-      return fetch(url, { method: 'GET', cache: 'no-store' }).then(function (response) {
-        if (!response.ok) {
-          throw new Error('Firestore events REST の読み込みに失敗しました');
+    return getFirebaseIdToken().then(function (idToken) {
+      function loadPage(pageToken) {
+        var url = buildFirestoreRestEventsUrl(targetDate, pageToken);
+        if (!url) {
+          return Promise.resolve(events);
         }
-        return response.json();
-      }).then(function (payload) {
-        (payload.documents || []).forEach(function (doc) {
-          events.push(decodeFirestoreFields(doc.fields || {}));
+        return fetch(url, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: {
+            Authorization: 'Bearer ' + idToken
+          }
+        }).then(function (response) {
+          if (!response.ok) {
+            throw new Error('Firestore events REST の読み込みに失敗しました');
+          }
+          return response.json();
+        }).then(function (payload) {
+          (payload.documents || []).forEach(function (doc) {
+            events.push(decodeFirestoreFields(doc.fields || {}));
+          });
+          if (payload.nextPageToken) {
+            return loadPage(payload.nextPageToken);
+          }
+          return events;
         });
-        if (payload.nextPageToken) {
-          return loadPage(payload.nextPageToken);
-        }
-        return events;
-      });
-    }
-    return loadPage('');
+      }
+      return loadPage('');
+    });
   }
 
   function loadTemplateInsertEventsFromFirestoreSdk(targetDate) {

@@ -9,7 +9,7 @@ test('GitHub Pages 用 LIFF 画面は必要スクリプトと要素を持つ', a
   assert.doesNotMatch(html, /<script src="https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js"><\/script>/);
   assert.doesNotMatch(html, /<script src="https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-app-compat\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" href="\.\/style\.css\?v=period-progress-color-20260426" \/>/);
-  assert.match(html, /<script src="\.\/app\.js\?v=period-progress-color-20260426" defer><\/script>/);
+  assert.match(html, /<script src="\.\/app\.js\?v=firestore-rest-auth-20260426" defer><\/script>/);
   assert.match(appJs, /var LIFF_SDK_URL = 'https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js';/);
   assert.match(appJs, /firebase-app-compat\.js/);
   assert.match(appJs, /firebase-auth-compat\.js/);
@@ -98,6 +98,16 @@ test('GitHub Pages の realtime 同期は自端末イベント・未確定時刻
   assert.match(appJs, /if\s*\(emittedAtMs <= actionState\.lastSyncedAtMs\)\s*\{\s*return;\s*\}/);
   assert.match(appJs, /actionState\.lastSyncedAtMs = emittedAtMs;/);
   assert.doesNotMatch(appJs, /syncSessionStartedAtMs/);
+});
+
+test('GitHub Pages の Firestore events REST 読み込みは Firebase ID token を付ける', async () => {
+  const appJs = await readFile('pages/app.js', 'utf8');
+
+  assert.match(appJs, /function getFirebaseIdToken\(\)/);
+  assert.match(appJs, /typeof user\.getIdToken !== 'function'/);
+  assert.match(appJs, /return user\.getIdToken\(\);/);
+  assert.match(appJs, /var idToken = await getFirebaseIdToken\(\);/);
+  assert.match(appJs, /Authorization:\s*'Bearer ' \+ idToken/);
 });
 
 test('GitHub Pages の API再取得マージは未確定 desiredStatus を維持する', async () => {

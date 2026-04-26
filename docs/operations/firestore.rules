@@ -87,7 +87,7 @@ service cloud.firestore {
     }
 
     match /stores/{storeId}/runs/{targetDate}/events/{eventId} {
-      allow read: if true;
+      allow read: if isSignedIn();
       allow create: if isValidChecklistEvent(storeId, targetDate) || isValidTemplateInsertEvent(storeId, targetDate);
       allow update, delete: if false;
     }

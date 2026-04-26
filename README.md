@@ -15,7 +15,7 @@
 - 正本データ: Spreadsheet
 - LIFF フロント: GitHub Pages (`pages/`)
 - 管理者画面: GitHub Pages (`pages/admin.html`)
-- Firestore: `events` の create/read、`snapshots/today` の read
+- Firestore: `events` の認証済み create/read、`snapshots/today` の read
 
 ## 運用手順
 - 非IT担当者向けの全体運用手順は [docs/operations/non-technical-operations.md](/home/sota411/Documents/project/ogawaya/docs/operations/non-technical-operations.md) を参照してください。
@@ -69,10 +69,10 @@
 ## リアルタイム同期（Firestore）
 - `enableRealtimeSync=true` かつ `firebase` 設定済みのときだけ有効。
 - `clientFirestoreWriteEnabled=true` のとき、チェック操作は Firestore `events` へ先に書き込み、GAS API は保存用にバックグラウンド同期する。
-- イベント作成・読取: `stores/{storeId}/runs/{targetDate}/events/*`
+- イベント作成・読取（Firebase Authentication ログイン後）: `stores/{storeId}/runs/{targetDate}/events/*`
 - スナップショット読取: `stores/{storeId}/runs/{targetDate}/snapshots/today`
 - `snapshots/today` が未作成の運用日でも、LIFF は同日分の端末キャッシュを先に描画し、Firestore `events` とGAS APIで追従する。
-- 統計タブは `snapshots/today` をクライアント集計する。
+- 統計タブは `snapshots/today` をクライアント集計する。公開 snapshot にはチェック者名や LINE userId を含めない。
 - Firestore 直接書き込みには Firebase Authentication の匿名ログインを使う。
 - Firestore `events` は GAS の `syncFirestoreEventsToSpreadsheet` time-driven trigger で Spreadsheet に後追い同期する。
 - Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。

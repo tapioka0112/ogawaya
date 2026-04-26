@@ -136,9 +136,9 @@ test('非IT担当者向けの全体運用手順が存在する', async () => {
     'https://tapioka0112.github.io/ogawaya/',
     'https://tapioka0112.github.io/ogawaya/admin.html',
     'https://liff.line.me/2009859108-sJ31BCFx',
-    'https://docs.google.com/spreadsheets/d/1VBTZaLtSi1FZQnWG-zIDQ1GFpoHilAUpf1R7xcllLP8/edit?gid=2082526106#gid=2082526106',
+    '公開リポジトリにはURLを書かない',
     'https://console.firebase.google.com/project/owagaya-fd93b/overview',
-    'https://script.google.com/d/1q7LLKLs4l_mH2gE9VmaxdX0Ilrbt9BLuOSTZXlOZIPxukh7FH7zHeMHd/edit'
+    'https://script.google.com/macros/s/<DEPLOYMENT_ID>/exec'
   ]) {
     assert.match(manual, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
