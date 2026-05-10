@@ -18,6 +18,12 @@ test('GitHub Pages app は Firestore run items をホーム表示の入力にす
   const appJs = await readFile('pages/app.js', 'utf8');
 
   assert.match(appJs, /async function getTodayChecklist\(\)/);
+  assert.match(appJs, /function getChecklistTargetDateCandidates\(\)/);
+  assert.match(appJs, /function getCalendarDateInJst\(\)/);
+  assert.match(appJs, /async function loadChecklistForDate\(firebaseUser,\s*storeId,\s*store,\s*targetDate\)/);
+  assert.match(appJs, /var candidates = getChecklistTargetDateCandidates\(\);/);
+  assert.match(appJs, /var fallbackChecklist = null;/);
+  assert.match(appJs, /if \(checklist\.items\.length > 0\) \{\s*return checklist;\s*\}/);
   assert.match(appJs, /\.collection\('stores'\)\.doc\(storeId\)\.collection\('runs'\)\.doc\(targetDate\)\.get\(\)/);
   assert.match(appJs, /\.collection\('items'\)\s*\.get\(\)/);
   assert.match(appJs, /if \(data\.isActive === false\) \{/);

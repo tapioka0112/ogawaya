@@ -148,6 +148,19 @@
     return JST_DATE_FORMATTER.format(previousDate);
   }
 
+  function getCalendarDateInJst() {
+    return JST_DATE_FORMATTER.format(new Date());
+  }
+
+  function getChecklistTargetDateCandidates() {
+    var calendarDate = getCalendarDateInJst();
+    var businessDate = getTodayDateInJst();
+    if (calendarDate === businessDate) {
+      return [businessDate];
+    }
+    return [calendarDate, businessDate];
+  }
+
   function readStorageValue(key) {
     try {
       if (!global.localStorage || typeof global.localStorage.getItem !== 'function') {
@@ -464,16 +477,7 @@
       };
     }
 
-    async function getTodayChecklist() {
-      var firebaseUser = await ensureFirebaseAuthSession();
-      var storeId = getStoreId();
-      if (!storeId) {
-        throw new Error('店舗IDが未設定です');
-      }
-      writeStorageValue(LAST_STORE_ID_STORAGE_KEY, storeId);
-      var targetDate = getTodayDateInJst();
-      var storeDoc = await state.firestore.collection('stores').doc(storeId).get();
-      var store = storeDoc.exists ? storeDoc.data() || {} : {};
+    async function loadChecklistForDate(firebaseUser, storeId, store, targetDate) {
       var runDoc = await state.firestore.collection('stores').doc(storeId).collection('runs').doc(targetDate).get();
       var run = runDoc.exists ? runDoc.data() || {} : {};
       var itemSnapshot = await state.firestore
@@ -510,6 +514,29 @@
         currentUser: currentUser,
         items: items
       };
+    }
+
+    async function getTodayChecklist() {
+      var firebaseUser = await ensureFirebaseAuthSession();
+      var storeId = getStoreId();
+      if (!storeId) {
+        throw new Error('店舗IDが未設定です');
+      }
+      writeStorageValue(LAST_STORE_ID_STORAGE_KEY, storeId);
+      var storeDoc = await state.firestore.collection('stores').doc(storeId).get();
+      var store = storeDoc.exists ? storeDoc.data() || {} : {};
+      var candidates = getChecklistTargetDateCandidates();
+      var fallbackChecklist = null;
+      for (var index = 0; index < candidates.length; index += 1) {
+        var checklist = await loadChecklistForDate(firebaseUser, storeId, store, candidates[index]);
+        if (!fallbackChecklist) {
+          fallbackChecklist = checklist;
+        }
+        if (checklist.items.length > 0) {
+          return checklist;
+        }
+      }
+      return fallbackChecklist;
     }
 
     async function updateItem(runItemId, status) {
