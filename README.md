@@ -1,93 +1,61 @@
-# 会社共有チェックリスト LINE Bot（GAS + Firestore 同期）
+# 会社共有チェックリスト LINE Bot（Firebase Spark 主系）
 
 `tasks.md` を正として実装を進めるリポジトリです。  
-現行運用は `LIFF (GitHub Pages) + GAS API + Spreadsheet` を主系にし、Firestore はチェック操作の高速反映とリアルタイム同期に使います。
+現行運用は `LIFF (GitHub Pages) + Firebase Auth + Firestore + GitHub Actions` を主系にします。GAS と Firebase Functions は本番運用の主系として使いません。
 
 ## 確定仕様（tasks.md 準拠）
 - 初期版は `1ユーザー = 1店舗` 前提。
 - 当日判定は日本時間 10:30 切替（`10:30〜翌10:29` を同じ運用日として扱う）。
-- 日次ジョブは 10:30 開始処理、0:30 未完了通知、0:00 締め処理を想定。
-- チェック実行者は `checked_by_name` に LINE 表示名で保存する。
-- `ALLOW_ANONYMOUS_ACCESS` は閲覧フォールバック用途（更新系は `idToken` 必須）。
+- 日次ジョブは GitHub Actions で 10:35 開始処理、00:35 未完了通知を実行する。
+- チェック実行者は Firestore の `checkedBy` と `checkedByUserId` に保存する。
+- 更新系は Firebase Auth のログイン状態が必須。
 
 ## 構成
-- API/バックエンド: GAS (`gas/src`)
-- 正本データ: Spreadsheet
+- API/バックエンド: Firestore 直接書き込みと GitHub Actions (`scripts/`)
+- 正本データ: Firestore
 - LIFF フロント: GitHub Pages (`pages/`)
 - 管理者画面: GitHub Pages (`pages/admin.html`)
-- Firestore: `events` の認証済み create/read、`snapshots/today` の read
+- Firestore: タスク、テンプレート、日別実行項目、ユーザー、管理者allowlistを保存
 
 ## 運用手順
-- 非IT担当者向けの全体運用手順は [docs/operations/non-technical-operations.md](/home/sota411/Documents/project/ogawaya/docs/operations/non-technical-operations.md) を参照してください。
-- 初期構築やScript Propertiesの詳細は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照してください。
-- 通知用LINE公式アカウントの増設・人数調整は [docs/operations/line-notification-scaling.md](/home/sota411/Documents/project/ogawaya/docs/operations/line-notification-scaling.md) を参照してください。
+- 非IT担当者向けの現行運用説明書は [docs/operations/non-it-operator-guide.md](/home/sota411/Documents/project/ogawaya/docs/operations/non-it-operator-guide.md) を参照してください。
+- Firebase Spark 主系の技術運用は [docs/operations/firebase-spark-primary.md](/home/sota411/Documents/project/ogawaya/docs/operations/firebase-spark-primary.md) を参照してください。
+- 旧GAS主系の参考資料は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) に残っています。
 
 ## ディレクトリ
-- [gas/](/home/sota411/Documents/project/ogawaya/gas)
 - [docs/](/home/sota411/Documents/project/ogawaya/docs)
 - [pages/](/home/sota411/Documents/project/ogawaya/pages)
+- [scripts/](/home/sota411/Documents/project/ogawaya/scripts)
 - [tasks.md](/home/sota411/Documents/project/ogawaya/tasks.md)
 
 ## ローカル準備
 - Node.js をインストール
-- `clasp` をインストール
-  - `npm i -g @google/clasp`
-- `clasp login`
+- `npm ci`
 
 ## テスト
 - `npm test`
 
-## デプロイ準備
-1. GAS 側 Script Properties を設定する。
-   - `SPREADSHEET_ID`
-   - `LINE_LOGIN_CHANNEL_ID`（LIFF の `idToken` verify に使う LINE Login channel ID）
-   - `LINE_CHANNEL_ID`
-   - `LINE_CHANNEL_SECRET`
-   - `LINE_CHANNEL_ACCESS_TOKEN`
-   - `LINE_CHANNEL_ACCESS_TOKEN_NOTIFY_01` 以降（0:30未完了通知用）
-   - `LIFF_ID`
-   - `CHECKLIST_APP_URL`
-   - `ADMIN_LOGIN_ID`
-   - `ADMIN_LOGIN_PASSWORD`
-   - `FIRESTORE_EVENT_SYNC_SECRET`
-   - LIFF の `idToken` 検証は `LINE_LOGIN_CHANNEL_ID` を優先し、`LIFF_ID` 先頭10桁、`LINE_CHANNEL_ID` の順に fallback する。
-   - `idToken` が期限切れの場合は、LIFF の `accessToken` を LINE Login API で検証し、同一 channel の token だけを認証に使う。
-   - LIFF の `idToken` または `accessToken` が期限切れ・取り消し済みの場合は、画面側で LIFF session を1回だけ更新する。
-   - GitHub Pages 版は `pages/config.json` の `liffId` も GAS に送る。GAS Script Properties の `LIFF_ID` がある場合はそちらを優先する。
-2. `pages/config.json` を設定する。
-   - `gasApiBaseUrl`
-   - `liffId`
-   - `defaultStoreId`
-   - `enableRealtimeSync`
-   - `clientFirestoreWriteEnabled`
-   - `firebase.apiKey` / `firebase.authDomain` / `firebase.projectId` / `firebase.appId`
-   - `functionsApiBaseUrl` は空文字で運用可能
-3. GitHub Pages を有効化し、`pages/` を公開する。
-4. LINE Developers の LIFF Endpoint URL を `https://<user>.github.io/<repo>/` に設定する。
-5. LIFF URL（`https://liff.line.me/<LIFF_ID>`）をLINEリッチメニューに設定する。
+## 必要な本番設定
+- Firebase Authentication: Email/Password と Anonymous を有効化する。
+- Firestore Rules: [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。
+- 管理者: Firebase Auth のUIDを `stores/store-hashimoto/admins/{uid}` に登録する。
+- GitHub Actions secrets:
+  - `FIREBASE_SERVICE_ACCOUNT_JSON`
+  - `LINE_CHANNEL_ACCESS_TOKEN`
+- GitHub Actions variables:
+  - `STORE_ID`。未設定時は `store-hashimoto` を使う。
 
-## リアルタイム同期（Firestore）
-- `enableRealtimeSync=true` かつ `firebase` 設定済みのときだけ有効。
-- `clientFirestoreWriteEnabled=true` のとき、チェック操作は Firestore `events` へ先に書き込み、GAS API は保存用にバックグラウンド同期する。
-- イベント作成・読取（Firebase Authentication ログイン後）: `stores/{storeId}/runs/{targetDate}/events/*`
-- スナップショット読取: `stores/{storeId}/runs/{targetDate}/snapshots/today`
-- `snapshots/today` が未作成の運用日でも、LIFF は同日分の端末キャッシュを先に描画し、Firestore `events` とGAS APIで追従する。
-- 統計タブは `snapshots/today` をクライアント集計する。公開 snapshot にはチェック者名や LINE userId を含めない。
-- Firestore 直接書き込みには Firebase Authentication の匿名ログインを使う。
-- Firestore `events` は GAS の `syncFirestoreEventsToSpreadsheet` time-driven trigger で Spreadsheet に後追い同期する。
-- Firestore Rules は [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules) を適用する。
+## 自動処理
+- `Deploy LIFF Pages`: `pages/` を GitHub Pages へ公開する。
+- `Daily start`: JST 10:35 に `scripts/daily-start.mjs` を実行し、当日分タスクを作成する。
+- `Incomplete reminder`: JST 00:35 に `scripts/incomplete-reminder.mjs` を実行し、前日分の未完了通知を送る。
+
+## Firestore同期
+- チェック操作、テンプレート挿入、日付内タスク削除は Firestore へ直接保存する。
+- リアルタイム同期用イベントは `stores/{storeId}/runs/{targetDate}/events/*` に保存する。
+- 日別タスクは `stores/{storeId}/runs/{targetDate}/items/*` に保存する。
+- 統計タブは Firestore の日別データをクライアントで集計する。
 
 ## LIFF 起動時間の計測
 - `pages/` のURLに `?debugTiming=1` を付けると、起動時間のウォーターフォールを画面下部とブラウザconsoleに表示する。
-- 表示対象は `config.json`、Firestore snapshot/cache、LIFF SDK、`liff.init`、GAS API、初回描画までの時間。
-- LIFF URLでクエリを付けにくい場合は、ブラウザconsoleで `localStorage.setItem('ogawaya:debug-timing', '1')` を実行してから再読み込みする。
 - 解除する場合は `localStorage.removeItem('ogawaya:debug-timing')` を実行する。
-
-## 0:30 未完了通知
-- 複数のLINE公式アカウントを `notification_channels` に登録し、従業員を `notification_recipients` で割り当てる。
-- 送信元チャネルは `notifications.channel_id` に残る。
-- 月間送信数は `notification_channel_usage` の `local_sent_count` / `remaining_count` で確認する。
-- 公式アカウントの無料枠は1アカウントあたり月200通を標準値にする。LINE公式情報では日本のCommunication Planは月200通まで無料、Push messagesは通数カウント対象。
-- 運用手順は [docs/operations/line-notification-scaling.md](/home/sota411/Documents/project/ogawaya/docs/operations/line-notification-scaling.md) を参照する。
-
-詳細手順は [docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md) を参照してください。

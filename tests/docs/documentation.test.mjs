@@ -21,14 +21,16 @@ test('README に単一店舗前提・匿名運用・日次時刻・LINE表示名
   const readme = await readFile('README.md', 'utf8');
 
   assert.match(readme, /1ユーザー = 1店舗/);
-  assert.match(readme, /ALLOW_ANONYMOUS_ACCESS/);
-  assert.match(readme, /checked_by_name/);
+  assert.match(readme, /checkedBy/);
+  assert.match(readme, /checkedByUserId/);
+  assert.match(readme, /Firebase Auth のログイン状態が必須/);
   assert.match(readme, /10:30/);
-  assert.match(readme, /0:00/);
+  assert.match(readme, /00:35/);
   assert.match(readme, /Firestore/);
-  assert.match(readme, /enableRealtimeSync/);
-  assert.match(readme, /snapshots\/today/);
-  assert.match(readme, /Spreadsheet/);
+  assert.match(readme, /Firebase Auth/);
+  assert.match(readme, /GitHub Actions/);
+  assert.match(readme, /本番運用の主系として使いません/);
+  assert.doesNotMatch(readme, /正本データ: Spreadsheet/);
 });
 
 test('import 用アセットに CSV と Script Properties テンプレートが揃っている', async () => {
@@ -91,8 +93,8 @@ test('Firestore 同期用 rules の実体と適用手順が存在する', async 
   assert.match(firestoreRules, /isValidItemDeleteEvent/);
   assert.match(firestoreRules, /data\.type == 'item_delete'/);
   assert.match(bootstrap, /snapshots\/today/);
-  assert.match(readme, /正本データ: Spreadsheet|Firestore/);
-  assert.match(readme, /clientFirestoreWriteEnabled/);
+  assert.match(readme, /正本データ: Firestore/);
+  assert.match(readme, /Firebase Spark 主系/);
   assert.match(bootstrap, /Anonymous/);
   assert.match(
     firestoreRules,
@@ -103,11 +105,9 @@ test('Firestore 同期用 rules の実体と適用手順が存在する', async 
 });
 
 test('LINE公式アカウント分散通知の運用手順が存在する', async () => {
-  const readme = await readFile('README.md', 'utf8');
   const bootstrap = await readFile('docs/operations/bootstrap.md', 'utf8');
   const scaling = await readFile('docs/operations/line-notification-scaling.md', 'utf8');
 
-  assert.match(readme, /line-notification-scaling\.md/);
   assert.match(bootstrap, /installReminderTriggers/);
   assert.match(scaling, /notification_channels/);
   assert.match(scaling, /rebalanceNotificationRecipients/);
@@ -120,7 +120,7 @@ test('非IT担当者向けの全体運用手順が存在する', async () => {
   const manual = await readFile('docs/operations/non-technical-operations.md', 'utf8');
 
   for (const content of [readme, bootstrap]) {
-    assert.match(content, /non-technical-operations\.md/);
+    assert.match(content, /non-technical-operations\.md|non-it-operator-guide\.md/);
   }
   for (const text of [
     '毎日やること',
@@ -159,4 +159,29 @@ test('非IT担当者向けの全体運用手順が存在する', async () => {
     const image = await readFile(`docs/operations/${imagePath.replace('./', '')}`);
     assert.ok(image.length > 0);
   }
+});
+
+test('Firestore主系の非IT担当者向け運用説明書が存在する', async () => {
+  const manual = await readFile('docs/operations/non-it-operator-guide.md', 'utf8');
+
+  for (const text of [
+    'GitHub Pages、Firebase Auth、Firestore、GitHub Actions',
+    'https://liff.line.me/2009859108-sJ31BCFx',
+    'https://tapioka0112.github.io/ogawaya/',
+    'https://tapioka0112.github.io/ogawaya/admin.html',
+    'store-hashimoto',
+    'Daily start',
+    'Incomplete reminder',
+    '日間清掃チェックリスト',
+    '週間清掃チェックリスト',
+    '月間清掃チェックリスト',
+    'stores/store-hashimoto/admins/{uid}',
+    'GAS待ちではありません'
+  ]) {
+    assert.match(manual, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  assert.doesNotMatch(manual, /データの正本 \| Googleスプレッドシート/);
+  assert.doesNotMatch(manual, /保存API \| GAS API/);
+  assert.doesNotMatch(manual, /Apps ScriptのScript Properties/);
 });
