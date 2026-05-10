@@ -1267,6 +1267,31 @@
     return newItems;
   }
 
+  function applyRunItemDeleteEventToRunItems(eventPayload, targetDate) {
+    if (!eventPayload || eventPayload.type !== 'item_delete') {
+      return false;
+    }
+    if (String(eventPayload.storeId || '') !== String(state.storeId || '')) {
+      return false;
+    }
+    if (String(eventPayload.targetDate || '') !== String(targetDate || '')) {
+      return false;
+    }
+    var runItemId = String(eventPayload.itemId || '');
+    if (!runItemId) {
+      return false;
+    }
+    var items = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
+    var nextItems = items.filter(function (item) {
+      return String(item.id || '') !== runItemId;
+    });
+    if (nextItems.length === items.length) {
+      return false;
+    }
+    updateCurrentChecklistItems(nextItems);
+    return true;
+  }
+
   function sortFirestoreEvents(events) {
     return (events || []).slice().sort(function (a, b) {
       return String(a.emittedAt || '').localeCompare(String(b.emittedAt || ''));
@@ -1330,7 +1355,7 @@
       var events = [];
       snapshot.forEach(function (doc) {
         var data = doc && typeof doc.data === 'function' ? doc.data() : null;
-        if (data && data.type === 'template_insert') {
+        if (data && (data.type === 'template_insert' || data.type === 'item_delete')) {
           events.push(data);
         }
       });
@@ -1402,6 +1427,10 @@
           }
           return;
         }
+        if (eventPayload.type === 'item_delete') {
+          applyRunItemDeleteEventToRunItems(eventPayload, targetDate);
+          return;
+        }
         applyRunItemStatusEventToRunItems(eventPayload, targetDate);
       });
     });
@@ -1459,6 +1488,29 @@
       setError(error && error.message
         ? 'テンプレートの保存に失敗しました: ' + String(error.message)
         : 'テンプレートの保存に失敗しました');
+    });
+  }
+
+  function deleteRunItemViaGas(targetDate, runItemId) {
+    return apiRequest(
+      'DELETE',
+      '/api/admin/runs/' + encodeURIComponent(targetDate) + '/items/' + encodeURIComponent(runItemId),
+      null
+    );
+  }
+
+  function syncRunItemDeleteViaGasInBackground(targetDate, runItemId, attempt) {
+    var currentAttempt = Number(attempt || 0);
+    deleteRunItemViaGas(targetDate, runItemId).catch(function (error) {
+      if (currentAttempt + 1 < TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS) {
+        global.setTimeout(function () {
+          syncRunItemDeleteViaGasInBackground(targetDate, runItemId, currentAttempt + 1);
+        }, TEMPLATE_GAS_SYNC_BASE_DELAY_MS * Math.pow(2, currentAttempt));
+        return;
+      }
+      setError(error && error.message
+        ? 'タスク削除の保存に失敗しました: ' + String(error.message)
+        : 'タスク削除の保存に失敗しました');
     });
   }
 
@@ -1635,14 +1687,13 @@
     var previousChecklist = state.checklist;
     removeCurrentRunItem(runItemId);
     try {
-      if (state.config.functionsApiBaseUrl) {
+      if (state.config.clientFirestoreWriteEnabled === true) {
         await writeRunItemDeleteEvent(state.selectedDate, runItemId);
+        if (!state.config.functionsApiBaseUrl) {
+          syncRunItemDeleteViaGasInBackground(state.selectedDate, runItemId, 0);
+        }
       } else {
-        await apiRequest(
-          'DELETE',
-          '/api/admin/runs/' + encodeURIComponent(state.selectedDate) + '/items/' + encodeURIComponent(runItemId),
-          null
-        );
+        await deleteRunItemViaGas(state.selectedDate, runItemId);
       }
       setStatus('タスクを削除しました');
     } catch (error) {
