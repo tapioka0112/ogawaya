@@ -1671,6 +1671,23 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       return grouped;
     }
 
+    function repairInvalidTemplateClosingTimes(now) {
+      var changed = false;
+      var templates = repository.listTable('checklist_templates').map(function (template) {
+        if (ns.isTimeString(template.closing_time)) {
+          return template;
+        }
+        changed = true;
+        var repaired = ns.clone(template);
+        repaired.closing_time = '00:00';
+        repaired.updated_at = now;
+        return repaired;
+      });
+      if (changed) {
+        repository.replaceTable('checklist_templates', templates);
+      }
+    }
+
     function ensureSplitTemplateItems(templateId, period, items, now) {
       (items || []).forEach(function (item, index) {
         var splitItemId = buildSplitTemplateItemId(item.id, period);
@@ -1694,6 +1711,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
 
     function normalizePeriodTemplatesForStore(storeId) {
       var now = ns.toIsoString(clock.now());
+      repairInvalidTemplateClosingTimes(now);
       repository.listActiveTemplatesWithItems(storeId).forEach(function (entry) {
         var template = entry.template;
         var items = entry.items;
