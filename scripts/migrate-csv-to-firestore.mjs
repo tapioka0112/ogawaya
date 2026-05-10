@@ -71,66 +71,127 @@ async function readCsvObjects(path) {
   });
 }
 
+async function readFirstExistingCsvObjectList(names) {
+  for (const name of names) {
+    const rows = await readCsvObjects(csvPath(name));
+    if (rows.length > 0) {
+      return {
+        name,
+        rows
+      };
+    }
+  }
+  return {
+    name: names[0],
+    rows: []
+  };
+}
+
 function csvPath(name) {
   const baseDir = String(process.env.IMPORT_DIR || 'docs/operations/import').replace(/\/+$/, '');
   return `${baseDir}/${name}.csv`;
+}
+
+function pickSourceStore(stores, targetStoreId) {
+  const explicitSourceStoreId = String(process.env.SOURCE_STORE_ID || '').trim();
+  if (explicitSourceStoreId) {
+    const source = stores.find((item) => item.id === explicitSourceStoreId);
+    if (!source) {
+      throw new Error(`stores.csv に SOURCE_STORE_ID=${explicitSourceStoreId} がありません`);
+    }
+    return source;
+  }
+
+  const direct = stores.find((item) => item.id === targetStoreId);
+  if (direct) {
+    return direct;
+  }
+
+  if (stores.length === 1) {
+    return stores[0];
+  }
+
+  throw new Error(`stores.csv に STORE_ID=${targetStoreId} がありません。SOURCE_STORE_ID を指定してください`);
+}
+
+function belongsToSourceStore(item, sourceStoreId) {
+  return (item.storeId || item.store_id) === sourceStoreId;
+}
+
+function isActive(item) {
+  if (String(item.isActive || item.is_active || '').toLowerCase() === 'false') {
+    return false;
+  }
+  return item.status !== 'inactive';
 }
 
 const storeId = requireStoreId();
 const db = getFirestore();
 const storeRef = db.collection('stores').doc(storeId);
 
-const [stores, tasks, templates, templateItems, users] = await Promise.all([
+const [stores, tasksResult, templatesResult, templateItemsResult, users] = await Promise.all([
   readCsvObjects(csvPath('stores')),
-  readCsvObjects(csvPath('tasks')),
-  readCsvObjects(csvPath('templates')),
-  readCsvObjects(csvPath('template_items')),
+  readFirstExistingCsvObjectList(['tasks', 'checklist_items']),
+  readFirstExistingCsvObjectList(['templates', 'checklist_templates']),
+  readFirstExistingCsvObjectList(['template_items', 'checklist_template_items']),
   readCsvObjects(csvPath('users'))
 ]);
 
-const store = stores.find((item) => item.id === storeId);
-if (!store) {
-  throw new Error(`stores.csv に STORE_ID=${storeId} がありません`);
-}
+const sourceStore = pickSourceStore(stores, storeId);
+const sourceStoreId = sourceStore.id;
+const tasks = tasksResult.rows;
+const templates = templatesResult.rows;
+const templateItems = templateItemsResult.rows;
 
 await storeRef.set({
   id: storeId,
-  name: store.name,
+  sourceStoreId,
+  name: sourceStore.name,
   updatedAt: admin.firestore.FieldValue.serverTimestamp()
 }, { merge: true });
 
-for (const task of tasks.filter((item) => (item.storeId || item.store_id) === storeId)) {
+for (const task of tasks.filter((item) => belongsToSourceStore(item, sourceStoreId))) {
   await storeRef.collection('tasks').doc(task.id).set({
     id: task.id,
     title: task.title,
     description: task.description || '',
     period: task.period || 'daily',
     sortOrder: Number(task.sortOrder || 0),
-    isActive: task.status !== 'inactive',
+    isActive: isActive(task),
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
 }
 
-for (const template of templates.filter((item) => (item.storeId || item.store_id) === storeId)) {
+for (const template of templates.filter((item) => belongsToSourceStore(item, sourceStoreId))) {
   await storeRef.collection('templates').doc(template.id).set({
     id: template.id,
     name: template.name,
     period: template.period || 'daily',
-    isActive: template.status !== 'inactive',
+    notifyTime: template.notify_time || template.notifyTime || '',
+    closingTime: template.closing_time || template.closingTime || '',
+    isActive: isActive(template),
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
 }
 
-for (const item of templateItems.filter((row) => (row.storeId || row.store_id) === storeId)) {
-  await storeRef.collection('templates').doc(item.templateId).collection('items').doc(item.id).set({
-    taskId: item.taskId,
-    sortOrder: Number(item.sortOrder || 0),
-    isActive: item.status !== 'inactive',
+for (const item of templateItems) {
+  const templateId = item.templateId || item.template_id;
+  if (!templateId || !templates.some((template) => template.id === templateId && belongsToSourceStore(template, sourceStoreId))) {
+    continue;
+  }
+  await storeRef.collection('templates').doc(templateId).collection('items').doc(item.id).set({
+    taskId: item.taskId || item.task_id || '',
+    title: item.title || '',
+    description: item.description || '',
+    period: item.period || 'daily',
+    sortOrder: Number(item.sortOrder || item.sort_order || 0),
+    isRequired: String(item.is_required || item.isRequired || '').toLowerCase() === 'true',
+    isActive: isActive(item),
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
 }
 
-for (const user of users.filter((item) => (item.storeId || item.store_id) === storeId)) {
+for (const user of users.filter((item) => belongsToSourceStore(item, sourceStoreId))) {
   if (user.role === 'admin') {
     await storeRef.collection('admins').doc(user.id).set({
       uid: user.id,
@@ -143,8 +204,12 @@ for (const user of users.filter((item) => (item.storeId || item.store_id) === st
 console.log(JSON.stringify({
   ok: true,
   storeId,
+  sourceStoreId,
+  taskCsv: tasksResult.name,
+  templateCsv: templatesResult.name,
+  templateItemCsv: templateItemsResult.name,
   tasks: tasks.length,
   templates: templates.length,
   templateItems: templateItems.length,
-  adminCandidates: users.filter((item) => (item.storeId || item.store_id) === storeId && item.role === 'admin').length
+  adminCandidates: users.filter((item) => belongsToSourceStore(item, sourceStoreId) && item.role === 'admin').length
 }));

@@ -27,7 +27,9 @@ GAS と Firebase Functions は使わず、GitHub Pages、LIFF、Firebase Auth、
 CSV がある場合は次で Firestore へ投入する。
 
 ```sh
-STORE_ID=store-hashimoto FIREBASE_SERVICE_ACCOUNT_JSON='...' node scripts/migrate-csv-to-firestore.mjs
+STORE_ID=store-hashimoto SOURCE_STORE_ID=store-001 FIREBASE_SERVICE_ACCOUNT_JSON='...' node scripts/migrate-csv-to-firestore.mjs
 ```
+
+`SOURCE_STORE_ID` は CSV 内の店舗ID、`STORE_ID` は Firestore の投入先店舗IDを指定する。`FIREBASE_SERVICE_ACCOUNT_JSON` の代わりに `GOOGLE_APPLICATION_CREDENTIALS` も利用できる。
 
 管理者UIDは Firebase Auth のUIDを使うため、既存CSVの社員IDとは一致しません。Firebase Console で管理者ユーザーを作成後、そのUIDを `stores/{storeId}/admins/{uid}` に登録します。

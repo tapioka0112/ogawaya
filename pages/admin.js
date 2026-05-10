@@ -1459,15 +1459,16 @@
           return;
         }
         var task = taskMap[String(itemData.taskId || '')];
-        if (!task) {
+        var title = task ? task.title : String(itemData.title || '');
+        if (!title) {
           return;
         }
         items.push({
           id: itemDoc.id,
-          taskId: task.id,
-          title: task.title,
-          description: task.description,
-          period: normalizeTaskPeriod(task.period),
+          taskId: task ? task.id : String(itemData.taskId || ''),
+          title: title,
+          description: task ? task.description : String(itemData.description || ''),
+          period: normalizeTaskPeriod(task ? task.period : itemData.period),
           sortOrder: Number(itemData.sortOrder || 0)
         });
       });

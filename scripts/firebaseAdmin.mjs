@@ -6,13 +6,18 @@ export function initializeFirebaseAdmin() {
   }
 
   const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (!rawJson) {
-    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON が未設定です');
+  if (rawJson) {
+    const serviceAccount = JSON.parse(rawJson);
+    return admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
   }
 
-  const serviceAccount = JSON.parse(rawJson);
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON または GOOGLE_APPLICATION_CREDENTIALS が未設定です');
+  }
   return admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+    credential: admin.credential.applicationDefault()
   });
 }
 
