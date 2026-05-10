@@ -989,6 +989,33 @@
     }));
   }
 
+  function getRunIdForDate(date) {
+    var targetDate = String(date || '');
+    var checklist = targetDate === state.selectedDate ? state.checklist : getCachedRunItems(targetDate);
+    return checklist && checklist.runId ? String(checklist.runId) : '';
+  }
+
+  function rememberRunMetadataForDate(date, response) {
+    var targetDate = String((response && response.targetDate) || date || '');
+    var runId = String((response && response.runId) || '');
+    if (!targetDate || !runId) {
+      return;
+    }
+    var baseChecklist = targetDate === state.selectedDate ? state.checklist : getCachedRunItems(targetDate);
+    var nextChecklist = Object.assign({}, baseChecklist || {
+      targetDate: targetDate,
+      status: 'open',
+      items: []
+    }, {
+      targetDate: targetDate,
+      runId: runId
+    });
+    if (targetDate === state.selectedDate) {
+      state.checklist = nextChecklist;
+    }
+    rememberRunItems(targetDate, nextChecklist);
+  }
+
   function getExistingTemplateItemIdSet() {
     var result = {};
     var items = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
@@ -1287,9 +1314,20 @@
     });
   }
 
-  function syncTemplateInsertViaGasInBackground(targetDate, templateId, period, items, attempt) {
-    var currentAttempt = Number(attempt || 0);
-    apiRequest(
+  function applyTemplateInsertGasResponse(targetDate, response, items) {
+    var responseTargetDate = String((response && response.targetDate) || targetDate || '');
+    rememberRunMetadataForDate(responseTargetDate, response);
+    if (response && Array.isArray(response.items) && response.items.length > 0) {
+      appendRunItemsForDate(responseTargetDate, response.items);
+      return;
+    }
+    markRunItemsSavedForDate(responseTargetDate, items.map(function (item) {
+      return item.id;
+    }));
+  }
+
+  function syncTemplateInsertViaGas(targetDate, templateId, period, items) {
+    return apiRequest(
       'POST',
       '/api/admin/runs/' + encodeURIComponent(targetDate) + '/templates/' + encodeURIComponent(templateId) + ':apply',
       {
@@ -1297,14 +1335,16 @@
         clientItems: buildTemplateClientItems(items)
       }
     ).then(function (response) {
-      if (Array.isArray(response.items) && response.items.length > 0) {
-        appendRunItemsForDate(targetDate, response.items);
-      } else {
-        markRunItemsSavedForDate(targetDate, items.map(function (item) {
-          return item.id;
-        }));
-      }
-      if (targetDate === state.selectedDate) {
+      applyTemplateInsertGasResponse(targetDate, response, items);
+      return response;
+    });
+  }
+
+  function syncTemplateInsertViaGasInBackground(targetDate, templateId, period, items, attempt) {
+    var currentAttempt = Number(attempt || 0);
+    syncTemplateInsertViaGas(targetDate, templateId, period, items).then(function (response) {
+      var responseTargetDate = String((response && response.targetDate) || targetDate || '');
+      if (responseTargetDate === state.selectedDate) {
         setStatus('テンプレートを保存しました');
       }
     }).catch(function (error) {
@@ -1480,6 +1520,14 @@
     }
     appendCurrentRunItems(optimisticItems);
     setStatus('テンプレートを挿入しました。保存しています...');
+    if (!getRunIdForDate(targetDate)) {
+      await syncTemplateInsertViaGas(targetDate, template.id, templatePeriod, optimisticItems);
+      writeTemplateInsertEvent(targetDate, template.id, templatePeriod, optimisticItems).catch(function (error) {
+        console.error('[admin-sync] template_insert realtime write failed', error);
+      });
+      setStatus('テンプレートを保存しました');
+      return;
+    }
     writeTemplateInsertEvent(targetDate, template.id, templatePeriod, optimisticItems).catch(function (error) {
       console.error('[admin-sync] template_insert realtime write failed', error);
     });

@@ -538,6 +538,8 @@ test('管理者画面向け API でログイン後にタスク作成・挿入・
     body: {}
   });
   assert.equal(applyTemplate.statusCode, 201);
+  assert.ok(applyTemplate.body.runId);
+  assert.equal(applyTemplate.body.targetDate, '2026-04-19');
 
   const getRun = app.handleApiRequest({
     method: 'GET',
@@ -557,6 +559,71 @@ test('管理者画面向け API でログイン後にタスク作成・挿入・
     body: {}
   });
   assert.equal(deleteItem.statusCode, 200);
+});
+
+test('管理者のタスク削除は既存テンプレートの closing_time 不正に影響されない', async () => {
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      ADMIN_LOGIN_ID: 'admin-login',
+      ADMIN_LOGIN_PASSWORD: 'admin-password'
+    },
+    enableCacheService: true
+  });
+  const seed = createBaseDataset();
+  seed.checklist_templates[0].closing_time = 'invalid';
+  seed.checklist_runs = [
+    {
+      id: 'run-delete-001',
+      template_id: 'tmpl-001',
+      store_id: 'store-001',
+      target_date: '2026-04-21',
+      status: 'open',
+      notified_at: '2026-04-21T01:30:00Z',
+      closed_at: '',
+      created_at: '2026-04-21T01:30:00Z'
+    }
+  ];
+  seed.checklist_run_items = [
+    {
+      id: 'run-item-delete-001',
+      run_id: 'run-delete-001',
+      template_item_id: 'tmpl-item-001',
+      title: '削除対象',
+      period: 'daily',
+      sort_order: '1',
+      status: 'unchecked',
+      checked_by: '',
+      checked_by_name: '',
+      checked_at: '',
+      updated_at: '2026-04-21T01:30:00Z'
+    }
+  ];
+  const app = runtime.Ogawaya.createApplication({
+    storage: runtime.Ogawaya.createArrayStorage(seed),
+    clock: {
+      now() {
+        return new Date('2026-04-21T03:00:00Z');
+      },
+      today() {
+        return '2026-04-21';
+      },
+      yesterday() {
+        return '2026-04-20';
+      }
+    }
+  });
+  const token = loginAsAdmin(app);
+
+  const response = app.handleApiRequest({
+    method: 'DELETE',
+    path: '/api/admin/runs/2026-04-21/items/run-item-delete-001',
+    query: { adminToken: token },
+    body: {}
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.deletedRunItemId, 'run-item-delete-001');
+  assert.equal(app.repository.findRunItemById('run-item-delete-001'), null);
 });
 
 test('管理者の日付別タスク一覧は従業員ホームと同じ期間内タスクを返し削除できる', async () => {

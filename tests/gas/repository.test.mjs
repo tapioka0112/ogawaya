@@ -51,7 +51,8 @@ function createStoresSheet(initialRows) {
   const counters = {
     reads: 0,
     clears: 0,
-    writes: 0
+    writes: 0,
+    deletes: 0
   };
 
   function ensureCell(rowIndex, colIndex) {
@@ -71,6 +72,10 @@ function createStoresSheet(initialRows) {
       clearContents() {
         counters.clears += 1;
         values = [headers.slice()];
+      },
+      deleteRow(row) {
+        counters.deletes += 1;
+        values.splice(row - 1, 1);
       },
       getRange(row, col, numRows, numCols) {
         return {
@@ -124,7 +129,8 @@ function createSheet(headers, initialRows) {
   const counters = {
     reads: 0,
     clears: 0,
-    writes: 0
+    writes: 0,
+    deletes: 0
   };
 
   function ensureCell(rowIndex, colIndex) {
@@ -156,6 +162,10 @@ function createSheet(headers, initialRows) {
       clearContents() {
         counters.clears += 1;
         values = [headers.slice()];
+      },
+      deleteRow(row) {
+        counters.deletes += 1;
+        values.splice(row - 1, 1);
       },
       getRange(row, col, numRows, numCols) {
         return {
@@ -916,4 +926,50 @@ test('updateRunItem は period 追加前ヘッダーを既存行ごと移行す�
   assert.equal(runItemsSheet.getValues()[2][4], '');
   assert.equal(runItemsSheet.getValues()[2][5], '2');
   assert.equal(runItemsSheet.getValues()[2][6], 'unchecked');
+});
+
+test('deleteRunItem は Spreadsheet 全量再書き込みせず対象行だけ削除する', async () => {
+  const cache = createScriptCache();
+  const runItemsSheet = createSheet(
+    ['id', 'run_id', 'template_item_id', 'title', 'period', 'sort_order', 'status', 'checked_by', 'checked_by_name', 'checked_at', 'updated_at'],
+    [
+      ['run-item-001', 'run-001', 'tmpl-item-001', '開店準備', 'daily', '1', 'unchecked', '', '', '', '2026-04-22T12:00:00Z'],
+      ['run-item-002', 'run-001', 'tmpl-item-002', '清掃確認', 'daily', '2', 'unchecked', '', '', '', '2026-04-22T12:00:00Z']
+    ]
+  );
+
+  const runtime = await loadGasRuntime({
+    scriptProperties: {
+      SPREADSHEET_ID: 'spreadsheet-001'
+    },
+    cacheFactory() {
+      return cache;
+    },
+    spreadsheetFactory() {
+      return {
+        getSheetByName(sheetName) {
+          if (sheetName === 'checklist_run_items') {
+            return runItemsSheet.sheet;
+          }
+          return null;
+        },
+        insertSheet(sheetName) {
+          if (sheetName === 'checklist_run_items') {
+            return runItemsSheet.sheet;
+          }
+          throw new Error('unexpected sheet: ' + sheetName);
+        }
+      };
+    }
+  });
+
+  const repository = runtime.Ogawaya.createSpreadsheetRepository({ spreadsheetId: 'spreadsheet-001' });
+  const deleted = repository.deleteRunItem('run-item-001');
+
+  assert.equal(deleted.id, 'run-item-001');
+  assert.equal(runItemsSheet.counters.clears, 0);
+  assert.equal(runItemsSheet.counters.writes, 0);
+  assert.equal(runItemsSheet.counters.deletes, 1);
+  assert.equal(runItemsSheet.getValues().length, 2);
+  assert.equal(runItemsSheet.getValues()[1][0], 'run-item-002');
 });

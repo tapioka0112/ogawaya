@@ -1976,6 +1976,8 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       var responseItems = insertedItems.concat(changedItems);
       var metadataByTemplateItemId = buildTemplateItemMetadataMap(repository, responseItems);
       return {
+        runId: baseRun.id,
+        targetDate: effectiveTargetDate,
         insertedCount: insertedItems.length,
         changedCount: changedItems.length,
         items: responseItems.map(function (item) {
@@ -2535,12 +2537,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
           400
         );
 
-        var allRunItems = repository.listTable('checklist_run_items');
-        var filteredRunItems = allRunItems.filter(function (item) {
-          return item.id !== runItemId;
-        });
-        ns.assert(filteredRunItems.length !== allRunItems.length, 'not_found', '削除対象のタスクが見つかりません', 404);
-        repository.replaceTable('checklist_run_items', filteredRunItems);
+        repository.deleteRunItem(runItemId);
         writeRunAndCurrentSnapshots(run);
         if (targetDate !== run.target_date && repository.findRunByStoreAndDate(run.store_id, targetDate)) {
           writeChecklistSnapshotForTargetDate(run.store_id, targetDate);

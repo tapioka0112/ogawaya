@@ -549,6 +549,31 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       });
     }
 
+    function deleteRunItem(runItemId) {
+      if (storage && typeof storage.deleteRunItem === 'function') {
+        var runItems = getTableRowsUnsafe('checklist_run_items');
+        var runItemIndex = runItems.findIndex(function (row) {
+          return row.id === runItemId;
+        });
+        ns.assert(runItemIndex !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
+        var deletedRow = ns.clone(runItems[runItemIndex]);
+        storage.deleteRunItem(runItemId);
+        runItems.splice(runItemIndex, 1);
+        cachedState.checklist_run_items = runItems;
+        loadedSheetFlags.checklist_run_items = true;
+        return deletedRow;
+      }
+      return commit(function (draftState) {
+        var index = draftState.checklist_run_items.findIndex(function (row) {
+          return row.id === runItemId;
+        });
+        ns.assert(index !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
+        var deletedRow = ns.clone(draftState.checklist_run_items[index]);
+        draftState.checklist_run_items.splice(index, 1);
+        return deletedRow;
+      });
+    }
+
     function updateRun(runId, changes) {
       return updateRow('checklist_runs', runId, function (row) {
         Object.keys(changes).forEach(function (key) {
@@ -704,6 +729,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       createRunItems: createRunItems,
       createTemplate: createTemplate,
       createTemplateItem: createTemplateItem,
+      deleteRunItem: deleteRunItem,
       deleteTemplateItem: deleteTemplateItem,
       assignNotificationRecipientChannels: assignNotificationRecipientChannels,
       findLineAccountByUserId: findLineAccountByUserId,
@@ -750,6 +776,16 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       },
       loadTable: function (sheetName) {
         return (state[sheetName] || []).map(ns.clone);
+      },
+      deleteRunItem: function (runItemId) {
+        var runItems = state.checklist_run_items || [];
+        var index = runItems.findIndex(function (row) {
+          return row.id === runItemId;
+        });
+        ns.assert(index !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
+        var deletedRow = ns.clone(runItems[index]);
+        runItems.splice(index, 1);
+        return deletedRow;
       },
       save: function (nextState) {
         state = ensureStateShape(nextState);
@@ -1357,6 +1393,32 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       writeTableToCache(cache, 'checklist_item_logs', logs);
     }
 
+    function deleteRunItem(runItemId) {
+      var spreadsheet = getSpreadsheet();
+      var runItemsSheet = spreadsheet.getSheetByName('checklist_run_items') || spreadsheet.insertSheet('checklist_run_items');
+      ensureSheetHeader(runItemsSheet, 'checklist_run_items');
+
+      var runItemRow = findDataRowById(runItemsSheet, 'checklist_run_items', runItemId);
+      var runItems = loadTable('checklist_run_items');
+      var runItemIndex = runItems.findIndex(function (row) {
+        return row.id === runItemId;
+      });
+      ns.assert(runItemIndex !== -1, 'not_found', 'checklist_run_items が見つかりません', 404);
+      var deletedRow = ns.clone(runItems[runItemIndex]);
+      runItemsSheet.deleteRow(runItemRow);
+      runItems.splice(runItemIndex, 1);
+      tableStateCache.checklist_run_items = cloneTableRows(runItems);
+
+      var cache = getScriptCache();
+      if (lastLoadedState) {
+        lastLoadedState.checklist_run_items = cloneTableRows(runItems);
+        writeStateToCache(cache, lastLoadedState);
+        return deletedRow;
+      }
+      writeTableToCache(cache, 'checklist_run_items', runItems);
+      return deletedRow;
+    }
+
     function load() {
       var loadStartedAt = new Date().getTime();
       var cache = getScriptCache();
@@ -1441,6 +1503,7 @@ var Ogawaya = typeof Ogawaya === 'object' ? Ogawaya : {};
       load: load,
       loadTable: loadTable,
       save: save,
+      deleteRunItem: deleteRunItem,
       updateRunItem: updateRunItem,
       updateRunItemWithLog: updateRunItemWithLog
     };
