@@ -42,7 +42,7 @@ test('管理者ページはログイン導線と管理UIの主要要素を持つ
   assert.match(html, /https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-auth-compat\.js/);
   assert.match(html, /https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-firestore-compat\.js/);
   assert.match(html, /<script src="\.\/admin\.js\?v=[^"]+"><\/script>/);
-  assert.match(html, /<script src="\.\/admin\.js\?v=admin-period-template-fix-20260426"><\/script>/);
+  assert.match(html, /<script src="\.\/admin\.js\?v=admin-template-import-20260511"><\/script>/);
 });
 
 test('管理者ページのタスク挿入はタグごとに対象日を算出する', async () => {
