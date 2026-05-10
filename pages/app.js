@@ -1,8 +1,4 @@
 (function (global) {
-  function normalizeBaseUrl(baseUrl) {
-    return String(baseUrl || '').replace(/\/+$/, '');
-  }
-
   function appendQuery(url, query) {
     var pairs = [];
     Object.keys(query || {}).forEach(function (key) {
@@ -81,14 +77,13 @@
       throw new Error('config.json の読み込みに失敗しました');
     }
     var payload = await response.json();
-    var gasApiBaseUrl = normalizeBaseUrl(payload.gasApiBaseUrl || '');
-    var functionsApiBaseUrl = normalizeBaseUrl(payload.functionsApiBaseUrl || '');
     var liffId = String(payload.liffId || '').trim();
-    if (!gasApiBaseUrl && !functionsApiBaseUrl) {
-      throw new Error('config.json の gasApiBaseUrl または functionsApiBaseUrl を設定してください');
-    }
     if (!liffId) {
       throw new Error('config.json の liffId が未設定です');
+    }
+    var firebaseConfig = normalizeFirebaseConfig(payload.firebase);
+    if (!firebaseConfig) {
+      throw new Error('config.json の firebase 設定が未設定です');
     }
 
     var consistencyRefreshSeconds = Number(payload.consistencyRefreshSeconds);
@@ -98,8 +93,6 @@
     var defaultStoreId = String(payload.defaultStoreId || '').trim();
 
     return {
-      gasApiBaseUrl: gasApiBaseUrl,
-      functionsApiBaseUrl: functionsApiBaseUrl,
       liffId: liffId,
       defaultStoreId: defaultStoreId,
       allowAnonymousAccess: payload.allowAnonymousAccess === true,
@@ -107,7 +100,7 @@
       enableRealtimeSync: payload.enableRealtimeSync !== false,
       clientFirestoreWriteEnabled: payload.clientFirestoreWriteEnabled === true,
       consistencyRefreshSeconds: consistencyRefreshSeconds,
-      firebase: normalizeFirebaseConfig(payload.firebase)
+      firebase: firebaseConfig
     };
   }
 
@@ -127,8 +120,6 @@
   var ITEM_ACTION_DISPATCH_DEBOUNCE_MS = 120;
   var ITEM_ACTION_REQUEST_TIMEOUT_MS = 8000;
   var ITEM_ACTION_RETRY_MAX_ATTEMPTS = 6;
-  var BACKGROUND_GAS_SYNC_TIMEOUT_MS = 15000;
-  var BACKGROUND_GAS_SYNC_RETRY_MAX_ATTEMPTS = 5;
   var FIRESTORE_WRITE_SUSPEND_MS = 5 * 60 * 1000;
   var JST_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Tokyo',
@@ -423,136 +414,150 @@
   }
 
   function createApi(options) {
-    var normalizedGasBaseUrl = normalizeBaseUrl(options && options.gasApiBaseUrl ? options.gasApiBaseUrl : '');
-    var normalizedFunctionsBaseUrl = normalizeBaseUrl(options && options.functionsApiBaseUrl ? options.functionsApiBaseUrl : '');
     var defaultStoreId = String(options && options.defaultStoreId ? options.defaultStoreId : '');
-    var liffId = String(options && options.liffId ? options.liffId : '').trim();
-    var useFunctionsApi = normalizedFunctionsBaseUrl !== '';
 
-    function buildLegacyBody(idToken, accessToken, body) {
-      var requestBody = Object.assign({}, body || {});
-      if (idToken) {
-        requestBody.authToken = idToken;
+    function toIso(value) {
+      if (!value) {
+        return '';
       }
-      if (accessToken) {
-        requestBody.accessToken = accessToken;
+      if (typeof value.toDate === 'function') {
+        return value.toDate().toISOString();
       }
-      if (liffId) {
-        requestBody.liffId = liffId;
+      if (value instanceof Date) {
+        return value.toISOString();
       }
-      return requestBody;
+      return String(value || '');
     }
 
-    async function requestLegacyGas(method, path, idToken, accessToken, body, queryExtras) {
-      var query = {
-        path: String(path || '').replace(/^\/+/, '')
+    function getStoreId() {
+      var stored = readStorageValue(LAST_STORE_ID_STORAGE_KEY);
+      return stored || defaultStoreId;
+    }
+
+    function buildCurrentUser(firebaseUser) {
+      var authUser = state.authUserContext || {};
+      return {
+        userId: firebaseUser && firebaseUser.uid ? String(firebaseUser.uid) : '',
+        name: String(authUser.name || 'LINEユーザー'),
+        role: '',
+        store: {
+          id: getStoreId(),
+          name: ''
+        }
       };
-      Object.keys(queryExtras || {}).forEach(function (key) {
-        query[key] = queryExtras[key];
+    }
+
+    function normalizeFirestoreItem(doc) {
+      var data = doc.data() || {};
+      return {
+        id: doc.id,
+        templateItemId: String(data.templateItemId || ''),
+        title: String(data.title || ''),
+        description: String(data.description || ''),
+        period: normalizeTaskPeriod(data.period),
+        sortOrder: Number(data.sortOrder || 0),
+        status: data.status === 'checked' ? 'checked' : 'unchecked',
+        checkedBy: data.checkedBy ? String(data.checkedBy) : null,
+        checkedByUserId: data.checkedByUserId ? String(data.checkedByUserId) : null,
+        checkedAt: data.checkedAt ? toIso(data.checkedAt) : null,
+        updatedAt: data.updatedAt ? toIso(data.updatedAt) : null
+      };
+    }
+
+    async function getTodayChecklist() {
+      var firebaseUser = await ensureFirebaseAuthSession();
+      var storeId = getStoreId();
+      if (!storeId) {
+        throw new Error('店舗IDが未設定です');
+      }
+      writeStorageValue(LAST_STORE_ID_STORAGE_KEY, storeId);
+      var targetDate = getTodayDateInJst();
+      var storeDoc = await state.firestore.collection('stores').doc(storeId).get();
+      var store = storeDoc.exists ? storeDoc.data() || {} : {};
+      var runDoc = await state.firestore.collection('stores').doc(storeId).collection('runs').doc(targetDate).get();
+      var run = runDoc.exists ? runDoc.data() || {} : {};
+      var itemSnapshot = await state.firestore
+        .collection('stores')
+        .doc(storeId)
+        .collection('runs')
+        .doc(targetDate)
+        .collection('items')
+        .get();
+      var items = [];
+      itemSnapshot.forEach(function (doc) {
+        var data = doc.data() || {};
+        if (data.isActive === false) {
+          return;
+        }
+        items.push(normalizeFirestoreItem(doc));
       });
-
-      var actualMethod = method;
-      var requestBody = buildLegacyBody(idToken, accessToken, body);
-      var options = {
-        method: actualMethod
+      items.sort(function (left, right) {
+        var leftSort = Number(left.sortOrder || 0);
+        var rightSort = Number(right.sortOrder || 0);
+        if (leftSort !== rightSort) {
+          return leftSort - rightSort;
+        }
+        return left.title.localeCompare(right.title);
+      });
+      var currentUser = buildCurrentUser(firebaseUser);
+      currentUser.store.name = String(store.name || run.storeName || '');
+      return {
+        runId: String(run.id || targetDate),
+        templateId: String(run.templateId || ''),
+        storeName: currentUser.store.name,
+        targetDate: targetDate,
+        status: String(run.status || 'open'),
+        currentUser: currentUser,
+        items: items
       };
-      if (method === 'GET' && (idToken || accessToken)) {
-        actualMethod = 'POST';
-        query._method = 'GET';
-        options.method = actualMethod;
-      }
-      if (actualMethod !== 'GET') {
-        options.body = JSON.stringify(requestBody);
-      }
-
-      var response = await fetch(appendQuery(normalizedGasBaseUrl, query), options);
-      var rawText = await response.text();
-      var payload = null;
-      try {
-        payload = JSON.parse(rawText);
-      } catch (error) {
-        throw new Error('API 応答の解析に失敗しました');
-      }
-
-      var statusCode = typeof payload.statusCode === 'number'
-        ? payload.statusCode
-        : Number(payload.statusCode) || response.status || 500;
-      if (!payload || payload.ok === false || statusCode >= 400) {
-        var apiError = new Error(payload && payload.message ? payload.message : 'API request failed');
-        apiError.code = payload && payload.code ? payload.code : '';
-        apiError.statusCode = statusCode;
-        apiError.details = payload && payload.details && typeof payload.details === 'object' ? payload.details : null;
-        throw apiError;
-      }
-      return payload;
     }
 
-    async function requestFunctionsApi(method, path, idToken, accessToken, body, queryExtras) {
-      var query = Object.assign({}, queryExtras || {});
-      if (idToken) {
-        query.idToken = idToken;
+    async function updateItem(runItemId, status) {
+      var firebaseUser = await ensureFirebaseAuthSession();
+      var checklist = state.checklist || await getTodayChecklist();
+      var storeId = resolveChecklistStoreId(checklist) || getStoreId();
+      var targetDate = String(checklist.targetDate || getTodayDateInJst());
+      var item = findChecklistItemById(runItemId);
+      if (!item) {
+        throw new Error('チェック項目が見つかりません');
       }
-      if (accessToken) {
-        query.accessToken = accessToken;
-      }
-      if (defaultStoreId && !query.storeId) {
-        query.storeId = defaultStoreId;
-      }
-      var url = appendQuery(normalizedFunctionsBaseUrl + String(path || ''), query);
-      var options = {
-        method: method
-      };
-      if (method !== 'GET' && method !== 'DELETE') {
-        options.headers = { 'Content-Type': 'application/json' };
-        options.body = JSON.stringify(body || {});
-      }
-      var response = await fetch(url, options);
-      var rawText = await response.text();
-      var payload = null;
-      try {
-        payload = JSON.parse(rawText);
-      } catch (error) {
-        throw new Error('API 応答の解析に失敗しました');
-      }
-      var statusCode = typeof payload.statusCode === 'number'
-        ? payload.statusCode
-        : Number(payload.statusCode) || response.status || 500;
-      if (!payload || payload.ok === false || statusCode >= 400) {
-        var apiError = new Error(payload && payload.message ? payload.message : 'API request failed');
-        apiError.code = payload && payload.code ? payload.code : '';
-        apiError.statusCode = statusCode;
-        apiError.details = payload && payload.details && typeof payload.details === 'object' ? payload.details : null;
-        throw apiError;
-      }
-      return payload;
-    }
-
-    function request(method, legacyPath, idToken, accessToken, body, queryExtras) {
-      if (useFunctionsApi) {
-        if (legacyPath === 'api/checklists/today') {
-          return requestFunctionsApi('GET', '/v1/user/checklists/today', idToken, accessToken, body, queryExtras);
-        }
-        var checkMatch = String(legacyPath).match(/^api\/checklist-items\/([^/]+)\/check$/);
-        if (checkMatch) {
-          return requestFunctionsApi('POST', '/v1/user/checklist-items/' + encodeURIComponent(checkMatch[1]) + '/check', idToken, accessToken, body, queryExtras);
-        }
-        var uncheckMatch = String(legacyPath).match(/^api\/checklist-items\/([^/]+)\/uncheck$/);
-        if (uncheckMatch) {
-          return requestFunctionsApi('POST', '/v1/user/checklist-items/' + encodeURIComponent(uncheckMatch[1]) + '/uncheck', idToken, accessToken, body, queryExtras);
-        }
-      }
-      return requestLegacyGas(method, legacyPath, idToken, accessToken, body, queryExtras);
+      var checked = status === 'checked';
+      var now = new Date().toISOString();
+      var authUser = state.authUserContext || {};
+      var nextItem = Object.assign({}, item, {
+        status: checked ? 'checked' : 'unchecked',
+        checkedBy: checked ? String(authUser.name || 'LINEユーザー') : null,
+        checkedByUserId: checked ? String(firebaseUser.uid || '') : null,
+        checkedAt: checked ? now : null,
+        updatedAt: now
+      });
+      var itemRef = state.firestore
+        .collection('stores')
+        .doc(storeId)
+        .collection('runs')
+        .doc(targetDate)
+        .collection('items')
+        .doc(runItemId);
+      await itemRef.set({
+        status: nextItem.status,
+        checkedBy: nextItem.checkedBy || '',
+        checkedByUserId: nextItem.checkedByUserId || '',
+        checkedAt: nextItem.checkedAt || '',
+        updatedAt: nextItem.updatedAt
+      }, { merge: true });
+      await writeRealtimeEvent(nextItem);
+      return { item: nextItem };
     }
 
     return {
-      getTodayChecklist: function (idToken, accessToken) {
-        return request('GET', 'api/checklists/today', idToken, accessToken);
+      getTodayChecklist: function () {
+        return getTodayChecklist();
       },
       checkItem: function (idToken, accessToken, runItemId) {
-        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/check', idToken, accessToken, { comment: '' });
+        return updateItem(runItemId, 'checked');
       },
       uncheckItem: function (idToken, accessToken, runItemId) {
-        return request('POST', 'api/checklist-items/' + encodeURIComponent(runItemId) + '/uncheck', idToken, accessToken, { reason: '' });
+        return updateItem(runItemId, 'unchecked');
       }
     };
   }
@@ -1028,35 +1033,9 @@
   }
 
   function emitClientEvent(name, details) {
-    if (!state.config || !state.config.gasApiBaseUrl || !global.fetch) {
-      return;
+    if (global.console && typeof global.console.debug === 'function') {
+      global.console.debug('[client-event]', name, details || {});
     }
-    var eventDetails = details || {};
-    var query = {
-      path: 'api/client-events',
-      name: String(name || ''),
-      mode: 'user',
-      message: eventDetails.message ? String(eventDetails.message) : JSON.stringify(eventDetails),
-      code: eventDetails.code ? String(eventDetails.code) : '',
-      statusCode: eventDetails.statusCode ? String(eventDetails.statusCode) : ''
-    };
-    if (typeof eventDetails.elapsedMs === 'number') {
-      query.elapsedMs = String(eventDetails.elapsedMs);
-    }
-    if (eventDetails.runItemId) {
-      query.runItemId = String(eventDetails.runItemId);
-    }
-    if (eventDetails.desiredStatus) {
-      query.desiredStatus = String(eventDetails.desiredStatus);
-    }
-    if (eventDetails.source) {
-      query.source = String(eventDetails.source);
-    }
-    global.fetch(appendQuery(state.config.gasApiBaseUrl, query), {
-      method: 'GET',
-      mode: 'no-cors',
-      keepalive: true
-    }).catch(function () {});
   }
 
   function setMenuOpen(open) {
@@ -2281,6 +2260,28 @@
     });
   }
 
+  async function upsertCurrentUserProfile() {
+    var firebaseUser = await ensureFirebaseAuthSession();
+    var storeId = state.config && state.config.defaultStoreId ? String(state.config.defaultStoreId) : '';
+    if (!storeId || !firebaseUser || !firebaseUser.uid) {
+      throw new Error('Firebase ユーザー情報が未確定です');
+    }
+    var authUser = state.authUserContext || {};
+    await state.firestore
+      .collection('stores')
+      .doc(storeId)
+      .collection('users')
+      .doc(firebaseUser.uid)
+      .set({
+        uid: firebaseUser.uid,
+        liffUserId: String(authUser.userId || ''),
+        displayName: String(authUser.name || 'LINEユーザー'),
+        updatedAt: global.firebase.firestore.FieldValue.serverTimestamp(),
+        lastSeenAt: global.firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    return firebaseUser;
+  }
+
   function buildSnapshotDocRef(storeId, targetDate) {
     return state.firestore
       .collection('stores')
@@ -2726,11 +2727,6 @@
     return payload;
   }
 
-  function shouldRetryWithoutSourceClientId(error) {
-    var code = error && error.code ? String(error.code) : '';
-    return code === 'permission-denied';
-  }
-
   function normalizeTemplateInsertEventItem(item) {
     return {
       id: String(item && item.id ? item.id : ''),
@@ -2767,19 +2763,7 @@
         .collection('runs')
         .doc(targetInfo.targetDate)
         .collection('events')
-        .add(buildRealtimeEventPayload(updatedItem, { includeSourceClientId: true }))
-        .catch(function (error) {
-          if (!shouldRetryWithoutSourceClientId(error)) {
-            throw error;
-          }
-          return state.firestore
-            .collection('stores')
-            .doc(targetInfo.storeId)
-            .collection('runs')
-            .doc(targetInfo.targetDate)
-            .collection('events')
-            .add(buildRealtimeEventPayload(updatedItem, { includeSourceClientId: false }));
-        });
+        .add(buildRealtimeEventPayload(updatedItem, { includeSourceClientId: true }));
     }).catch(function (error) {
       suspendFirestoreWrites(error);
       throw error;
@@ -3124,52 +3108,15 @@
     setStatus('通信遅延のため保存を再試行しています...');
   }
 
-  function syncItemStatusViaGas(runItemId, desiredStatus, timeoutMs) {
+  function writeItemStatusToFirestore(runItemId, desiredStatus, timeoutMs) {
     var requestPromise = desiredStatus === 'checked'
       ? state.api.checkItem(state.idToken, state.accessToken, runItemId)
       : state.api.uncheckItem(state.idToken, state.accessToken, runItemId);
     return withTimeout(
       requestPromise,
       timeoutMs,
-      'API 同期がタイムアウトしました'
+      'Firestore 保存がタイムアウトしました'
     );
-  }
-
-  function syncItemStatusViaGasInBackground(runItemId, desiredStatus, expectedUpdatedAt, attempt) {
-    var currentAttempt = Number(attempt || 1);
-    global.setTimeout(function () {
-      var latestItem = findChecklistItemById(runItemId);
-      if (
-        !latestItem ||
-        latestItem.status !== desiredStatus ||
-        String(latestItem.updatedAt || '') !== String(expectedUpdatedAt || '')
-      ) {
-        return;
-      }
-      var startedAtMs = Date.now();
-      syncItemStatusViaGas(runItemId, desiredStatus, BACKGROUND_GAS_SYNC_TIMEOUT_MS).then(function () {
-        emitClientEvent('item.sync.background_gas.success', {
-          source: 'gas',
-          runItemId: runItemId,
-          desiredStatus: desiredStatus,
-          elapsedMs: Date.now() - startedAtMs
-        });
-      }).catch(function (error) {
-        emitClientEvent('item.sync.background_gas.failed', {
-          source: 'gas',
-          runItemId: runItemId,
-          desiredStatus: desiredStatus,
-          code: error && error.code ? String(error.code) : '',
-          statusCode: error && typeof error.statusCode === 'number' ? error.statusCode : 0,
-          message: error && error.message ? String(error.message) : 'background gas sync failed',
-          elapsedMs: Date.now() - startedAtMs
-        });
-        console.error('[sync] background GAS sync failed', error);
-        if (currentAttempt < BACKGROUND_GAS_SYNC_RETRY_MAX_ATTEMPTS) {
-          syncItemStatusViaGasInBackground(runItemId, desiredStatus, expectedUpdatedAt, currentAttempt + 1);
-        }
-      });
-    }, Math.min(15000, 1000 * currentAttempt));
   }
 
   function processItemStatusChange(runItemId) {
@@ -3210,31 +3157,7 @@
       desiredStatus: desiredStatus
     });
 
-    var requestPromiseWithFallback = writeRealtimeEvent(optimisticItemForDispatch).then(function () {
-      actionState.confirmedItem = cloneChecklistItem(optimisticItemForDispatch);
-      syncItemStatusViaGasInBackground(runItemId, desiredStatus, optimisticItemForDispatch.updatedAt);
-      emitClientEvent('item.sync.firestore.success', {
-        source: 'firestore',
-        runItemId: runItemId,
-        desiredStatus: desiredStatus,
-        elapsedMs: Date.now() - syncStartedAtMs
-      });
-      return {
-        item: optimisticItemForDispatch
-      };
-    }).catch(function (firestoreError) {
-      syncSource = 'gas';
-      emitClientEvent('item.sync.firestore.fallback', {
-        source: 'firestore',
-        runItemId: runItemId,
-        desiredStatus: desiredStatus,
-        code: firestoreError && firestoreError.code ? String(firestoreError.code) : '',
-        message: firestoreError && firestoreError.message ? String(firestoreError.message) : 'Firestore sync failed',
-        elapsedMs: Date.now() - syncStartedAtMs
-      });
-      setStatus('高速同期に失敗したため通常保存に切り替えます');
-      return syncItemStatusViaGas(runItemId, desiredStatus, ITEM_ACTION_REQUEST_TIMEOUT_MS);
-    });
+    var requestPromiseWithFallback = writeItemStatusToFirestore(runItemId, desiredStatus, ITEM_ACTION_REQUEST_TIMEOUT_MS);
 
     requestPromiseWithFallback.then(function (response) {
       if (!response || !response.item) {
@@ -3579,8 +3502,8 @@
   async function refreshChecklist(options) {
     var refreshOptions = options || {};
     var marker = beginTiming(
-      refreshOptions.timingName || 'gas.today',
-      refreshOptions.timingLabel || 'GAS API today'
+      refreshOptions.timingName || 'firestore.today',
+      refreshOptions.timingLabel || 'Firestore today'
     );
     var checklist;
     try {
@@ -3592,7 +3515,7 @@
     }
     applyChecklistPayload(checklist, {
       restartSync: refreshOptions.restartSync !== false,
-      source: refreshOptions.source || 'gas.api',
+      source: refreshOptions.source || 'firestore.primary',
       preserveMissingItems: refreshOptions.preserveMissingItems === true
     });
     clearLiffSessionRenewalAttempt();
@@ -3652,30 +3575,14 @@
         return loadConfig();
       });
       state.config = config;
-      global.OGAWAYA_APP_BASE_URL = config.gasApiBaseUrl || config.functionsApiBaseUrl;
+      global.OGAWAYA_APP_BASE_URL = '';
       global.OGAWAYA_LIFF_ID = config.liffId;
       global.OGAWAYA_ALLOW_ANONYMOUS_ACCESS = config.allowAnonymousAccess;
       global.OGAWAYA_TRY_LIFF_AUTH_IN_ANONYMOUS = config.tryLiffAuthInAnonymous;
 
       state.api = createApi({
-        gasApiBaseUrl: config.gasApiBaseUrl,
-        functionsApiBaseUrl: config.functionsApiBaseUrl,
         defaultStoreId: config.defaultStoreId,
         liffId: config.liffId
-      });
-      var loadedFromSnapshot = false;
-      var snapshotLoadPromise = loadChecklistFromSnapshot().then(function (snapshotChecklist) {
-        if (snapshotChecklist && snapshotChecklist.runId && !state.checklist) {
-          applyChecklistPayload(snapshotChecklist, {
-            restartSync: true,
-            source: state.lastSnapshotSource || 'snapshot'
-          });
-          loadedFromSnapshot = true;
-        }
-        return loadedFromSnapshot;
-      }).catch(function (snapshotError) {
-        console.error('[sync] failed to load checklist snapshot', snapshotError);
-        return false;
       });
 
       var authContext = await measureTiming('liff.auth', 'LIFF認証全体', function () {
@@ -3684,51 +3591,19 @@
       state.idToken = authContext.idToken;
       state.accessToken = authContext.accessToken;
       state.authUserContext = extractUserContextFromIdToken(state.idToken);
+      await upsertCurrentUserProfile();
 
-      if (state.checklist) {
-        applyChecklistPayload(state.checklist, {
-          restartSync: false,
-          currentUserOverride: state.authUserContext,
-          source: 'auth.merge'
+      try {
+        await refreshChecklist({
+          source: 'firestore.primary',
+          timingName: 'firestore.today.blocking',
+          timingLabel: 'Firestore 初回取得'
         });
-        loadedFromSnapshot = true;
-      } else {
-        loadedFromSnapshot = await snapshotLoadPromise;
-        if (state.checklist) {
-          applyChecklistPayload(state.checklist, {
-            restartSync: false,
-            currentUserOverride: state.authUserContext,
-            source: 'auth.merge'
-          });
+      } catch (error) {
+        if (renewLiffSessionForAuthError(error)) {
+          return;
         }
-      }
-
-      if (loadedFromSnapshot) {
-        refreshChecklist({
-          restartSync: false,
-          source: 'gas.api.background',
-          timingName: 'gas.today.background',
-          timingLabel: 'GAS API再取得',
-          preserveMissingItems: true
-        }).catch(function (error) {
-          if (renewLiffSessionForAuthError(error)) {
-            return;
-          }
-          console.error('[sync] background api refresh failed', error);
-        });
-      } else {
-        try {
-          await refreshChecklist({
-            source: 'gas.api.blocking',
-            timingName: 'gas.today.blocking',
-            timingLabel: 'GAS API初回取得'
-          });
-        } catch (error) {
-          if (renewLiffSessionForAuthError(error)) {
-            return;
-          }
-          throw error;
-        }
+        throw error;
       }
       startConsistencyRefresh();
     } catch (error) {

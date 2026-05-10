@@ -6,12 +6,156 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function adminPath(storeId) {
+      return /databases/$(database)/documents/stores/$(storeId)/admins/$(request.auth.uid);
+    }
+
+    function isStoreAdmin(storeId) {
+      return isSignedIn() && exists(adminPath(storeId));
+    }
+
     function isSafeText(value, maxLength) {
       return value is string && value.size() <= maxLength;
     }
 
+    function isValidPeriod(value) {
+      return value == 'daily' || value == 'weekly' || value == 'monthly';
+    }
+
     function isValidItemStatus(value) {
       return value == 'checked' || value == 'unchecked';
+    }
+
+    function isValidTaskData(data) {
+      return data.keys().hasOnly([
+          'id',
+          'title',
+          'description',
+          'period',
+          'sortOrder',
+          'isActive',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isSafeText(data.id, 120)
+        && isSafeText(data.title, 120)
+        && isSafeText(data.description, 500)
+        && isValidPeriod(data.period)
+        && data.sortOrder is number
+        && data.isActive is bool;
+    }
+
+    function isValidTemplateData(data) {
+      return data.keys().hasOnly([
+          'id',
+          'name',
+          'period',
+          'isActive',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isSafeText(data.id, 120)
+        && isSafeText(data.name, 120)
+        && isValidPeriod(data.period)
+        && data.isActive is bool;
+    }
+
+    function isValidTemplateItemData(data) {
+      return data.keys().hasOnly([
+          'taskId',
+          'sortOrder',
+          'isActive',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isSafeText(data.taskId, 120)
+        && data.sortOrder is number
+        && data.isActive is bool;
+    }
+
+    function isValidRunData(storeId, targetDate, data) {
+      return data.keys().hasOnly([
+          'id',
+          'storeId',
+          'targetDate',
+          'templateId',
+          'storeName',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.id == targetDate
+        && data.storeId == storeId
+        && data.targetDate == targetDate
+        && (!data.keys().hasAny(['templateId']) || isSafeText(data.templateId, 120))
+        && (!data.keys().hasAny(['storeName']) || isSafeText(data.storeName, 120))
+        && isSafeText(data.status, 40);
+    }
+
+    function isValidRunItemData(data) {
+      return data.keys().hasOnly([
+          'id',
+          'templateItemId',
+          'title',
+          'description',
+          'period',
+          'sortOrder',
+          'status',
+          'checkedBy',
+          'checkedByUserId',
+          'checkedAt',
+          'updatedAt',
+          'isActive'
+        ])
+        && isSafeText(data.id, 120)
+        && isSafeText(data.templateItemId, 120)
+        && isSafeText(data.title, 120)
+        && isSafeText(data.description, 500)
+        && isValidPeriod(data.period)
+        && data.sortOrder is number
+        && isValidItemStatus(data.status)
+        && isSafeText(data.checkedBy, 80)
+        && isSafeText(data.checkedByUserId, 128)
+        && isSafeText(data.checkedAt, 40)
+        && isSafeText(data.updatedAt, 40)
+        && data.isActive is bool;
+    }
+
+    function isValidEmployeeItemUpdate() {
+      let data = request.resource.data;
+      let before = resource.data;
+      return data.diff(before).affectedKeys().hasOnly([
+          'status',
+          'checkedBy',
+          'checkedByUserId',
+          'checkedAt',
+          'updatedAt'
+        ])
+        && isValidRunItemData(data)
+        && (
+          (data.status == 'checked'
+            && data.checkedBy != ''
+            && data.checkedByUserId == request.auth.uid
+            && data.checkedAt != '')
+          || (data.status == 'unchecked'
+            && data.checkedBy == ''
+            && data.checkedByUserId == ''
+            && data.checkedAt == '')
+        );
+    }
+
+    function isValidUserProfile(uid, data) {
+      return uid == request.auth.uid
+        && data.keys().hasOnly([
+          'uid',
+          'liffUserId',
+          'displayName',
+          'updatedAt',
+          'lastSeenAt'
+        ])
+        && data.uid == uid
+        && isSafeText(data.liffUserId, 128)
+        && isSafeText(data.displayName, 120);
     }
 
     function isValidChecklistEvent(storeId, targetDate) {
@@ -40,8 +184,7 @@ service cloud.firestore {
         && isSafeText(data.checkedByUserId, 128)
         && isSafeText(data.checkedAt, 40)
         && data.updatedAt == request.time
-        && isSafeText(data.sourceUserId, 128)
-        && data.sourceUserId != ''
+        && data.sourceUserId == request.auth.uid
         && isSafeText(data.sourceClientId, 128)
         && data.sourceClientId != ''
         && data.emittedAt == request.time
@@ -59,7 +202,7 @@ service cloud.firestore {
 
     function isValidTemplateInsertEvent(storeId, targetDate) {
       let data = request.resource.data;
-      return isSignedIn()
+      return isStoreAdmin(storeId)
         && data.keys().hasOnly([
           'type',
           'runId',
@@ -77,12 +220,11 @@ service cloud.firestore {
         && data.targetDate == targetDate
         && (!data.keys().hasAny(['runId']) || isSafeText(data.runId, 80))
         && isSafeText(data.templateId, 120)
-        && isSafeText(data.period, 20)
+        && isValidPeriod(data.period)
         && data.items is list
         && data.items.size() > 0
         && data.items.size() <= 30
-        && isSafeText(data.sourceUserId, 128)
-        && data.sourceUserId != ''
+        && data.sourceUserId == request.auth.uid
         && isSafeText(data.sourceClientId, 128)
         && data.sourceClientId != ''
         && data.emittedAt == request.time;
@@ -90,7 +232,7 @@ service cloud.firestore {
 
     function isValidItemDeleteEvent(storeId, targetDate) {
       let data = request.resource.data;
-      return isSignedIn()
+      return isStoreAdmin(storeId)
         && data.keys().hasOnly([
           'type',
           'runId',
@@ -108,24 +250,71 @@ service cloud.firestore {
         && (!data.keys().hasAny(['runId']) || isSafeText(data.runId, 80))
         && isSafeText(data.itemId, 120)
         && data.updatedAt == request.time
-        && isSafeText(data.sourceUserId, 128)
-        && data.sourceUserId != ''
+        && data.sourceUserId == request.auth.uid
         && isSafeText(data.sourceClientId, 128)
         && data.sourceClientId != ''
         && data.emittedAt == request.time;
     }
 
-    match /stores/{storeId}/runs/{targetDate}/events/{eventId} {
+    match /stores/{storeId} {
       allow read: if isSignedIn();
-      allow create: if isValidChecklistEvent(storeId, targetDate)
-        || isValidTemplateInsertEvent(storeId, targetDate)
-        || isValidItemDeleteEvent(storeId, targetDate);
-      allow update, delete: if false;
-    }
+      allow write: if false;
 
-    match /stores/{storeId}/runs/{targetDate}/snapshots/{snapshotId} {
-      allow read: if snapshotId == 'today';
-      allow create, update, delete: if false;
+      match /admins/{uid} {
+        allow read: if isStoreAdmin(storeId);
+        allow write: if false;
+      }
+
+      match /users/{uid} {
+        allow read: if isStoreAdmin(storeId) || (isSignedIn() && uid == request.auth.uid);
+        allow create, update: if isSignedIn() && isValidUserProfile(uid, request.resource.data);
+        allow delete: if false;
+      }
+
+      match /tasks/{taskId} {
+        allow read: if isSignedIn();
+        allow create, update: if isStoreAdmin(storeId) && isValidTaskData(request.resource.data);
+        allow delete: if false;
+      }
+
+      match /templates/{templateId} {
+        allow read: if isSignedIn();
+        allow create, update: if isStoreAdmin(storeId) && isValidTemplateData(request.resource.data);
+        allow delete: if false;
+
+        match /items/{itemId} {
+          allow read: if isSignedIn();
+          allow create, update: if isStoreAdmin(storeId) && isValidTemplateItemData(request.resource.data);
+          allow delete: if false;
+        }
+      }
+
+      match /runs/{targetDate} {
+        allow read: if isSignedIn();
+        allow create, update: if isStoreAdmin(storeId) && isValidRunData(storeId, targetDate, request.resource.data);
+        allow delete: if false;
+
+        match /items/{itemId} {
+          allow read: if isSignedIn();
+          allow create: if isStoreAdmin(storeId) && isValidRunItemData(request.resource.data);
+          allow update: if (isStoreAdmin(storeId) && isValidRunItemData(request.resource.data))
+            || (isSignedIn() && isValidEmployeeItemUpdate());
+          allow delete: if false;
+        }
+
+        match /events/{eventId} {
+          allow read: if isSignedIn();
+          allow create: if isValidChecklistEvent(storeId, targetDate)
+            || isValidTemplateInsertEvent(storeId, targetDate)
+            || isValidItemDeleteEvent(storeId, targetDate);
+          allow update, delete: if false;
+        }
+
+        match /snapshots/{snapshotId} {
+          allow read: if isSignedIn() && snapshotId == 'today';
+          allow write: if false;
+        }
+      }
     }
 
     match /{document=**} {

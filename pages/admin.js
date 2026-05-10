@@ -1,13 +1,11 @@
 (function (global) {
-  var ADMIN_SESSION_STORAGE_KEY = 'ogawaya:admin:session-token:v3';
   var CLIENT_ID_STORAGE_KEY = 'ogawaya:client-id';
   var JST_OFFSET_MS = 9 * 60 * 60 * 1000;
-  var TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS = 5;
-  var TEMPLATE_GAS_SYNC_BASE_DELAY_MS = 1000;
 
   var state = {
     config: null,
     token: '',
+    adminUser: null,
     storeId: '',
     selectedDate: '',
     calendarYear: 0,
@@ -83,10 +81,6 @@
     return TASK_PERIOD_LABELS[normalizeTaskPeriod(period)];
   }
 
-  function normalizeBaseUrl(value) {
-    return String(value || '').replace(/\/+$/, '');
-  }
-
   function decodeFirestoreValue(value) {
     if (!value || typeof value !== 'object') {
       return null;
@@ -147,21 +141,6 @@
       url += '&pageToken=' + encodeURIComponent(pageToken);
     }
     return url;
-  }
-
-  function appendQuery(url, query) {
-    var pairs = [];
-    Object.keys(query || {}).forEach(function (key) {
-      var value = query[key];
-      if (value == null || value === '') {
-        return;
-      }
-      pairs.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
-    });
-    if (pairs.length === 0) {
-      return url;
-    }
-    return url + (url.indexOf('?') >= 0 ? '&' : '?') + pairs.join('&');
   }
 
   function getClientInstanceId() {
@@ -350,18 +329,14 @@
       throw new Error('config.json の読み込みに失敗しました');
     }
     var config = await response.json();
-    var gasApiBaseUrl = normalizeBaseUrl(config.gasApiBaseUrl || '');
-    var functionsApiBaseUrl = normalizeBaseUrl(config.functionsApiBaseUrl || '');
     var defaultStoreId = String(config.defaultStoreId || '').trim();
-    if (!gasApiBaseUrl && !functionsApiBaseUrl) {
-      throw new Error('config.json の gasApiBaseUrl または functionsApiBaseUrl が未設定です');
-    }
     if (!defaultStoreId) {
       throw new Error('config.json の defaultStoreId が未設定です');
     }
+    if (!config.firebase || !config.firebase.projectId || !config.firebase.apiKey || !config.firebase.appId) {
+      throw new Error('config.json の firebase 設定が未設定です');
+    }
     return {
-      gasApiBaseUrl: gasApiBaseUrl,
-      functionsApiBaseUrl: functionsApiBaseUrl,
       defaultStoreId: defaultStoreId,
       enableRealtimeSync: config.enableRealtimeSync !== false,
       clientFirestoreWriteEnabled: config.clientFirestoreWriteEnabled === true,
@@ -397,18 +372,10 @@
       return Promise.reject(new Error('Firebase Auth SDK が読み込まれていません'));
     }
     var auth = global.firebase.auth();
-    if (auth.currentUser) {
-      return Promise.resolve(auth.currentUser);
+    if (!auth.currentUser) {
+      return Promise.reject(new Error('管理者ログインが必要です'));
     }
-    if (!state.firebaseAuthPromise) {
-      state.firebaseAuthPromise = auth.signInAnonymously().then(function (result) {
-        return result && result.user ? result.user : auth.currentUser;
-      }).catch(function (error) {
-        state.firebaseAuthPromise = null;
-        throw error;
-      });
-    }
-    return state.firebaseAuthPromise;
+    return Promise.resolve(auth.currentUser);
   }
 
   function getFirebaseIdToken() {
@@ -420,115 +387,55 @@
     });
   }
 
+  function waitForFirebaseAuthState() {
+    if (!initializeRealtimeClient()) {
+      return Promise.reject(new Error('Firebase が初期化されていません'));
+    }
+    var auth = global.firebase.auth();
+    if (auth.currentUser) {
+      return Promise.resolve(auth.currentUser);
+    }
+    return new Promise(function (resolve) {
+      var unsubscribe = auth.onAuthStateChanged(function (user) {
+        unsubscribe();
+        resolve(user || null);
+      });
+    });
+  }
+
+  function getStoreRef() {
+    return state.firestore.collection('stores').doc(state.storeId);
+  }
+
+  function toIso(value) {
+    if (!value) {
+      return '';
+    }
+    if (typeof value.toDate === 'function') {
+      return value.toDate().toISOString();
+    }
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    return String(value || '');
+  }
+
+  async function requireAdminUser(user) {
+    var firebaseUser = user || await ensureFirebaseAuthSession();
+    var adminDoc = await getStoreRef().collection('admins').doc(firebaseUser.uid).get();
+    if (!adminDoc.exists) {
+      throw createApiError('管理者権限がありません', 403, 'forbidden');
+    }
+    state.adminUser = firebaseUser;
+    state.token = firebaseUser.uid;
+    return firebaseUser;
+  }
+
   function createApiError(message, statusCode, code) {
     var error = new Error(message);
     error.statusCode = Number(statusCode || 500);
     error.code = String(code || '');
     return error;
-  }
-
-  async function apiRequest(method, path, body, options) {
-    var requestOptions = options || {};
-    if (state.config.functionsApiBaseUrl) {
-      return functionsApiRequest(method, path, body, requestOptions);
-    }
-    var query = Object.assign({}, requestOptions.query || {}, {
-      path: String(path || '').replace(/^\/+/, '')
-    });
-    if (requestOptions.auth !== false) {
-      if (!state.token) {
-        throw createApiError('管理者ログインが必要です', 401, 'unauthorized');
-      }
-      query.adminToken = state.token;
-    }
-    if (method !== 'GET') {
-      query._method = method;
-    }
-    if (body && typeof body === 'object' && Object.keys(body).length > 0) {
-      query._payload = JSON.stringify(body);
-    }
-    var url = appendQuery(state.config.gasApiBaseUrl, query);
-    var response = await fetch(url, {
-      method: 'GET',
-      cache: 'no-store'
-    });
-    var raw = await response.text();
-    var json = {};
-    try {
-      json = JSON.parse(raw);
-    } catch (error) {
-      throw createApiError('API 応答の解析に失敗しました', response.status || 500, 'invalid_response');
-    }
-    var statusCode = typeof json.statusCode === 'number' ? json.statusCode : response.status;
-    if (!json.ok || statusCode >= 400) {
-      throw createApiError(
-        json.message || 'API 実行に失敗しました',
-        statusCode,
-        json.code || ''
-      );
-    }
-    return json;
-  }
-
-  function mapFunctionsApiPath(path) {
-    var normalized = '/' + String(path || '').replace(/^\/+/, '');
-    var mappings = [
-      [/^\/api\/admin\/login$/, '/v1/admin/login'],
-      [/^\/api\/admin\/tasks$/, '/v1/admin/tasks'],
-      [/^\/api\/admin\/templates$/, '/v1/admin/templates'],
-      [/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})$/, '/v1/admin/runs/$1'],
-      [/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/items:insert$/, '/v1/admin/runs/$1/items:insert'],
-      [/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/templates\/([^/]+):apply$/, '/v1/admin/runs/$1/templates/$2:apply'],
-      [/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/items\/([^/]+)$/, '/v1/admin/runs/$1/items/$2']
-    ];
-    for (var index = 0; index < mappings.length; index += 1) {
-      if (mappings[index][0].test(normalized)) {
-        return normalized.replace(mappings[index][0], mappings[index][1]);
-      }
-    }
-    throw createApiError('Firebase Functions 未対応の API です: ' + normalized, 500, 'unsupported_api');
-  }
-
-  async function functionsApiRequest(method, path, body, options) {
-    var requestOptions = options || {};
-    var query = Object.assign({}, requestOptions.query || {});
-    if (state.config.defaultStoreId && !query.storeId) {
-      query.storeId = state.config.defaultStoreId;
-    }
-    var requestPath = mapFunctionsApiPath(path);
-    var requestUrl = appendQuery(state.config.functionsApiBaseUrl + requestPath, query);
-    var fetchOptions = {
-      method: method,
-      cache: 'no-store',
-      headers: {}
-    };
-    if (requestOptions.auth !== false) {
-      if (!state.token) {
-        throw createApiError('管理者ログインが必要です', 401, 'unauthorized');
-      }
-      fetchOptions.headers.Authorization = 'Bearer ' + state.token;
-    }
-    if (method !== 'GET' && method !== 'DELETE') {
-      fetchOptions.headers['Content-Type'] = 'application/json';
-      fetchOptions.body = JSON.stringify(body || {});
-    }
-    var response = await fetch(requestUrl, fetchOptions);
-    var raw = await response.text();
-    var json = {};
-    try {
-      json = JSON.parse(raw);
-    } catch (error) {
-      throw createApiError('API 応答の解析に失敗しました', response.status || 500, 'invalid_response');
-    }
-    var statusCode = typeof json.statusCode === 'number' ? json.statusCode : response.status;
-    if (!json.ok || statusCode >= 400) {
-      throw createApiError(
-        json.message || 'API 実行に失敗しました',
-        statusCode,
-        json.code || ''
-      );
-    }
-    return json;
   }
 
   function fillSelectOptions(selectElement, options) {
@@ -1143,7 +1050,7 @@
           updatedAt: item.updatedAt || ''
         };
       }),
-      sourceUserId: 'admin:' + state.storeId,
+      sourceUserId: state.adminUser ? String(state.adminUser.uid || '') : '',
       sourceClientId: getClientInstanceId(),
       emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -1179,7 +1086,7 @@
       targetDate: targetDate,
       itemId: runItemId,
       updatedAt: global.firebase.firestore.FieldValue.serverTimestamp(),
-      sourceUserId: 'admin:' + state.storeId,
+      sourceUserId: state.adminUser ? String(state.adminUser.uid || '') : '',
       sourceClientId: getClientInstanceId(),
       emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -1415,16 +1322,7 @@
     return loadTemplateInsertEventsFromFirestore(targetDate).then(function (events) {
       events.forEach(function (eventPayload) {
         if (eventPayload.type === 'template_insert') {
-          var addedItems = applyTemplateInsertEventToRunItems(eventPayload, targetDate);
-          if (addedItems.length > 0 && eventPayload.templateId) {
-            syncTemplateInsertViaGasInBackground(
-              targetDate,
-              String(eventPayload.templateId),
-              normalizeTaskPeriod(eventPayload.period),
-              addedItems,
-              0
-            );
-          }
+          applyTemplateInsertEventToRunItems(eventPayload, targetDate);
           return;
         }
         if (eventPayload.type === 'item_delete') {
@@ -1436,84 +1334,6 @@
     });
   }
 
-  function buildTemplateClientItems(items) {
-    return (items || []).map(function (item) {
-      return {
-        id: item.id,
-        templateItemId: item.templateItemId
-      };
-    });
-  }
-
-  function applyTemplateInsertGasResponse(targetDate, response, items) {
-    var responseTargetDate = String((response && response.targetDate) || targetDate || '');
-    rememberRunMetadataForDate(responseTargetDate, response);
-    if (response && Array.isArray(response.items) && response.items.length > 0) {
-      appendRunItemsForDate(responseTargetDate, response.items);
-      return;
-    }
-    markRunItemsSavedForDate(responseTargetDate, items.map(function (item) {
-      return item.id;
-    }));
-  }
-
-  function syncTemplateInsertViaGas(targetDate, templateId, period, items) {
-    return apiRequest(
-      'POST',
-      '/api/admin/runs/' + encodeURIComponent(targetDate) + '/templates/' + encodeURIComponent(templateId) + ':apply',
-      {
-        period: normalizeTaskPeriod(period),
-        clientItems: buildTemplateClientItems(items)
-      }
-    ).then(function (response) {
-      applyTemplateInsertGasResponse(targetDate, response, items);
-      return response;
-    });
-  }
-
-  function syncTemplateInsertViaGasInBackground(targetDate, templateId, period, items, attempt) {
-    var currentAttempt = Number(attempt || 0);
-    syncTemplateInsertViaGas(targetDate, templateId, period, items).then(function (response) {
-      var responseTargetDate = String((response && response.targetDate) || targetDate || '');
-      if (responseTargetDate === state.selectedDate) {
-        setStatus('テンプレートを保存しました');
-      }
-    }).catch(function (error) {
-      if (currentAttempt + 1 < TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS) {
-        global.setTimeout(function () {
-          syncTemplateInsertViaGasInBackground(targetDate, templateId, period, items, currentAttempt + 1);
-        }, TEMPLATE_GAS_SYNC_BASE_DELAY_MS * Math.pow(2, currentAttempt));
-        return;
-      }
-      setError(error && error.message
-        ? 'テンプレートの保存に失敗しました: ' + String(error.message)
-        : 'テンプレートの保存に失敗しました');
-    });
-  }
-
-  function deleteRunItemViaGas(targetDate, runItemId) {
-    return apiRequest(
-      'DELETE',
-      '/api/admin/runs/' + encodeURIComponent(targetDate) + '/items/' + encodeURIComponent(runItemId),
-      null
-    );
-  }
-
-  function syncRunItemDeleteViaGasInBackground(targetDate, runItemId, attempt) {
-    var currentAttempt = Number(attempt || 0);
-    deleteRunItemViaGas(targetDate, runItemId).catch(function (error) {
-      if (currentAttempt + 1 < TEMPLATE_GAS_SYNC_RETRY_MAX_ATTEMPTS) {
-        global.setTimeout(function () {
-          syncRunItemDeleteViaGasInBackground(targetDate, runItemId, currentAttempt + 1);
-        }, TEMPLATE_GAS_SYNC_BASE_DELAY_MS * Math.pow(2, currentAttempt));
-        return;
-      }
-      setError(error && error.message
-        ? 'タスク削除の保存に失敗しました: ' + String(error.message)
-        : 'タスク削除の保存に失敗しました');
-    });
-  }
-
   function removeCurrentRunItem(runItemId) {
     var existingItems = state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : [];
     updateCurrentChecklistItems(existingItems.filter(function (item) {
@@ -1521,15 +1341,149 @@
     }));
   }
 
+  function normalizeTaskDoc(doc) {
+    var data = doc.data() || {};
+    return {
+      id: doc.id,
+      title: String(data.title || ''),
+      description: String(data.description || ''),
+      period: normalizeTaskPeriod(data.period),
+      sortOrder: Number(data.sortOrder || 0),
+      isActive: data.isActive !== false
+    };
+  }
+
+  function normalizeRunItemDoc(doc) {
+    var data = doc.data() || {};
+    return {
+      id: doc.id,
+      templateItemId: String(data.templateItemId || ''),
+      title: String(data.title || ''),
+      description: String(data.description || ''),
+      period: normalizeTaskPeriod(data.period),
+      sortOrder: Number(data.sortOrder || 0),
+      status: data.status === 'checked' ? 'checked' : 'unchecked',
+      checkedBy: data.checkedBy ? String(data.checkedBy) : null,
+      checkedByUserId: data.checkedByUserId ? String(data.checkedByUserId) : null,
+      checkedAt: data.checkedAt ? toIso(data.checkedAt) : null,
+      updatedAt: data.updatedAt ? toIso(data.updatedAt) : null,
+      pendingSave: false
+    };
+  }
+
+  function buildRunItemFromTask(task, itemId, sortOrder) {
+    var now = new Date().toISOString();
+    return {
+      id: itemId,
+      templateItemId: '',
+      title: task.title,
+      description: task.description,
+      period: normalizeTaskPeriod(task.period),
+      sortOrder: Number(sortOrder || task.sortOrder || 0),
+      status: 'unchecked',
+      checkedBy: null,
+      checkedByUserId: null,
+      checkedAt: null,
+      updatedAt: now,
+      pendingSave: false
+    };
+  }
+
+  async function ensureRunDocument(targetDate) {
+    var runRef = getStoreRef().collection('runs').doc(targetDate);
+    await runRef.set({
+      id: targetDate,
+      storeId: state.storeId,
+      targetDate: targetDate,
+      status: 'open',
+      updatedAt: global.firebase.firestore.FieldValue.serverTimestamp(),
+      createdAt: global.firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    return runRef;
+  }
+
+  function writeRunItemDoc(targetDate, item) {
+    return getStoreRef()
+      .collection('runs')
+      .doc(targetDate)
+      .collection('items')
+      .doc(item.id)
+      .set({
+        id: item.id,
+        templateItemId: item.templateItemId || '',
+        title: item.title,
+        description: item.description || '',
+        period: normalizeTaskPeriod(item.period),
+        sortOrder: Number(item.sortOrder || 0),
+        status: item.status || 'unchecked',
+        checkedBy: item.checkedBy || '',
+        checkedByUserId: item.checkedByUserId || '',
+        checkedAt: item.checkedAt || '',
+        updatedAt: item.updatedAt || new Date().toISOString(),
+        isActive: true
+      }, { merge: true });
+  }
+
   async function loadTasks() {
-    var response = await apiRequest('GET', '/api/admin/tasks', null);
-    state.tasks = sortTasksBySortOrder(Array.isArray(response.tasks) ? response.tasks : []);
+    await requireAdminUser();
+    var snapshot = await getStoreRef().collection('tasks').get();
+    var tasks = [];
+    snapshot.forEach(function (doc) {
+      var task = normalizeTaskDoc(doc);
+      if (task.isActive) {
+        tasks.push(task);
+      }
+    });
+    state.tasks = sortTasksBySortOrder(tasks);
     renderTaskSelector();
   }
 
   async function loadTemplates() {
-    var response = await apiRequest('GET', '/api/admin/templates', null);
-    state.templates = Array.isArray(response.templates) ? response.templates : [];
+    await requireAdminUser();
+    var taskMap = {};
+    state.tasks.forEach(function (task) {
+      taskMap[task.id] = task;
+    });
+    var snapshot = await getStoreRef().collection('templates').get();
+    var templates = [];
+    await Promise.all(snapshot.docs.map(async function (doc) {
+      var data = doc.data() || {};
+      if (data.isActive === false) {
+        return;
+      }
+      var itemSnapshot = await doc.ref.collection('items').get();
+      var items = [];
+      itemSnapshot.forEach(function (itemDoc) {
+        var itemData = itemDoc.data() || {};
+        if (itemData.isActive === false) {
+          return;
+        }
+        var task = taskMap[String(itemData.taskId || '')];
+        if (!task) {
+          return;
+        }
+        items.push({
+          id: itemDoc.id,
+          taskId: task.id,
+          title: task.title,
+          description: task.description,
+          period: normalizeTaskPeriod(task.period),
+          sortOrder: Number(itemData.sortOrder || 0)
+        });
+      });
+      items.sort(function (left, right) {
+        return Number(left.sortOrder || 0) - Number(right.sortOrder || 0);
+      });
+      templates.push({
+        id: doc.id,
+        name: String(data.name || ''),
+        period: normalizeTaskPeriod(data.period),
+        items: items
+      });
+    }));
+    state.templates = templates.sort(function (left, right) {
+      return left.name.localeCompare(right.name);
+    });
     renderTemplateSelector();
   }
 
@@ -1543,11 +1497,30 @@
     state.checklist = cachedChecklist || null;
     renderRunItems();
     try {
-      var response = await apiRequest('GET', '/api/admin/runs/' + encodeURIComponent(targetDate), null);
+      await requireAdminUser();
+      var runDoc = await getStoreRef().collection('runs').doc(targetDate).get();
+      var itemSnapshot = await getStoreRef().collection('runs').doc(targetDate).collection('items').get();
       if (requestId !== state.runItemsRequestId || targetDate !== state.selectedDate) {
         return;
       }
-      state.checklist = response.checklist || null;
+      var items = [];
+      itemSnapshot.forEach(function (doc) {
+        var data = doc.data() || {};
+        if (data.isActive === false) {
+          return;
+        }
+        items.push(normalizeRunItemDoc(doc));
+      });
+      items.sort(function (left, right) {
+        return Number(left.sortOrder || 0) - Number(right.sortOrder || 0);
+      });
+      var run = runDoc.exists ? runDoc.data() || {} : {};
+      state.checklist = {
+        runId: String(run.id || targetDate),
+        targetDate: targetDate,
+        status: String(run.status || 'open'),
+        items: items
+      };
       rememberRunItems(targetDate, state.checklist);
       await restoreTemplateInsertEventsForDate(targetDate);
       if (requestId !== state.runItemsRequestId || targetDate !== state.selectedDate) {
@@ -1575,11 +1548,21 @@
     if (!title) {
       throw new Error('タスク名を入力してください');
     }
-    var response = await apiRequest('POST', '/api/admin/tasks', {
+    await requireAdminUser();
+    var taskRef = getStoreRef().collection('tasks').doc();
+    var sortOrder = state.tasks.length + 1;
+    var task = {
+      id: taskRef.id,
       title: title,
       description: description,
-      period: period
-    });
+      period: period,
+      sortOrder: sortOrder,
+      isActive: true
+    };
+    await taskRef.set(Object.assign({}, task, {
+      createdAt: global.firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: global.firebase.firestore.FieldValue.serverTimestamp()
+    }));
     if (elements.taskTitleInput) {
       elements.taskTitleInput.value = '';
     }
@@ -1589,11 +1572,7 @@
     if (elements.taskPeriodInput) {
       elements.taskPeriodInput.value = 'daily';
     }
-    if (response.task) {
-      upsertTask(response.task);
-    } else {
-      await loadTasks();
-    }
+    upsertTask(task);
     setStatus('タスクを作成しました');
   }
 
@@ -1609,18 +1588,14 @@
       throw new Error('挿入するタスクが見つかりません');
     }
     var targetDate = getInsertTargetDateForTask(task);
-    var response = await apiRequest(
-      'POST',
-      '/api/admin/runs/' + encodeURIComponent(targetDate) + '/items:insert',
-      {
-        taskId: taskId
-      }
-    );
-    if (response.item) {
-      appendRunItemsForDate(targetDate, [response.item]);
-    } else if (targetDate === state.selectedDate) {
-      await loadRunItems({ preferCache: false, targetDate: targetDate });
-    }
+    await requireAdminUser();
+    await ensureRunDocument(targetDate);
+    var itemRef = getStoreRef().collection('runs').doc(targetDate).collection('items').doc();
+    var cachedChecklist = getCachedRunItems(targetDate);
+    var cachedItems = cachedChecklist && Array.isArray(cachedChecklist.items) ? cachedChecklist.items : [];
+    var item = buildRunItemFromTask(task, itemRef.id, cachedItems.length + 1);
+    await writeRunItemDoc(targetDate, item);
+    appendRunItemsForDate(targetDate, [item]);
     if (targetDate !== state.selectedDate) {
       await selectDate(targetDate);
     }
@@ -1639,19 +1614,29 @@
     if (taskIds.length === 0) {
       throw new Error('テンプレートへ含めるタスクを1件以上選択してください');
     }
-    var response = await apiRequest('POST', '/api/admin/templates', {
+    await requireAdminUser();
+    var templateRef = getStoreRef().collection('templates').doc();
+    await templateRef.set({
+      id: templateRef.id,
       name: templateName,
       period: templatePeriod,
-      taskIds: taskIds
+      isActive: true,
+      createdAt: global.firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: global.firebase.firestore.FieldValue.serverTimestamp()
     });
+    await Promise.all(taskIds.map(function (taskId, index) {
+      return templateRef.collection('items').doc().set({
+        taskId: taskId,
+        sortOrder: index + 1,
+        isActive: true,
+        createdAt: global.firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: global.firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }));
     if (elements.templateNameInput) {
       elements.templateNameInput.value = '';
     }
-    if (response.template) {
-      upsertTemplate(response.template);
-    } else {
-      await loadTemplates();
-    }
+    await loadTemplates();
     setStatus('テンプレートを作成しました');
   }
 
@@ -1674,10 +1659,12 @@
     }
     appendCurrentRunItems(optimisticItems);
     setStatus('テンプレートを挿入しました。保存しています...');
+    await requireAdminUser();
+    await ensureRunDocument(targetDate);
+    await Promise.all(optimisticItems.map(function (item) {
+      return writeRunItemDoc(targetDate, item);
+    }));
     await writeTemplateInsertEvent(targetDate, template.id, templatePeriod, optimisticItems);
-    if (!state.config.functionsApiBaseUrl) {
-      syncTemplateInsertViaGasInBackground(targetDate, template.id, templatePeriod, optimisticItems, 0);
-    }
     setStatus('テンプレートを保存しました');
   }
 
@@ -1687,14 +1674,17 @@
     var previousChecklist = state.checklist;
     removeCurrentRunItem(runItemId);
     try {
-      if (state.config.clientFirestoreWriteEnabled === true) {
-        await writeRunItemDeleteEvent(state.selectedDate, runItemId);
-        if (!state.config.functionsApiBaseUrl) {
-          syncRunItemDeleteViaGasInBackground(state.selectedDate, runItemId, 0);
-        }
-      } else {
-        await deleteRunItemViaGas(state.selectedDate, runItemId);
-      }
+      await requireAdminUser();
+      await getStoreRef()
+        .collection('runs')
+        .doc(state.selectedDate)
+        .collection('items')
+        .doc(runItemId)
+        .set({
+          isActive: false,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      await writeRunItemDeleteEvent(state.selectedDate, runItemId);
       setStatus('タスクを削除しました');
     } catch (error) {
       state.checklist = previousChecklist;
@@ -1726,8 +1716,8 @@
   }
 
   async function initializeAfterLogin() {
+    await loadTasks();
     await Promise.all([
-      loadTasks(),
       loadTemplates(),
       loadRunItems()
     ]);
@@ -1741,33 +1731,23 @@
     if (!loginId || !password) {
       throw new Error('管理者IDとパスワードを入力してください');
     }
-    var response = await apiRequest(
-      'POST',
-      '/api/admin/login',
-      {
-        loginId: loginId,
-        password: password,
-        storeId: state.config.defaultStoreId
-      },
-      { auth: false }
-    );
-    state.token = String(response.session && response.session.token ? response.session.token : '');
-    if (!state.token) {
-      throw new Error('ログインに失敗しました');
+    if (!initializeRealtimeClient() || !global.firebase || typeof global.firebase.auth !== 'function') {
+      throw new Error('Firebase Auth が初期化されていません');
     }
-    safeSetStorage(ADMIN_SESSION_STORAGE_KEY, state.token);
+    var result = await global.firebase.auth().signInWithEmailAndPassword(loginId, password);
+    await requireAdminUser(result && result.user ? result.user : global.firebase.auth().currentUser);
     setAuthenticated(true);
     await initializeAfterLogin();
     clearStatus();
   }
 
   async function restoreSession() {
-    var token = safeGetStorage(ADMIN_SESSION_STORAGE_KEY);
-    if (!token) {
+    var user = await waitForFirebaseAuthState();
+    if (!user) {
       return false;
     }
-    state.token = token;
     try {
+      await requireAdminUser(user);
       await Promise.all([
         loadTasks(),
         loadTemplates(),
@@ -1777,7 +1757,6 @@
       return true;
     } catch (error) {
       state.token = '';
-      safeRemoveStorage(ADMIN_SESSION_STORAGE_KEY);
       setAuthenticated(false);
       return false;
     }
@@ -1785,7 +1764,10 @@
 
   function logout() {
     state.token = '';
-    safeRemoveStorage(ADMIN_SESSION_STORAGE_KEY);
+    state.adminUser = null;
+    if (global.firebase && typeof global.firebase.auth === 'function') {
+      global.firebase.auth().signOut();
+    }
     setAuthenticated(false);
     clearStatus();
     if (elements.loginPasswordInput) {

@@ -1,0 +1,28 @@
+name: Daily start
+
+on:
+  schedule:
+    - cron: '35 1 * * *'
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: 'YYYY-MM-DD。空ならJST当日'
+        required: false
+        type: string
+
+jobs:
+  daily-start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: node scripts/daily-start.mjs
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          STORE_ID: ${{ vars.STORE_ID || 'store-hashimoto' }}
+          TARGET_DATE: ${{ inputs.target_date }}
