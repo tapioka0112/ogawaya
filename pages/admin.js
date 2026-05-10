@@ -351,15 +351,17 @@
     }
     var config = await response.json();
     var gasApiBaseUrl = normalizeBaseUrl(config.gasApiBaseUrl || '');
+    var functionsApiBaseUrl = normalizeBaseUrl(config.functionsApiBaseUrl || '');
     var defaultStoreId = String(config.defaultStoreId || '').trim();
-    if (!gasApiBaseUrl) {
-      throw new Error('config.json の gasApiBaseUrl が未設定です');
+    if (!gasApiBaseUrl && !functionsApiBaseUrl) {
+      throw new Error('config.json の gasApiBaseUrl または functionsApiBaseUrl が未設定です');
     }
     if (!defaultStoreId) {
       throw new Error('config.json の defaultStoreId が未設定です');
     }
     return {
       gasApiBaseUrl: gasApiBaseUrl,
+      functionsApiBaseUrl: functionsApiBaseUrl,
       defaultStoreId: defaultStoreId,
       enableRealtimeSync: config.enableRealtimeSync !== false,
       clientFirestoreWriteEnabled: config.clientFirestoreWriteEnabled === true,
@@ -427,6 +429,9 @@
 
   async function apiRequest(method, path, body, options) {
     var requestOptions = options || {};
+    if (state.config.functionsApiBaseUrl) {
+      return functionsApiRequest(method, path, body, requestOptions);
+    }
     var query = Object.assign({}, requestOptions.query || {}, {
       path: String(path || '').replace(/^\/+/, '')
     });
@@ -447,6 +452,67 @@
       method: 'GET',
       cache: 'no-store'
     });
+    var raw = await response.text();
+    var json = {};
+    try {
+      json = JSON.parse(raw);
+    } catch (error) {
+      throw createApiError('API 応答の解析に失敗しました', response.status || 500, 'invalid_response');
+    }
+    var statusCode = typeof json.statusCode === 'number' ? json.statusCode : response.status;
+    if (!json.ok || statusCode >= 400) {
+      throw createApiError(
+        json.message || 'API 実行に失敗しました',
+        statusCode,
+        json.code || ''
+      );
+    }
+    return json;
+  }
+
+  function mapFunctionsApiPath(path) {
+    var normalized = '/' + String(path || '').replace(/^\/+/, '');
+    var mappings = [
+      [/^\/api\/admin\/login$/, '/v1/admin/login'],
+      [/^\/api\/admin\/tasks$/, '/v1/admin/tasks'],
+      [/^\/api\/admin\/templates$/, '/v1/admin/templates'],
+      [/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})$/, '/v1/admin/runs/$1'],
+      [/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/items:insert$/, '/v1/admin/runs/$1/items:insert'],
+      [/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/templates\/([^/]+):apply$/, '/v1/admin/runs/$1/templates/$2:apply'],
+      [/^\/api\/admin\/runs\/(\d{4}-\d{2}-\d{2})\/items\/([^/]+)$/, '/v1/admin/runs/$1/items/$2']
+    ];
+    for (var index = 0; index < mappings.length; index += 1) {
+      if (mappings[index][0].test(normalized)) {
+        return normalized.replace(mappings[index][0], mappings[index][1]);
+      }
+    }
+    throw createApiError('Firebase Functions 未対応の API です: ' + normalized, 500, 'unsupported_api');
+  }
+
+  async function functionsApiRequest(method, path, body, options) {
+    var requestOptions = options || {};
+    var query = Object.assign({}, requestOptions.query || {});
+    if (state.config.defaultStoreId && !query.storeId) {
+      query.storeId = state.config.defaultStoreId;
+    }
+    var requestPath = mapFunctionsApiPath(path);
+    var requestUrl = appendQuery(state.config.functionsApiBaseUrl + requestPath, query);
+    var fetchOptions = {
+      method: method,
+      cache: 'no-store',
+      headers: {}
+    };
+    if (requestOptions.auth !== false) {
+      if (!state.token) {
+        throw createApiError('管理者ログインが必要です', 401, 'unauthorized');
+      }
+      fetchOptions.headers.Authorization = 'Bearer ' + state.token;
+    }
+    if (method !== 'GET' && method !== 'DELETE') {
+      fetchOptions.headers['Content-Type'] = 'application/json';
+      fetchOptions.body = JSON.stringify(body || {});
+    }
+    var response = await fetch(requestUrl, fetchOptions);
     var raw = await response.text();
     var json = {};
     try {
@@ -1060,14 +1126,10 @@
 
   function buildTemplateInsertEventPayload(targetDate, templateId, period, items) {
     var runId = state.checklist && state.checklist.runId ? String(state.checklist.runId) : '';
-    if (!runId) {
-      throw new Error('Firestore同期用のrunIdが未確定です');
-    }
-    return {
+    var payload = {
       type: 'template_insert',
       storeId: state.storeId,
       targetDate: targetDate,
-      runId: runId,
       templateId: templateId,
       period: normalizeTaskPeriod(period),
       items: items.map(function (item) {
@@ -1085,6 +1147,10 @@
       sourceClientId: getClientInstanceId(),
       emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
     };
+    if (runId) {
+      payload.runId = runId;
+    }
+    return payload;
   }
 
   function writeTemplateInsertEvent(targetDate, templateId, period, items) {
@@ -1102,6 +1168,42 @@
         .doc(targetDate)
         .collection('events')
         .add(buildTemplateInsertEventPayload(targetDate, templateId, period, items));
+    });
+  }
+
+  function buildRunItemDeleteEventPayload(targetDate, runItemId) {
+    var runId = state.checklist && state.checklist.runId ? String(state.checklist.runId) : '';
+    var payload = {
+      type: 'item_delete',
+      storeId: state.storeId,
+      targetDate: targetDate,
+      itemId: runItemId,
+      updatedAt: global.firebase.firestore.FieldValue.serverTimestamp(),
+      sourceUserId: 'admin:' + state.storeId,
+      sourceClientId: getClientInstanceId(),
+      emittedAt: global.firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (runId) {
+      payload.runId = runId;
+    }
+    return payload;
+  }
+
+  function writeRunItemDeleteEvent(targetDate, runItemId) {
+    if (!state.config || state.config.clientFirestoreWriteEnabled !== true) {
+      return Promise.reject(new Error('Firestore直接書き込みは無効です'));
+    }
+    if (!runItemId) {
+      return Promise.reject(new Error('削除対象のタスクが未確定です'));
+    }
+    return ensureFirebaseAuthSession().then(function () {
+      return state.firestore
+        .collection('stores')
+        .doc(state.storeId)
+        .collection('runs')
+        .doc(targetDate)
+        .collection('events')
+        .add(buildRunItemDeleteEventPayload(targetDate, runItemId));
     });
   }
 
@@ -1520,18 +1622,11 @@
     }
     appendCurrentRunItems(optimisticItems);
     setStatus('テンプレートを挿入しました。保存しています...');
-    if (!getRunIdForDate(targetDate)) {
-      await syncTemplateInsertViaGas(targetDate, template.id, templatePeriod, optimisticItems);
-      writeTemplateInsertEvent(targetDate, template.id, templatePeriod, optimisticItems).catch(function (error) {
-        console.error('[admin-sync] template_insert realtime write failed', error);
-      });
-      setStatus('テンプレートを保存しました');
-      return;
+    await writeTemplateInsertEvent(targetDate, template.id, templatePeriod, optimisticItems);
+    if (!state.config.functionsApiBaseUrl) {
+      syncTemplateInsertViaGasInBackground(targetDate, template.id, templatePeriod, optimisticItems, 0);
     }
-    writeTemplateInsertEvent(targetDate, template.id, templatePeriod, optimisticItems).catch(function (error) {
-      console.error('[admin-sync] template_insert realtime write failed', error);
-    });
-    syncTemplateInsertViaGasInBackground(targetDate, template.id, templatePeriod, optimisticItems, 0);
+    setStatus('テンプレートを保存しました');
   }
 
   async function deleteRunItem(runItemId) {
@@ -1540,11 +1635,15 @@
     var previousChecklist = state.checklist;
     removeCurrentRunItem(runItemId);
     try {
-      await apiRequest(
-        'DELETE',
-        '/api/admin/runs/' + encodeURIComponent(state.selectedDate) + '/items/' + encodeURIComponent(runItemId),
-        null
-      );
+      if (state.config.functionsApiBaseUrl) {
+        await writeRunItemDeleteEvent(state.selectedDate, runItemId);
+      } else {
+        await apiRequest(
+          'DELETE',
+          '/api/admin/runs/' + encodeURIComponent(state.selectedDate) + '/items/' + encodeURIComponent(runItemId),
+          null
+        );
+      }
       setStatus('タスクを削除しました');
     } catch (error) {
       state.checklist = previousChecklist;

@@ -783,6 +783,13 @@
           elements.statsContent.hidden = !isStats;
         }
         if (isStats) {
+          if (!state.statsData && state.checklist && state.checklist.targetDate) {
+            var checklistMonthMatch = String(state.checklist.targetDate).match(/^(\d{4})-(\d{2})-\d{2}$/);
+            if (checklistMonthMatch) {
+              state.statsYear = Number(checklistMonthMatch[1]);
+              state.statsMonth = Number(checklistMonthMatch[2]);
+            }
+          }
           updateMonthLabel();
           if (state.statsData) {
             renderStats();

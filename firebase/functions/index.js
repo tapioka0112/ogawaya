@@ -1,13 +1,11 @@
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onRequest } = require('firebase-functions/v2/https');
-const { defineSecret } = require('firebase-functions/params');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const crypto = require('node:crypto');
 
 initializeApp();
 const db = getFirestore();
-const firestoreEventSyncSecret = defineSecret('FIRESTORE_EVENT_SYNC_SECRET');
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const BUSINESS_DAY_CUTOFF_HOUR = 10;
@@ -51,7 +49,6 @@ const COLLECTIONS = {
 
 const SNAPSHOT_DOC_ID = 'today';
 const FIRESTORE_EVENT_DOCUMENT_PATH = 'stores/{storeId}/runs/{targetDate}/events/{eventId}';
-const GAS_FIRESTORE_EVENT_SYNC_PATH = '/api/internal/firestore-events:apply';
 
 class HttpError extends Error {
   constructor(statusCode, code, message) {
@@ -146,18 +143,6 @@ function readLineChannelId() {
 function readRequiredEnv(name) {
   const value = String(process.env[name] || '').trim();
   assert(value !== '', 500, 'config_error', `${name} が未設定です`);
-  return value;
-}
-
-function buildGasFirestoreEventSyncUrl() {
-  const url = new URL(readRequiredEnv('GAS_API_BASE_URL'));
-  url.searchParams.set('path', GAS_FIRESTORE_EVENT_SYNC_PATH);
-  return url.toString();
-}
-
-function readFirestoreEventSyncSecret() {
-  const value = String(firestoreEventSyncSecret.value() || process.env.FIRESTORE_EVENT_SYNC_SECRET || '').trim();
-  assert(value !== '', 500, 'config_error', 'FIRESTORE_EVENT_SYNC_SECRET が未設定です');
   return value;
 }
 
@@ -325,6 +310,7 @@ function normalizeRunItem(docSnapshot) {
     checkedByUserId: data.checkedByUserId ? String(data.checkedByUserId) : null,
     checkedAt: data.checkedAt ? String(data.checkedAt) : null,
     updatedAt: data.updatedAt ? String(data.updatedAt) : null,
+    templateItemId: data.templateItemId ? String(data.templateItemId) : '',
     isActive: data.isActive !== false
   };
 }
@@ -473,6 +459,10 @@ function buildChecklistResponse(storeId, storeName, businessDate, runData, curre
       return {
         id: item.id,
         title: item.title,
+        description: item.description,
+        period: item.period,
+        sortOrder: item.sortOrder,
+        templateItemId: item.templateItemId,
         status: item.status,
         checkedBy: item.checkedBy,
         checkedByUserId: item.checkedByUserId,
@@ -664,6 +654,7 @@ async function handleAdminCreateTemplate(req, body) {
   await requireAdminSession(req);
   const storeId = resolveStoreId(req, body);
   const name = normalizeString(body.name, 'name');
+  const period = normalizeTaskPeriod(body.period);
   const rawTaskIds = Array.isArray(body.taskIds) ? body.taskIds : [];
   const taskIds = [...new Set(rawTaskIds.map((value) => String(value || '').trim()).filter((value) => value !== ''))];
   assert(taskIds.length > 0, 400, 'invalid_request', 'taskIds は1件以上指定してください');
@@ -672,6 +663,12 @@ async function handleAdminCreateTemplate(req, body) {
   const activeTaskMap = new Map(tasks.map((task) => [task.id, task]));
   taskIds.forEach((taskId) => {
     assert(activeTaskMap.has(taskId), 400, 'invalid_request', `taskIds に存在しない taskId が含まれています: ${taskId}`);
+    assert(
+      normalizeTaskPeriod(activeTaskMap.get(taskId).period) === period,
+      400,
+      'invalid_request',
+      'template period と異なる period の taskIds は指定できません'
+    );
   });
 
   const templateRef = getTemplatesCollection(storeId).doc();
@@ -681,6 +678,7 @@ async function handleAdminCreateTemplate(req, body) {
     {
       id: templateRef.id,
       name,
+      period,
       isActive: true,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp()
@@ -726,6 +724,7 @@ async function handleAdminListTemplates(req, body) {
     templates.push({
       id: templateDoc.id,
       name: String(templateData.name || ''),
+      period: normalizeTaskPeriod(templateData.period),
       items: items.map((item) => {
         const task = taskMap.get(item.taskId);
         return {
@@ -827,6 +826,7 @@ async function handleAdminApplyTemplate(req, body, businessDate, templateId) {
   assert(templateSnap.exists, 404, 'not_found', 'テンプレートが見つかりません');
   const templateData = templateSnap.data() || {};
   assert(templateData.isActive !== false, 404, 'not_found', 'テンプレートが見つかりません');
+  const templatePeriod = normalizeTaskPeriod(body.period || templateData.period);
 
   const templateItems = await listActiveTemplateItems(storeId, templateId);
   const tasks = await listActiveTasks(storeId);
@@ -836,6 +836,9 @@ async function handleAdminApplyTemplate(req, body, businessDate, templateId) {
   for (const templateItem of templateItems) {
     const task = taskMap.get(templateItem.taskId);
     if (!task) {
+      continue;
+    }
+    if (normalizeTaskPeriod(task.period) !== templatePeriod) {
       continue;
     }
     const result = await insertTaskIntoRun(storeId, businessDate, task);
@@ -1118,6 +1121,131 @@ exports.api = onRequest(
   }
 );
 
+function normalizeEventTimestamp(value) {
+  const ms = parseTimestampMillis(value);
+  if (!ms) {
+    return new Date().toISOString();
+  }
+  return new Date(ms).toISOString();
+}
+
+function normalizeTemplateInsertEventItem(item) {
+  return {
+    id: normalizeString(item && item.id, 'event.items[].id'),
+    templateItemId: String(item && item.templateItemId ? item.templateItemId : '').trim(),
+    title: normalizeString(item && item.title, 'event.items[].title'),
+    description: String(item && item.description ? item.description : ''),
+    period: normalizeTaskPeriod(item && item.period),
+    sortOrder: Number(item && item.sortOrder ? item.sortOrder : 0),
+    updatedAt: normalizeEventTimestamp(item && item.updatedAt)
+  };
+}
+
+async function applyTemplateInsertEvent(storeId, targetDate, eventPayload) {
+  await ensureDailyRun(storeId, targetDate);
+  const rawItems = Array.isArray(eventPayload.items) ? eventPayload.items : [];
+  assert(rawItems.length > 0, 400, 'invalid_request', 'event.items は1件以上必要です');
+  const items = rawItems.map(normalizeTemplateInsertEventItem);
+  const existingItems = await listActiveRunItems(storeId, targetDate);
+  const existingIds = new Set(existingItems.map((entry) => entry.item.id));
+  const existingTemplateItemIds = new Set(existingItems.map((entry) => entry.item.templateItemId).filter((value) => value));
+  const batch = db.batch();
+  let insertedCount = 0;
+
+  items.forEach((item, index) => {
+    if (existingIds.has(item.id)) {
+      return;
+    }
+    if (item.templateItemId && existingTemplateItemIds.has(item.templateItemId)) {
+      return;
+    }
+    const itemRef = getDailyRunItemsCollection(storeId, targetDate).doc(item.id);
+    batch.set(
+      itemRef,
+      {
+        id: item.id,
+        templateItemId: item.templateItemId,
+        taskId: item.templateItemId,
+        title: item.title,
+        description: item.description,
+        period: item.period,
+        sortOrder: item.sortOrder || existingItems.length + index + 1,
+        status: ITEM_STATUS.UNCHECKED,
+        checkedByName: '',
+        checkedByUserId: '',
+        checkedAt: '',
+        updatedAt: item.updatedAt,
+        createdAt: item.updatedAt,
+        isActive: true
+      },
+      { merge: true }
+    );
+    insertedCount += 1;
+  });
+
+  if (insertedCount > 0) {
+    batch.set(getDailyRunRef(storeId, targetDate), { updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await batch.commit();
+    await writeSnapshotForRun(storeId, targetDate, { userId: 'admin', userName: '管理者' });
+  }
+  return { insertedCount };
+}
+
+async function applyItemStatusEvent(storeId, targetDate, eventPayload) {
+  const itemId = normalizeString(eventPayload.itemId, 'event.itemId');
+  const status = String(eventPayload.status || '').trim();
+  assert(status === ITEM_STATUS.CHECKED || status === ITEM_STATUS.UNCHECKED, 400, 'invalid_request', 'event.status が不正です');
+  const itemRef = getDailyRunItemsCollection(storeId, targetDate).doc(itemId);
+  const itemSnap = await itemRef.get();
+  assert(itemSnap.exists, 404, 'not_found', 'チェック項目が見つかりません');
+  const checked = status === ITEM_STATUS.CHECKED;
+  await itemRef.set(
+    {
+      status,
+      checkedByName: checked ? String(eventPayload.checkedBy || '') : '',
+      checkedByUserId: checked ? String(eventPayload.checkedByUserId || '') : '',
+      checkedAt: checked ? normalizeEventTimestamp(eventPayload.checkedAt) : '',
+      updatedAt: normalizeEventTimestamp(eventPayload.updatedAt)
+    },
+    { merge: true }
+  );
+  await writeSnapshotForRun(storeId, targetDate, {
+    userId: String(eventPayload.sourceUserId || ''),
+    userName: String(eventPayload.checkedBy || '')
+  });
+  return { itemId, status };
+}
+
+async function applyItemDeleteEvent(storeId, targetDate, eventPayload) {
+  const itemId = normalizeString(eventPayload.itemId, 'event.itemId');
+  const itemRef = getDailyRunItemsCollection(storeId, targetDate).doc(itemId);
+  const itemSnap = await itemRef.get();
+  if (!itemSnap.exists) {
+    return { itemId, deleted: false };
+  }
+  await itemRef.set(
+    {
+      isActive: false,
+      updatedAt: normalizeEventTimestamp(eventPayload.updatedAt)
+    },
+    { merge: true }
+  );
+  await writeSnapshotForRun(storeId, targetDate, { userId: 'admin', userName: '管理者' });
+  return { itemId, deleted: true };
+}
+
+async function applyFirestoreEvent(storeId, targetDate, eventPayload) {
+  assert(String(eventPayload.storeId || '') === storeId, 400, 'invalid_request', 'event.storeId が不正です');
+  assert(String(eventPayload.targetDate || '') === targetDate, 400, 'invalid_request', 'event.targetDate が不正です');
+  if (eventPayload.type === 'template_insert') {
+    return applyTemplateInsertEvent(storeId, targetDate, eventPayload);
+  }
+  if (eventPayload.type === 'item_delete') {
+    return applyItemDeleteEvent(storeId, targetDate, eventPayload);
+  }
+  return applyItemStatusEvent(storeId, targetDate, eventPayload);
+}
+
 function assertValidTargetDate(targetDate) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(targetDate || ''))) {
     throw new Error('targetDate must be YYYY-MM-DD');
@@ -1228,57 +1356,6 @@ function normalizeCalendarEntries(value) {
   return map;
 }
 
-function normalizeFirestoreEventSyncValue(value) {
-  if (value === null || typeof value === 'undefined') {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(normalizeFirestoreEventSyncValue);
-  }
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (typeof value.toDate === 'function') {
-    return value.toDate().toISOString();
-  }
-  if (typeof value === 'object') {
-    const normalized = {};
-    Object.keys(value).forEach((key) => {
-      normalized[key] = normalizeFirestoreEventSyncValue(value[key]);
-    });
-    return normalized;
-  }
-  return value;
-}
-
-async function postFirestoreEventToGas(storeId, targetDate, eventId, eventPayload) {
-  const response = await fetch(
-    buildGasFirestoreEventSyncUrl(),
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        syncSecret: readFirestoreEventSyncSecret(),
-        eventId,
-        storeId,
-        targetDate,
-        event: normalizeFirestoreEventSyncValue(eventPayload)
-      })
-    }
-  );
-  const responseText = await response.text();
-  if (!response.ok) {
-    throw new Error(`GAS Firestore event sync failed: ${response.status} ${responseText.slice(0, 240)}`);
-  }
-  const responsePayload = responseText ? JSON.parse(responseText) : {};
-  if (responsePayload.ok === false) {
-    throw new Error(`GAS Firestore event sync rejected: ${responsePayload.code || 'unknown'}`);
-  }
-  return responsePayload;
-}
-
 function buildMonthlySummary(calendarMap, year, month, storeId, counts) {
   const calendar = Object.keys(calendarMap).sort().map((date) => {
     return calendarMap[date];
@@ -1302,12 +1379,11 @@ function buildMonthlySummary(calendarMap, year, month, storeId, counts) {
   };
 }
 
-exports.syncFirestoreEventToGas = onDocumentCreated(
+exports.applyFirestoreEventToPrimaryStore = onDocumentCreated(
   {
     document: FIRESTORE_EVENT_DOCUMENT_PATH,
     region: 'asia-northeast1',
-    retry: true,
-    secrets: [firestoreEventSyncSecret]
+    retry: true
   },
   async (event) => {
     if (!event.data) {
@@ -1326,7 +1402,7 @@ exports.syncFirestoreEventToGas = onDocumentCreated(
     }
 
     const eventPayload = event.data.data() || {};
-    await postFirestoreEventToGas(storeId, targetDate, eventId, eventPayload);
+    await applyFirestoreEvent(storeId, targetDate, eventPayload);
   }
 );
 

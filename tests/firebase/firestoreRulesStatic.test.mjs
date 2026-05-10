@@ -13,7 +13,12 @@ test('Firestore events は認証済み read のみ許可し、snapshot は公開
     rules,
     /match \/stores\/\{storeId\}\/runs\/\{targetDate\}\/snapshots\/\{snapshotId\} \{\s+allow read: if snapshotId == 'today';/
   );
-  assert.match(rules, /allow create: if isValidChecklistEvent\(storeId, targetDate\) \|\| isValidTemplateInsertEvent\(storeId, targetDate\);/);
+  assert.match(rules, /isValidItemDeleteEvent\(storeId, targetDate\)/);
+  assert.match(rules, /!\s*data\.keys\(\)\.hasAny\(\['runId'\]\) \|\| isSafeText\(data\.runId, 80\)/);
+  assert.match(
+    rules,
+    /allow create: if isValidChecklistEvent\(storeId, targetDate\)\s+\|\| isValidTemplateInsertEvent\(storeId, targetDate\)\s+\|\| isValidItemDeleteEvent\(storeId, targetDate\);/
+  );
   assert.match(rules, /allow update, delete: if false;/);
 });
 

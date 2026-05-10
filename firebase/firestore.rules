@@ -66,6 +66,7 @@ service cloud.firestore {
           'targetDate',
           'storeId',
           'templateId',
+          'period',
           'items',
           'sourceUserId',
           'sourceClientId',
@@ -74,8 +75,9 @@ service cloud.firestore {
         && data.type == 'template_insert'
         && data.storeId == storeId
         && data.targetDate == targetDate
-        && isSafeText(data.runId, 80)
+        && (!data.keys().hasAny(['runId']) || isSafeText(data.runId, 80))
         && isSafeText(data.templateId, 120)
+        && isSafeText(data.period, 20)
         && data.items is list
         && data.items.size() > 0
         && data.items.size() <= 30
@@ -86,9 +88,38 @@ service cloud.firestore {
         && data.emittedAt == request.time;
     }
 
+    function isValidItemDeleteEvent(storeId, targetDate) {
+      let data = request.resource.data;
+      return isSignedIn()
+        && data.keys().hasOnly([
+          'type',
+          'runId',
+          'targetDate',
+          'storeId',
+          'itemId',
+          'updatedAt',
+          'sourceUserId',
+          'sourceClientId',
+          'emittedAt'
+        ])
+        && data.type == 'item_delete'
+        && data.storeId == storeId
+        && data.targetDate == targetDate
+        && (!data.keys().hasAny(['runId']) || isSafeText(data.runId, 80))
+        && isSafeText(data.itemId, 120)
+        && data.updatedAt == request.time
+        && isSafeText(data.sourceUserId, 128)
+        && data.sourceUserId != ''
+        && isSafeText(data.sourceClientId, 128)
+        && data.sourceClientId != ''
+        && data.emittedAt == request.time;
+    }
+
     match /stores/{storeId}/runs/{targetDate}/events/{eventId} {
       allow read: if isSignedIn();
-      allow create: if isValidChecklistEvent(storeId, targetDate) || isValidTemplateInsertEvent(storeId, targetDate);
+      allow create: if isValidChecklistEvent(storeId, targetDate)
+        || isValidTemplateInsertEvent(storeId, targetDate)
+        || isValidItemDeleteEvent(storeId, targetDate);
       allow update, delete: if false;
     }
 

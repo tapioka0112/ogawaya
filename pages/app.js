@@ -1111,6 +1111,13 @@
     elements.mainContent.hidden = isStatsTab;
     elements.statsContent.hidden = !isStatsTab;
     if (isStatsTab) {
+      if (!state.statsData && state.checklist && state.checklist.targetDate) {
+        var checklistMonthMatch = String(state.checklist.targetDate).match(/^(\d{4})-(\d{2})-\d{2}$/);
+        if (checklistMonthMatch) {
+          state.statsYear = Number(checklistMonthMatch[1]);
+          state.statsMonth = Number(checklistMonthMatch[2]);
+        }
+      }
       updateMonthLabel();
       if (state.statsData) {
         renderStats();
@@ -2787,11 +2794,21 @@
       console.debug('[sync] ignore realtime event: pending_server_timestamp');
       return;
     }
-    if (String(eventPayload.runId || '') !== String(state.checklist.runId || '')) {
+    if (eventPayload.type === 'template_insert') {
+      if (String(eventPayload.targetDate || '') !== String(state.checklist.targetDate || '')) {
+        return;
+      }
+      applyTemplateInsertRealtimeEvent(eventPayload);
       return;
     }
-    if (eventPayload.type === 'template_insert') {
-      applyTemplateInsertRealtimeEvent(eventPayload);
+    if (eventPayload.type === 'item_delete') {
+      if (String(eventPayload.targetDate || '') !== String(state.checklist.targetDate || '')) {
+        return;
+      }
+      applyRunItemDeleteRealtimeEvent(eventPayload, emittedAtMs);
+      return;
+    }
+    if (String(eventPayload.runId || '') !== String(state.checklist.runId || '')) {
       return;
     }
     var sourceClientId = String(eventPayload.sourceClientId || '');
@@ -2838,6 +2855,36 @@
     }
     applyChecklistItemUpdate(syncedItem);
     actionState.confirmedItem = cloneChecklistItem(syncedItem);
+  }
+
+  function applyRunItemDeleteRealtimeEvent(eventPayload, emittedAtMs) {
+    var sourceClientId = String(eventPayload.sourceClientId || '');
+    if (sourceClientId && sourceClientId === getClientInstanceId()) {
+      return;
+    }
+    var runItemId = String(eventPayload.itemId || '');
+    if (!runItemId || !Array.isArray(state.checklist.items)) {
+      return;
+    }
+    var actionState = getItemActionState(runItemId);
+    if (emittedAtMs <= actionState.lastSyncedAtMs) {
+      return;
+    }
+    var nextItems = state.checklist.items.filter(function (item) {
+      return String(item.id || '') !== runItemId;
+    });
+    if (nextItems.length === state.checklist.items.length) {
+      return;
+    }
+    actionState.lastSyncedAtMs = emittedAtMs;
+    state.checklist.items = nextItems;
+    recomputeProgress();
+    renderChecklist();
+    renderSelectedTaskDetail({ focus: false });
+    renderOverview();
+    renderIncomplete();
+    writeChecklistCache(state.checklist);
+    updateStatsFromCurrentChecklist();
   }
 
   function applyTemplateInsertRealtimeEvent(eventPayload) {
