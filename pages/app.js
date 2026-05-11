@@ -152,13 +152,59 @@
     return JST_DATE_FORMATTER.format(new Date());
   }
 
+  function parseIsoDate(value) {
+    var match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      throw new Error('日付形式が不正です');
+    }
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  }
+
+  function formatUtcDate(date) {
+    var year = date.getUTCFullYear();
+    var month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    var day = String(date.getUTCDate()).padStart(2, '0');
+    return year + '-' + month + '-' + day;
+  }
+
+  function getWeekStartDateForDate(dateValue) {
+    var date = parseIsoDate(dateValue);
+    return formatUtcDate(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - date.getUTCDay())));
+  }
+
+  function getMonthStartDateForDate(dateValue) {
+    var date = parseIsoDate(dateValue);
+    return formatUtcDate(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)));
+  }
+
+  function addDateCandidatePeriod(candidates, targetDate, period) {
+    var normalized = String(targetDate || '');
+    if (!normalized) {
+      return;
+    }
+    var existing = candidates.find(function (candidate) {
+      return candidate.targetDate === normalized;
+    });
+    if (!existing) {
+      existing = {
+        targetDate: normalized,
+        periods: {}
+      };
+      candidates.push(existing);
+    }
+    existing.periods[normalizeTaskPeriod(period)] = true;
+  }
+
   function getChecklistTargetDateCandidates() {
     var calendarDate = getCalendarDateInJst();
     var businessDate = getTodayDateInJst();
-    if (calendarDate === businessDate) {
-      return [businessDate];
-    }
-    return [calendarDate, businessDate];
+    var candidates = [];
+    [calendarDate, businessDate].forEach(function (dateValue) {
+      addDateCandidatePeriod(candidates, dateValue, 'daily');
+      addDateCandidatePeriod(candidates, getWeekStartDateForDate(dateValue), 'weekly');
+      addDateCandidatePeriod(candidates, getMonthStartDateForDate(dateValue), 'monthly');
+    });
+    return candidates;
   }
 
   function readStorageValue(key) {
@@ -460,10 +506,11 @@
       };
     }
 
-    function normalizeFirestoreItem(doc) {
+    function normalizeFirestoreItem(doc, targetDate) {
       var data = doc.data() || {};
       return {
         id: doc.id,
+        targetDate: String(targetDate || ''),
         templateItemId: String(data.templateItemId || ''),
         title: String(data.title || ''),
         description: String(data.description || ''),
@@ -493,7 +540,7 @@
         if (data.isActive === false) {
           return;
         }
-        items.push(normalizeFirestoreItem(doc));
+        items.push(normalizeFirestoreItem(doc, targetDate));
       });
       items.sort(function (left, right) {
         var leftSort = Number(left.sortOrder || 0);
@@ -527,27 +574,59 @@
       var store = storeDoc.exists ? storeDoc.data() || {} : {};
       var candidates = getChecklistTargetDateCandidates();
       var fallbackChecklist = null;
-      for (var index = 0; index < candidates.length; index += 1) {
-        var checklist = await loadChecklistForDate(firebaseUser, storeId, store, candidates[index]);
+      var mergedItems = [];
+      var mergedItemKeys = {};
+      var checklistResults = await Promise.all(candidates.map(function (candidate) {
+        return loadChecklistForDate(firebaseUser, storeId, store, candidate.targetDate).then(function (checklist) {
+          return {
+            candidate: candidate,
+            checklist: checklist
+          };
+        });
+      }));
+      checklistResults.forEach(function (result) {
+        var candidate = result.candidate;
+        var checklist = result.checklist;
         if (!fallbackChecklist) {
           fallbackChecklist = checklist;
         }
-        if (checklist.items.length > 0) {
-          return checklist;
-        }
+        checklist.items.forEach(function (item) {
+          if (!candidate.periods[normalizeTaskPeriod(item.period)]) {
+            return;
+          }
+          var itemKey = String(item.targetDate || checklist.targetDate || '') + ':' + item.id;
+          if (mergedItemKeys[itemKey]) {
+            return;
+          }
+          mergedItemKeys[itemKey] = true;
+          mergedItems.push(item);
+        });
+      });
+      if (!fallbackChecklist) {
+        return null;
       }
-      return fallbackChecklist;
+      mergedItems.sort(function (left, right) {
+        var leftSort = Number(left.sortOrder || 0);
+        var rightSort = Number(right.sortOrder || 0);
+        if (leftSort !== rightSort) {
+          return leftSort - rightSort;
+        }
+        return left.title.localeCompare(right.title);
+      });
+      return Object.assign({}, fallbackChecklist, {
+        items: mergedItems
+      });
     }
 
     async function updateItem(runItemId, status) {
       var firebaseUser = await ensureFirebaseAuthSession();
       var checklist = state.checklist || await getTodayChecklist();
       var storeId = resolveChecklistStoreId(checklist) || getStoreId();
-      var targetDate = String(checklist.targetDate || getTodayDateInJst());
       var item = findChecklistItemById(runItemId);
       if (!item) {
         throw new Error('チェック項目が見つかりません');
       }
+      var targetDate = String(item.targetDate || checklist.targetDate || getTodayDateInJst());
       var checked = status === 'checked';
       var now = new Date().toISOString();
       var authUser = state.authUserContext || {};
@@ -558,6 +637,7 @@
         checkedAt: checked ? now : null,
         updatedAt: now
       });
+      nextItem.targetDate = targetDate;
       var itemRef = state.firestore
         .collection('stores')
         .doc(storeId)
@@ -2215,6 +2295,53 @@
     };
   }
 
+  function addUniqueTargetDate(targetDates, dateValue) {
+    var normalized = String(dateValue || '');
+    if (!normalized || targetDates.indexOf(normalized) !== -1) {
+      return;
+    }
+    targetDates.push(normalized);
+  }
+
+  function getVisibleRunTargetDates() {
+    if (!state.checklist || !state.checklist.targetDate) {
+      return [];
+    }
+    var targetDates = [];
+    var baseTargetDate = String(state.checklist.targetDate || '');
+    addUniqueTargetDate(targetDates, baseTargetDate);
+    addUniqueTargetDate(targetDates, getWeekStartDateForDate(baseTargetDate));
+    addUniqueTargetDate(targetDates, getMonthStartDateForDate(baseTargetDate));
+    (state.checklist.items || []).forEach(function (item) {
+      addUniqueTargetDate(targetDates, item.targetDate);
+    });
+    return targetDates;
+  }
+
+  function getRealtimeTargetInfos() {
+    var targetInfo = ensureSyncTargetInfo();
+    if (!targetInfo) {
+      return [];
+    }
+    return getVisibleRunTargetDates().map(function (targetDate) {
+      return {
+        storeId: targetInfo.storeId,
+        targetDate: targetDate,
+        runId: targetDate
+      };
+    });
+  }
+
+  function getRealtimeTargetInfoKey(targetInfos) {
+    return (targetInfos || []).map(function (targetInfo) {
+      return [targetInfo.storeId, targetInfo.targetDate, targetInfo.runId].join(':');
+    }).join('|');
+  }
+
+  function isVisibleRunTargetDate(targetDate) {
+    return getVisibleRunTargetDates().indexOf(String(targetDate || '')) !== -1;
+  }
+
   function initializeRealtimeClient() {
     if (!state.config || !state.config.enableRealtimeSync || !state.config.firebase) {
       return false;
@@ -2731,13 +2858,14 @@
     if (!targetInfo) {
       throw new Error('Firestore 同期対象が未確定です');
     }
+    var targetDate = String(updatedItem && updatedItem.targetDate ? updatedItem.targetDate : targetInfo.targetDate);
     var sourceUserId = state.checklist && state.checklist.currentUser
       ? String(state.checklist.currentUser.userId || '')
       : '';
 
     var payload = {
-      runId: targetInfo.runId,
-      targetDate: targetInfo.targetDate,
+      runId: targetDate,
+      targetDate: targetDate,
       storeId: targetInfo.storeId,
       itemId: String(updatedItem.id || ''),
       status: String(updatedItem.status || ''),
@@ -2754,9 +2882,10 @@
     return payload;
   }
 
-  function normalizeTemplateInsertEventItem(item) {
+  function normalizeTemplateInsertEventItem(item, targetDate) {
     return {
       id: String(item && item.id ? item.id : ''),
+      targetDate: String(targetDate || ''),
       templateItemId: String(item && item.templateItemId ? item.templateItemId : ''),
       title: String(item && item.title ? item.title : ''),
       description: String(item && item.description ? item.description : ''),
@@ -2784,11 +2913,12 @@
       if (!targetInfo) {
         throw new Error('Firestore 同期対象が未確定です');
       }
+      var targetDate = String(updatedItem.targetDate || targetInfo.targetDate);
       return state.firestore
         .collection('stores')
         .doc(targetInfo.storeId)
         .collection('runs')
-        .doc(targetInfo.targetDate)
+        .doc(targetDate)
         .collection('events')
         .add(buildRealtimeEventPayload(updatedItem, { includeSourceClientId: true }));
     }).catch(function (error) {
@@ -2806,20 +2936,21 @@
       return;
     }
     if (eventPayload.type === 'template_insert') {
-      if (String(eventPayload.targetDate || '') !== String(state.checklist.targetDate || '')) {
+      if (!isVisibleRunTargetDate(eventPayload.targetDate)) {
         return;
       }
       applyTemplateInsertRealtimeEvent(eventPayload);
       return;
     }
     if (eventPayload.type === 'item_delete') {
-      if (String(eventPayload.targetDate || '') !== String(state.checklist.targetDate || '')) {
+      if (!isVisibleRunTargetDate(eventPayload.targetDate)) {
         return;
       }
       applyRunItemDeleteRealtimeEvent(eventPayload, emittedAtMs);
       return;
     }
-    if (String(eventPayload.runId || '') !== String(state.checklist.runId || '')) {
+    var eventTargetDate = String(eventPayload.targetDate || eventPayload.runId || '');
+    if (!isVisibleRunTargetDate(eventTargetDate)) {
       return;
     }
     var sourceClientId = String(eventPayload.sourceClientId || '');
@@ -2858,7 +2989,8 @@
       checkedBy: eventPayload.checkedBy || null,
       checkedByUserId: eventPayload.checkedByUserId || null,
       checkedAt: eventPayload.checkedAt || null,
-      updatedAt: eventPayload.updatedAt || null
+      updatedAt: eventPayload.updatedAt || null,
+      targetDate: eventTargetDate
     };
     if (syncedItem.status === 'checked' && !syncedItem.checkedAt) {
       console.debug('[sync] ignore realtime event: missing_checked_at');
@@ -2899,7 +3031,10 @@
   }
 
   function applyTemplateInsertRealtimeEvent(eventPayload) {
-    var incomingItems = Array.isArray(eventPayload.items) ? eventPayload.items.map(normalizeTemplateInsertEventItem) : [];
+    var targetDate = String(eventPayload.targetDate || '');
+    var incomingItems = Array.isArray(eventPayload.items) ? eventPayload.items.map(function (item) {
+      return normalizeTemplateInsertEventItem(item, targetDate);
+    }) : [];
     incomingItems = incomingItems.filter(function (item) {
       return item.id !== '' && item.title !== '';
     });
@@ -2951,46 +3086,49 @@
       return;
     }
 
-    var targetInfo = ensureSyncTargetInfo();
-    if (!targetInfo) {
+    var targetInfos = getRealtimeTargetInfos();
+    if (targetInfos.length === 0) {
       return;
     }
-    bootstrapRealtimeEventsFromRest(targetInfo);
+    var targetInfoKey = getRealtimeTargetInfoKey(targetInfos);
+    targetInfos.forEach(bootstrapRealtimeEventsFromRest);
 
     ensureRealtimeClientReady().then(function () {
       if (state.syncStartRequestId !== requestId) {
         return;
       }
-      var latestTargetInfo = ensureSyncTargetInfo();
-      if (
-        !latestTargetInfo ||
-        latestTargetInfo.storeId !== targetInfo.storeId ||
-        latestTargetInfo.targetDate !== targetInfo.targetDate ||
-        latestTargetInfo.runId !== targetInfo.runId
-      ) {
+      var latestTargetInfos = getRealtimeTargetInfos();
+      if (getRealtimeTargetInfoKey(latestTargetInfos) !== targetInfoKey) {
         return;
       }
-      var query = state.firestore
-        .collection('stores')
-        .doc(targetInfo.storeId)
-        .collection('runs')
-        .doc(targetInfo.targetDate)
-        .collection('events')
-        .orderBy('emittedAt', 'desc')
-        .limit(40);
+      var unsubscribers = targetInfos.map(function (targetInfo) {
+        var query = state.firestore
+          .collection('stores')
+          .doc(targetInfo.storeId)
+          .collection('runs')
+          .doc(targetInfo.targetDate)
+          .collection('events')
+          .orderBy('emittedAt', 'desc')
+          .limit(40);
 
-      state.syncUnsubscribe = query.onSnapshot(function (snapshot) {
-        snapshot.docChanges().forEach(function (change) {
-          if (change.type !== 'added' && change.type !== 'modified') {
-            return;
-          }
-          var payload = change.doc.data() || {};
-          var emittedAtMs = parseTimestampMillis(payload.emittedAt);
-          applyRealtimeEvent(payload, emittedAtMs);
+        return query.onSnapshot(function (snapshot) {
+          snapshot.docChanges().forEach(function (change) {
+            if (change.type !== 'added' && change.type !== 'modified') {
+              return;
+            }
+            var payload = change.doc.data() || {};
+            var emittedAtMs = parseTimestampMillis(payload.emittedAt);
+            applyRealtimeEvent(payload, emittedAtMs);
+          });
+        }, function (error) {
+          console.error('[sync] realtime listener failed', error);
         });
-      }, function (error) {
-        console.error('[sync] realtime listener failed', error);
       });
+      state.syncUnsubscribe = function () {
+        unsubscribers.forEach(function (unsubscribe) {
+          unsubscribe();
+        });
+      };
 
       state.realtimeEnabled = true;
     }).catch(function (error) {

@@ -254,6 +254,49 @@
     return year + '-' + month + '-' + day;
   }
 
+  function parseIsoDate(dateValue) {
+    var match = String(dateValue || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      throw new Error('日付形式が不正です');
+    }
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  }
+
+  function getWeekStartDateForDate(dateValue) {
+    var date = parseIsoDate(dateValue);
+    return formatUtcDate(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - date.getUTCDay())));
+  }
+
+  function getMonthStartDateForDate(dateValue) {
+    var date = parseIsoDate(dateValue);
+    return formatUtcDate(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)));
+  }
+
+  function getRunTargetDateCandidatesForDate(dateValue) {
+    var candidates = [];
+    function addCandidatePeriod(targetDate, period) {
+      var normalized = String(targetDate || '');
+      if (!normalized) {
+        return;
+      }
+      var existing = candidates.find(function (candidate) {
+        return candidate.targetDate === normalized;
+      });
+      if (!existing) {
+        existing = {
+          targetDate: normalized,
+          periods: {}
+        };
+        candidates.push(existing);
+      }
+      existing.periods[normalizeTaskPeriod(period)] = true;
+    }
+    addCandidatePeriod(dateValue, 'daily');
+    addCandidatePeriod(getWeekStartDateForDate(dateValue), 'weekly');
+    addCandidatePeriod(getMonthStartDateForDate(dateValue), 'monthly');
+    return candidates;
+  }
+
   function parseMonthValue(monthValue) {
     var match = String(monthValue || '').match(/^(\d{4})-(\d{2})$/);
     if (!match) {
@@ -1353,10 +1396,11 @@
     };
   }
 
-  function normalizeRunItemDoc(doc) {
+  function normalizeRunItemDoc(doc, targetDate) {
     var data = doc.data() || {};
     return {
       id: doc.id,
+      targetDate: String(targetDate || ''),
       templateItemId: String(data.templateItemId || ''),
       title: String(data.title || ''),
       description: String(data.description || ''),
@@ -1491,6 +1535,7 @@
   async function loadRunItems(options) {
     var requestOptions = options || {};
     var targetDate = state.selectedDate;
+    var targetDates = getRunTargetDateCandidatesForDate(targetDate);
     state.runItemsRequestId += 1;
     var requestId = state.runItemsRequestId;
     var cachedChecklist = requestOptions.preferCache === false ? null : getCachedRunItems(targetDate);
@@ -1500,17 +1545,36 @@
     try {
       await requireAdminUser();
       var runDoc = await getStoreRef().collection('runs').doc(targetDate).get();
-      var itemSnapshot = await getStoreRef().collection('runs').doc(targetDate).collection('items').get();
+      var itemSnapshots = await Promise.all(targetDates.map(function (candidate) {
+        return getStoreRef().collection('runs').doc(candidate.targetDate).collection('items').get().then(function (snapshot) {
+          return {
+            targetDate: candidate.targetDate,
+            periods: candidate.periods,
+            snapshot: snapshot
+          };
+        });
+      }));
       if (requestId !== state.runItemsRequestId || targetDate !== state.selectedDate) {
         return;
       }
       var items = [];
-      itemSnapshot.forEach(function (doc) {
-        var data = doc.data() || {};
-        if (data.isActive === false) {
-          return;
-        }
-        items.push(normalizeRunItemDoc(doc));
+      var itemKeys = {};
+      itemSnapshots.forEach(function (entry) {
+        entry.snapshot.forEach(function (doc) {
+          var data = doc.data() || {};
+          if (data.isActive === false) {
+            return;
+          }
+          if (!entry.periods[normalizeTaskPeriod(data.period)]) {
+            return;
+          }
+          var itemKey = entry.targetDate + ':' + doc.id;
+          if (itemKeys[itemKey]) {
+            return;
+          }
+          itemKeys[itemKey] = true;
+          items.push(normalizeRunItemDoc(doc, entry.targetDate));
+        });
       });
       items.sort(function (left, right) {
         return Number(left.sortOrder || 0) - Number(right.sortOrder || 0);
@@ -1673,19 +1737,23 @@
     clearError();
     setStatus('タスクを削除しています...');
     var previousChecklist = state.checklist;
+    var item = (state.checklist && Array.isArray(state.checklist.items) ? state.checklist.items : []).find(function (currentItem) {
+      return currentItem.id === runItemId;
+    }) || null;
+    var targetDate = String(item && item.targetDate ? item.targetDate : state.selectedDate);
     removeCurrentRunItem(runItemId);
     try {
       await requireAdminUser();
       await getStoreRef()
         .collection('runs')
-        .doc(state.selectedDate)
+        .doc(targetDate)
         .collection('items')
         .doc(runItemId)
         .set({
           isActive: false,
           updatedAt: new Date().toISOString()
         }, { merge: true });
-      await writeRunItemDeleteEvent(state.selectedDate, runItemId);
+      await writeRunItemDeleteEvent(targetDate, runItemId);
       setStatus('タスクを削除しました');
     } catch (error) {
       state.checklist = previousChecklist;

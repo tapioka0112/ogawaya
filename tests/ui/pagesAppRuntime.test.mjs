@@ -20,10 +20,20 @@ test('GitHub Pages app は Firestore run items をホーム表示の入力にす
   assert.match(appJs, /async function getTodayChecklist\(\)/);
   assert.match(appJs, /function getChecklistTargetDateCandidates\(\)/);
   assert.match(appJs, /function getCalendarDateInJst\(\)/);
+  assert.match(appJs, /function getWeekStartDateForDate\(dateValue\)/);
+  assert.match(appJs, /function getMonthStartDateForDate\(dateValue\)/);
   assert.match(appJs, /async function loadChecklistForDate\(firebaseUser,\s*storeId,\s*store,\s*targetDate\)/);
   assert.match(appJs, /var candidates = getChecklistTargetDateCandidates\(\);/);
   assert.match(appJs, /var fallbackChecklist = null;/);
-  assert.match(appJs, /if \(checklist\.items\.length > 0\) \{\s*return checklist;\s*\}/);
+  assert.match(appJs, /var mergedItems = \[\];/);
+  assert.match(appJs, /var checklistResults = await Promise\.all\(candidates\.map\(function \(candidate\)/);
+  assert.match(appJs, /addDateCandidatePeriod\(candidates,\s*dateValue,\s*'daily'\);/);
+  assert.match(appJs, /addDateCandidatePeriod\(candidates,\s*getWeekStartDateForDate\(dateValue\),\s*'weekly'\);/);
+  assert.match(appJs, /addDateCandidatePeriod\(candidates,\s*getMonthStartDateForDate\(dateValue\),\s*'monthly'\);/);
+  assert.match(appJs, /loadChecklistForDate\(firebaseUser,\s*storeId,\s*store,\s*candidate\.targetDate\)/);
+  assert.match(appJs, /if \(!candidate\.periods\[normalizeTaskPeriod\(item\.period\)\]\) \{/);
+  assert.match(appJs, /targetDate:\s*String\(targetDate \|\| ''\)/);
+  assert.match(appJs, /return Object\.assign\(\{\},\s*fallbackChecklist,\s*\{\s*items:\s*mergedItems\s*\}\);/);
   assert.match(appJs, /\.collection\('stores'\)\.doc\(storeId\)\.collection\('runs'\)\.doc\(targetDate\)\.get\(\)/);
   assert.match(appJs, /\.collection\('items'\)\s*\.get\(\)/);
   assert.match(appJs, /if \(data\.isActive === false\) \{/);
@@ -36,6 +46,14 @@ test('GitHub Pages app はチェック操作を item 更新と realtime event �
 
   assert.match(appJs, /async function updateItem\(runItemId,\s*status\)/);
   assert.match(appJs, /await itemRef\.set\(\{/);
+  assert.match(appJs, /var targetDate = String\(item\.targetDate \|\| checklist\.targetDate \|\| getTodayDateInJst\(\)\);/);
+  assert.match(appJs, /nextItem\.targetDate = targetDate;/);
+  assert.match(appJs, /\.collection\('runs'\)\s*\.doc\(targetDate\)\s*\.collection\('events'\)/);
+  assert.match(appJs, /function getRealtimeTargetInfos\(\)/);
+  assert.match(appJs, /function isVisibleRunTargetDate\(targetDate\)/);
+  assert.match(appJs, /targetInfos\.forEach\(bootstrapRealtimeEventsFromRest\);/);
+  assert.match(appJs, /var unsubscribers = targetInfos\.map\(function \(targetInfo\)/);
+  assert.match(appJs, /if \(!isVisibleRunTargetDate\(eventPayload\.targetDate\)\) \{/);
   assert.match(appJs, /checkedByUserId:\s*nextItem\.checkedByUserId \|\| ''/);
   assert.match(appJs, /await writeRealtimeEvent\(nextItem\);/);
   assert.match(appJs, /sourceUserId:\s*sourceUserId/);
