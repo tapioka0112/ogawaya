@@ -3,6 +3,21 @@
 `tasks.md` を正として実装を進めるリポジトリです。  
 現行運用は `LIFF (GitHub Pages) + Firebase Auth + Firestore + GitHub Actions` を主系にします。GAS と Firebase Functions は本番運用の主系として使いません。
 
+## 制作背景
+- 店舗の日々の確認作業が属人的になりやすく、従業員全員が同じ未完了項目をすぐ確認できる仕組みが必要だった。
+- 紙や口頭のチェックでは「誰が・いつ完了したか」が残りにくく、確認漏れや引き継ぎ漏れの原因になる。
+- 店舗スタッフが普段使う LINE から開ける画面にすることで、新しい専用アプリを導入せず日常業務へ組み込みやすくする。
+- 初期版は `1ユーザー = 1店舗` に絞り、日間・週間・月間の清掃チェックを確実に回すことを目的にする。
+
+## 技術選定と意図
+- LIFF: 従業員が LINE からチェック画面を開けるようにし、LINE の認証コンテキストから表示名やユーザー情報を扱う。
+- GitHub Pages: LIFF 画面と管理者画面は静的ファイルで成立するため、サーバー運用を増やさず `pages/` をそのまま公開する。
+- Firebase Auth: Firestore 更新時の認証境界として使う。管理者は Email/Password ログイン後、Firestore の `stores/{storeId}/admins/{uid}` allowlist で判定する。
+- Firestore: 複数端末で同じチェック状態を共有し、`checkedBy` と `checkedByUserId` によって実行者を記録する正本データとして使う。
+- Firestore Rules: クライアントから直接 Firestore に書き込む構成にする代わりに、管理者操作・従業員のチェック更新・イベント作成の許可範囲をデータ構造ごとに制限する。
+- GitHub Actions: Firebase Spark 前提で Cloud Functions を主系にせず、10:35 の日次タスク作成と 00:35 の未完了通知を定期実行する。
+- LINE Messaging API: 未完了タスクを従業員へ push 通知する。通知に必要なアクセストークンは GitHub Actions secrets で管理する。
+
 ## 確定仕様（tasks.md 準拠）
 - 初期版は `1ユーザー = 1店舗` 前提。
 - 当日判定は日本時間 10:30 切替（`10:30〜翌10:29` を同じ運用日として扱う）。
