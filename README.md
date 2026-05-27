@@ -11,7 +11,7 @@
 
 ## 技術選定と意図
 
-- LIFF: 従業員がLINEからそのままチェック画面を開くための入口. LINEのログイン情報から表示名やユーザー情報も扱える.
+- LIFF: 従業員がLINE上からチェック画面を開けるようにするために使う. LINEのログイン情報から表示名やユーザー情報も扱える.
 - GitHub Pages: 画面は静的ファイルだけで動くので, サーバーを増やさず`pages/`をそのまま公開する.
 - Firebase Auth: Firestoreへ書き込む人を識別するために使う. 管理者はEmail/Passwordでログインし, Firestoreの`stores/{storeId}/admins/{uid}`にUIDがあるかで判定する.
 - Firestore: チェック状態を複数端末で共有する保存先. `checkedBy`と`checkedByUserId`により, 誰がチェックしたかも保存する.
@@ -19,41 +19,40 @@
 - GitHub Actions: Firebase Sparkで運用しやすくするため, Cloud FunctionsではなくActionsで10:35の日次タスク作成と00:35の未完了通知を動かす.
 - LINE Messaging API: 未完了タスクを従業員へpush通知するために使う. 通知用のアクセストークンはGitHub Actions secretsで管理する.
 
-## 確定仕様（tasks.md準拠）
-- 初期版は`1ユーザー = 1店舗`前提.
-- 当日判定は日本時間10:30切替（`10:30〜翌10:29`を同じ運用日として扱う）.
-- 日次ジョブはGitHub Actionsで10:35開始処理, 00:35未完了通知を実行する.
-- チェック実行者はFirestoreの`checkedBy`と`checkedByUserId`に保存する.
-- 更新系はFirebase Authのログイン状態が必須.
-
 ## 構成
+
 - API/バックエンド: Firestore直接書き込みとGitHub Actions(`scripts/`)
 - 正本データ: Firestore
-- LIFFフロント: GitHub Pages(`pages/`)
+- フロントエンド: GitHub Pages(`pages/`)
 - 管理者画面: GitHub Pages(`pages/admin.html`)
 - Firestore: タスク, テンプレート, 日別実行項目, ユーザー, 管理者allowlistを保存
 
 ## 運用手順
-- 非IT担当者向けの現行運用説明書は[docs/operations/non-it-operator-guide.md](/home/sota411/Documents/project/ogawaya/docs/operations/non-it-operator-guide.md)を参照してください.
-- Firebase Spark主系の技術運用は[docs/operations/firebase-spark-primary.md](/home/sota411/Documents/project/ogawaya/docs/operations/firebase-spark-primary.md)を参照してください.
-- 旧GAS主系の参考資料は[docs/operations/bootstrap.md](/home/sota411/Documents/project/ogawaya/docs/operations/bootstrap.md)に残っています.
+
+- 非IT担当者向けの現行運用説明書は[docs/operations/non-it-operator-guide.md](docs/operations/non-it-operator-guide.md)を参照してください.
+- Firebase Spark主系の技術運用は[docs/operations/firebase-spark-primary.md](docs/operations/firebase-spark-primary.md)を参照してください.
+- 旧GAS主系の参考資料は[docs/operations/bootstrap.md](docs/operations/bootstrap.md)に残っています.
 
 ## ディレクトリ
-- [docs/](/home/sota411/Documents/project/ogawaya/docs)
-- [pages/](/home/sota411/Documents/project/ogawaya/pages)
-- [scripts/](/home/sota411/Documents/project/ogawaya/scripts)
-- [tasks.md](/home/sota411/Documents/project/ogawaya/tasks.md)
+
+- [docs/](docs/)
+- [pages/](pages/)
+- [scripts/](scripts/)
+- [tasks.md](tasks.md)
+
 
 ## ローカル準備
 - Node.jsをインストール
 - `npm ci`
 
+
 ## テスト
 - `npm test`
 
+
 ## 必要な本番設定
 - Firebase Authentication: Email/PasswordとAnonymousを有効化する.
-- Firestore Rules: [docs/operations/firestore.rules](/home/sota411/Documents/project/ogawaya/docs/operations/firestore.rules)を適用する.
+- Firestore Rules: [docs/operations/firestore.rules](docs/operations/firestore.rules)を適用する.
 - 管理者: Firebase AuthのUIDを`stores/store-hashimoto/admins/{uid}`に登録する.
 - GitHub Actions secrets:
   - `FIREBASE_SERVICE_ACCOUNT_JSON`
@@ -61,10 +60,12 @@
 - GitHub Actions variables:
   - `STORE_ID`. 未設定時は`store-hashimoto`を使う.
 
+
 ## 自動処理
 - `Deploy LIFF Pages`: `pages/`をGitHub Pagesへ公開する.
 - `Daily start`: JST10:35に`scripts/daily-start.mjs`を実行し, 当日分タスクを作成する.
 - `Incomplete reminder`: JST00:35に`scripts/incomplete-reminder.mjs`を実行し, 前日分の未完了通知を送る.
+
 
 ## Firestore同期
 - チェック操作, テンプレート挿入, 日付内タスク削除はFirestoreへ直接保存する.
