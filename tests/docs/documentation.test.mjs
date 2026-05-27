@@ -23,13 +23,13 @@ test('README に単一店舗前提・匿名運用・日次時刻・LINE表示名
   assert.match(readme, /1ユーザー = 1店舗/);
   assert.match(readme, /checkedBy/);
   assert.match(readme, /checkedByUserId/);
-  assert.match(readme, /Firebase Auth のログイン状態が必須/);
+  assert.match(readme, /Firebase Authのログイン状態が必須/);
   assert.match(readme, /10:30/);
   assert.match(readme, /00:35/);
   assert.match(readme, /Firestore/);
   assert.match(readme, /Firebase Auth/);
   assert.match(readme, /GitHub Actions/);
-  assert.match(readme, /本番運用の主系として使いません/);
+  assert.match(readme, /本番の中心にはしていません/);
   assert.doesNotMatch(readme, /正本データ: Spreadsheet/);
 });
 
@@ -94,7 +94,7 @@ test('Firestore 同期用 rules の実体と適用手順が存在する', async 
   assert.match(firestoreRules, /data\.type == 'item_delete'/);
   assert.match(bootstrap, /snapshots\/today/);
   assert.match(readme, /正本データ: Firestore/);
-  assert.match(readme, /Firebase Spark 主系/);
+  assert.match(readme, /Firebase Spark主系/);
   assert.match(bootstrap, /Anonymous/);
   assert.match(
     firestoreRules,
