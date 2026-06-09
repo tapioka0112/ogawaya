@@ -655,7 +655,7 @@
         checkedBy: nextItem.checkedBy || '',
         checkedByUserId: nextItem.checkedByUserId || '',
         checkedAt: nextItem.checkedAt || '',
-        updatedAt: nextItem.updatedAt
+        updatedAt: global.firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
       await writeRealtimeEventBestEffort(nextItem);
       return { item: nextItem };

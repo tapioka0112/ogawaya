@@ -26,6 +26,10 @@ service cloud.firestore {
       return value == 'checked' || value == 'unchecked';
     }
 
+    function isValidUpdatedAt(value) {
+      return isSafeText(value, 40) || value == request.time;
+    }
+
     function isValidTaskData(data) {
       return data.keys().hasOnly([
           'id',
@@ -117,7 +121,7 @@ service cloud.firestore {
         && isSafeText(data.checkedBy, 80)
         && isSafeText(data.checkedByUserId, 128)
         && isSafeText(data.checkedAt, 40)
-        && isSafeText(data.updatedAt, 40)
+        && isValidUpdatedAt(data.updatedAt)
         && data.isActive is bool;
     }
 

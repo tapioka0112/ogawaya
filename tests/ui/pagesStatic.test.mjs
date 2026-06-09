@@ -9,7 +9,7 @@ test('GitHub Pages 用 LIFF 画面は必要スクリプトと要素を持つ', a
   assert.doesNotMatch(html, /<script src="https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js"><\/script>/);
   assert.doesNotMatch(html, /<script src="https:\/\/www\.gstatic\.com\/firebasejs\/11\.0\.1\/firebase-app-compat\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" href="\.\/style\.css\?v=period-progress-color-20260426" \/>/);
-  assert.match(html, /<script src="\.\/app\.js\?v=liff-realtime-stable-20260609" defer><\/script>/);
+  assert.match(html, /<script src="\.\/app\.js\?v=liff-realtime-server-time-20260609" defer><\/script>/);
   assert.match(appJs, /var LIFF_SDK_URL = 'https:\/\/static\.line-scdn\.net\/liff\/edge\/2\/sdk\.js';/);
   assert.match(appJs, /firebase-app-compat\.js/);
   assert.match(appJs, /firebase-auth-compat\.js/);
@@ -181,6 +181,12 @@ test('GitHub Pages の check/uncheck は Firestore item と event を直接書�
   assert.match(appJs, /function writeItemStatusToFirestore\(runItemId,\s*desiredStatus,\s*timeoutMs,\s*targetDate\)/);
   assert.match(appJs, /state\.api\.checkItem\(state\.idToken,\s*state\.accessToken,\s*runItemId,\s*targetDate\)/);
   assert.match(appJs, /await itemRef\.set\(\{/);
+  const itemSetStart = appJs.indexOf('await itemRef.set({');
+  const itemSetEnd = appJs.indexOf('}, { merge: true });', itemSetStart);
+  assert.notEqual(itemSetStart, -1);
+  assert.notEqual(itemSetEnd, -1);
+  const itemSetBlock = appJs.slice(itemSetStart, itemSetEnd);
+  assert.match(itemSetBlock, /updatedAt:\s*global\.firebase\.firestore\.FieldValue\.serverTimestamp\(\)/);
   assert.match(appJs, /await writeRealtimeEventBestEffort\(nextItem\);/);
   assert.match(appJs, /payload\.sourceClientId = getClientInstanceId\(\);/);
   assert.doesNotMatch(appJs, /applyChecklistItemUpdate\(actionState\.confirmedItem\);/);
@@ -318,4 +324,16 @@ test('Firestore rules は端末単位の realtime event を許可する', async 
   assert.match(rules, /isSafeText\(data\.sourceClientId,\s*128\)/);
   assert.match(docsRules, /'sourceClientId'/);
   assert.match(docsRules, /isSafeText\(data\.sourceClientId,\s*128\)/);
+});
+
+test('Firestore rules は item updatedAt の server timestamp を許可する', async () => {
+  const rules = await readFile('firebase/firestore.rules', 'utf8');
+  const docsRules = await readFile('docs/operations/firestore.rules', 'utf8');
+
+  assert.match(rules, /function isValidUpdatedAt\(value\)/);
+  assert.match(rules, /value == request\.time/);
+  assert.match(rules, /isValidUpdatedAt\(data\.updatedAt\)/);
+  assert.match(docsRules, /function isValidUpdatedAt\(value\)/);
+  assert.match(docsRules, /value == request\.time/);
+  assert.match(docsRules, /isValidUpdatedAt\(data\.updatedAt\)/);
 });
