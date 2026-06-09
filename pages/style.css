@@ -876,22 +876,6 @@
     stroke-dashoffset: 0;
   }
 
-  /* ── pending spinner ── */
-  .user-mode .todo-bullet-spinner {
-    display: block;
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: 2px solid var(--period-accent-soft);
-    border-top-color: var(--period-accent);
-    animation: todoSpinnerRotate 700ms linear infinite;
-  }
-
-  @keyframes todoSpinnerRotate {
-    to { transform: rotate(360deg); }
-  }
-
   .user-mode .todo-main {
     flex: 1;
     min-width: 0;

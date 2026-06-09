@@ -37,25 +37,27 @@ test('GitHub Pages app は Firestore run items をホーム表示の入力にす
   assert.match(appJs, /\.collection\('stores'\)\.doc\(storeId\)\.collection\('runs'\)\.doc\(targetDate\)\.get\(\)/);
   assert.match(appJs, /\.collection\('items'\)\s*\.get\(\)/);
   assert.match(appJs, /if \(data\.isActive === false\) \{/);
-  assert.match(appJs, /items\.sort\(function \(left,\s*right\)/);
+  assert.match(appJs, /sortChecklistItemsBySortAndTitle\(items\);/);
+  assert.match(appJs, /var itemKey = String\(item\.targetDate \|\| checklist\.targetDate \|\| ''\) \+ ':' \+ item\.id;/);
   assert.match(appJs, /currentUser\.store\.name = String\(store\.name \|\| run\.storeName \|\| ''\);/);
 });
 
 test('GitHub Pages app はチェック操作を item 更新と realtime event の両方へ保存する', async () => {
   const appJs = await readFile('pages/app.js', 'utf8');
 
-  assert.match(appJs, /async function updateItem\(runItemId,\s*status\)/);
+  assert.match(appJs, /async function updateItem\(runItemId,\s*status,\s*targetDateOverride\)/);
   assert.match(appJs, /await itemRef\.set\(\{/);
-  assert.match(appJs, /var targetDate = String\(item\.targetDate \|\| checklist\.targetDate \|\| getTodayDateInJst\(\)\);/);
+  assert.match(appJs, /var targetDate = resolveChecklistItemTargetDate\(item,\s*checklist\);/);
   assert.match(appJs, /nextItem\.targetDate = targetDate;/);
   assert.match(appJs, /\.collection\('runs'\)\s*\.doc\(targetDate\)\s*\.collection\('events'\)/);
   assert.match(appJs, /function getRealtimeTargetInfos\(\)/);
   assert.match(appJs, /function isVisibleRunTargetDate\(targetDate\)/);
   assert.match(appJs, /targetInfos\.forEach\(bootstrapRealtimeEventsFromRest\);/);
   assert.match(appJs, /var unsubscribers = targetInfos\.map\(function \(targetInfo\)/);
+  assert.match(appJs, /subscribeRealtimeItems\(targetInfo\)/);
   assert.match(appJs, /if \(!isVisibleRunTargetDate\(eventPayload\.targetDate\)\) \{/);
   assert.match(appJs, /checkedByUserId:\s*nextItem\.checkedByUserId \|\| ''/);
-  assert.match(appJs, /await writeRealtimeEvent\(nextItem\);/);
+  assert.match(appJs, /await writeRealtimeEventBestEffort\(nextItem\);/);
   assert.match(appJs, /sourceUserId:\s*sourceUserId/);
   assert.match(appJs, /payload\.sourceClientId = getClientInstanceId\(\);/);
   assert.doesNotMatch(appJs, /syncItemStatusViaGas|GAS同期/);

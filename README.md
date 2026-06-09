@@ -27,6 +27,15 @@
 - 管理者画面: GitHub Pages(`pages/admin.html`)
 - Firestore: タスク, テンプレート, 日別実行項目, ユーザー, 管理者allowlistを保存
 
+## 運用前提
+
+- MVPは単一店舗運用を前提にし, 1ユーザー = 1店舗として扱う.
+- 従業員画面でFirestoreを読む時とチェックを更新する時は, Firebase Authのログイン状態が必須.
+- チェック記録は`checkedBy`にLINE表示名, `checkedByUserId`にFirebase Auth UIDを保存する.
+- LIFFのLINE userIdは`liffUserId`として別保存し, `checkedByUserId`はFirebase Auth UIDとして扱う.
+- 業務日の切替はJST10:30を境界にし, GitHub ActionsはJST10:35に当日分タスクを作成する.
+- 未完了通知はGitHub ActionsでJST00:35に実行する.
+
 ## 運用手順
 
 - 非IT担当者向けの現行運用説明書は[docs/operations/non-it-operator-guide.md](docs/operations/non-it-operator-guide.md)を参照してください.

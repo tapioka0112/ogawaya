@@ -177,6 +177,21 @@
     return formatUtcDate(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)));
   }
 
+  function resolveTargetDateForTaskPeriod(baseTargetDate, period) {
+    var normalizedBaseDate = String(baseTargetDate || '');
+    if (!normalizedBaseDate) {
+      return '';
+    }
+    var normalizedPeriod = normalizeTaskPeriod(period);
+    if (normalizedPeriod === 'weekly') {
+      return getWeekStartDateForDate(normalizedBaseDate);
+    }
+    if (normalizedPeriod === 'monthly') {
+      return getMonthStartDateForDate(normalizedBaseDate);
+    }
+    return normalizedBaseDate;
+  }
+
   function addDateCandidatePeriod(candidates, targetDate, period) {
     var normalized = String(targetDate || '');
     if (!normalized) {
@@ -472,21 +487,39 @@
     return match && match[1] ? match[1] : '';
   }
 
+  function toIsoTimestamp(value) {
+    if (!value) {
+      return '';
+    }
+    if (typeof value.toDate === 'function') {
+      return value.toDate().toISOString();
+    }
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    return String(value || '');
+  }
+
+  function normalizeFirestoreRunItem(doc, targetDate) {
+    var data = doc.data() || {};
+    return {
+      id: doc.id,
+      targetDate: String(targetDate || ''),
+      templateItemId: String(data.templateItemId || ''),
+      title: String(data.title || ''),
+      description: String(data.description || ''),
+      period: normalizeTaskPeriod(data.period),
+      sortOrder: Number(data.sortOrder || 0),
+      status: data.status === 'checked' ? 'checked' : 'unchecked',
+      checkedBy: data.checkedBy ? String(data.checkedBy) : null,
+      checkedByUserId: data.checkedByUserId ? String(data.checkedByUserId) : null,
+      checkedAt: data.checkedAt ? toIsoTimestamp(data.checkedAt) : null,
+      updatedAt: data.updatedAt ? toIsoTimestamp(data.updatedAt) : null
+    };
+  }
+
   function createApi(options) {
     var defaultStoreId = String(options && options.defaultStoreId ? options.defaultStoreId : '');
-
-    function toIso(value) {
-      if (!value) {
-        return '';
-      }
-      if (typeof value.toDate === 'function') {
-        return value.toDate().toISOString();
-      }
-      if (value instanceof Date) {
-        return value.toISOString();
-      }
-      return String(value || '');
-    }
 
     function getStoreId() {
       var stored = readStorageValue(LAST_STORE_ID_STORAGE_KEY);
@@ -507,21 +540,7 @@
     }
 
     function normalizeFirestoreItem(doc, targetDate) {
-      var data = doc.data() || {};
-      return {
-        id: doc.id,
-        targetDate: String(targetDate || ''),
-        templateItemId: String(data.templateItemId || ''),
-        title: String(data.title || ''),
-        description: String(data.description || ''),
-        period: normalizeTaskPeriod(data.period),
-        sortOrder: Number(data.sortOrder || 0),
-        status: data.status === 'checked' ? 'checked' : 'unchecked',
-        checkedBy: data.checkedBy ? String(data.checkedBy) : null,
-        checkedByUserId: data.checkedByUserId ? String(data.checkedByUserId) : null,
-        checkedAt: data.checkedAt ? toIso(data.checkedAt) : null,
-        updatedAt: data.updatedAt ? toIso(data.updatedAt) : null
-      };
+      return normalizeFirestoreRunItem(doc, targetDate);
     }
 
     async function loadChecklistForDate(firebaseUser, storeId, store, targetDate) {
@@ -542,14 +561,7 @@
         }
         items.push(normalizeFirestoreItem(doc, targetDate));
       });
-      items.sort(function (left, right) {
-        var leftSort = Number(left.sortOrder || 0);
-        var rightSort = Number(right.sortOrder || 0);
-        if (leftSort !== rightSort) {
-          return leftSort - rightSort;
-        }
-        return left.title.localeCompare(right.title);
-      });
+      sortChecklistItemsBySortAndTitle(items);
       var currentUser = buildCurrentUser(firebaseUser);
       currentUser.store.name = String(store.name || run.storeName || '');
       return {
@@ -605,28 +617,21 @@
       if (!fallbackChecklist) {
         return null;
       }
-      mergedItems.sort(function (left, right) {
-        var leftSort = Number(left.sortOrder || 0);
-        var rightSort = Number(right.sortOrder || 0);
-        if (leftSort !== rightSort) {
-          return leftSort - rightSort;
-        }
-        return left.title.localeCompare(right.title);
-      });
+      sortChecklistItemsBySortAndTitle(mergedItems);
       return Object.assign({}, fallbackChecklist, {
         items: mergedItems
       });
     }
 
-    async function updateItem(runItemId, status) {
+    async function updateItem(runItemId, status, targetDateOverride) {
       var firebaseUser = await ensureFirebaseAuthSession();
       var checklist = state.checklist || await getTodayChecklist();
       var storeId = resolveChecklistStoreId(checklist) || getStoreId();
-      var item = findChecklistItemById(runItemId);
+      var item = findChecklistItemById(runItemId, targetDateOverride);
       if (!item) {
         throw new Error('チェック項目が見つかりません');
       }
-      var targetDate = String(item.targetDate || checklist.targetDate || getTodayDateInJst());
+      var targetDate = resolveChecklistItemTargetDate(item, checklist);
       var checked = status === 'checked';
       var now = new Date().toISOString();
       var authUser = state.authUserContext || {};
@@ -652,7 +657,7 @@
         checkedAt: nextItem.checkedAt || '',
         updatedAt: nextItem.updatedAt
       }, { merge: true });
-      await writeRealtimeEvent(nextItem);
+      await writeRealtimeEventBestEffort(nextItem);
       return { item: nextItem };
     }
 
@@ -660,11 +665,11 @@
       getTodayChecklist: function () {
         return getTodayChecklist();
       },
-      checkItem: function (idToken, accessToken, runItemId) {
-        return updateItem(runItemId, 'checked');
+      checkItem: function (idToken, accessToken, runItemId, targetDate) {
+        return updateItem(runItemId, 'checked', targetDate);
       },
-      uncheckItem: function (idToken, accessToken, runItemId) {
-        return updateItem(runItemId, 'unchecked');
+      uncheckItem: function (idToken, accessToken, runItemId, targetDate) {
+        return updateItem(runItemId, 'unchecked', targetDate);
       }
     };
   }
@@ -758,6 +763,7 @@
     activeTab: 'home',
     activePeriod: 'daily',
     selectedTaskDetailId: '',
+    selectedTaskDetailTargetDate: '',
     authUserContext: {
       userId: '',
       name: ''
@@ -835,6 +841,20 @@
   function normalizeTaskPeriod(value) {
     var normalized = String(value || '').trim();
     return Object.prototype.hasOwnProperty.call(TASK_PERIOD_LABELS, normalized) ? normalized : 'daily';
+  }
+
+  function compareChecklistItemsBySortAndTitle(left, right) {
+    var leftSort = Number(left.sortOrder || 0);
+    var rightSort = Number(right.sortOrder || 0);
+    if (leftSort !== rightSort) {
+      return leftSort - rightSort;
+    }
+    return String(left.title || '').localeCompare(String(right.title || ''));
+  }
+
+  function sortChecklistItemsBySortAndTitle(items) {
+    items.sort(compareChecklistItemsBySortAndTitle);
+    return items;
   }
 
   function getTaskPeriodLabel(period) {
@@ -1929,10 +1949,12 @@
   function cloneChecklistItem(item) {
     return {
       id: item.id,
+      targetDate: String(item.targetDate || ''),
       templateItemId: item.templateItemId,
       title: item.title,
       description: item.description,
       period: normalizeTaskPeriod(item.period),
+      sortOrder: Number(item.sortOrder || 0),
       status: item.status,
       checkedBy: item.checkedBy,
       checkedByUserId: item.checkedByUserId,
@@ -1958,13 +1980,17 @@
   function normalizeChecklistPayload(value) {
     var checklist = value || {};
     var rawItems = Array.isArray(checklist.items) ? checklist.items : [];
+    var checklistTargetDate = String(checklist.targetDate || '');
     var normalizedItems = rawItems.map(function (item) {
+      var period = normalizeTaskPeriod(item.period);
       return {
         id: String(item.id || ''),
+        targetDate: String(item.targetDate || resolveTargetDateForTaskPeriod(checklistTargetDate, period)),
         templateItemId: String(item.templateItemId || ''),
         title: String(item.title || ''),
         description: String(item.description || ''),
-        period: normalizeTaskPeriod(item.period),
+        period: period,
+        sortOrder: Number(item.sortOrder || 0),
         status: item.status === 'checked' ? 'checked' : 'unchecked',
         checkedBy: item.checkedBy ? String(item.checkedBy) : null,
         checkedByUserId: item.checkedByUserId ? String(item.checkedByUserId) : null,
@@ -2130,18 +2156,33 @@
     return progressByPeriod[state.activePeriod] || { checked: 0, total: 0 };
   }
 
-  function findChecklistItemById(runItemId) {
+  function resolveChecklistItemTargetDate(item, checklist) {
+    if (item && item.targetDate) {
+      return String(item.targetDate);
+    }
+    var baseTargetDate = checklist && checklist.targetDate ? String(checklist.targetDate) : getTodayDateInJst();
+    return resolveTargetDateForTaskPeriod(baseTargetDate, item && item.period);
+  }
+
+  function buildChecklistItemActionKey(runItemId, targetDate) {
+    var normalizedTargetDate = String(targetDate || '');
+    return normalizedTargetDate ? normalizedTargetDate + ':' + String(runItemId || '') : String(runItemId || '');
+  }
+
+  function findChecklistItemById(runItemId, targetDate) {
     if (!state.checklist || !Array.isArray(state.checklist.items)) {
       return null;
     }
     return state.checklist.items.find(function (item) {
-      return item.id === runItemId;
+      return String(item.id || '') === String(runItemId || '') &&
+        (!targetDate || String(item.targetDate || '') === String(targetDate || ''));
     }) || null;
   }
 
-  function getItemActionState(runItemId) {
-    if (!state.itemActions[runItemId]) {
-      state.itemActions[runItemId] = {
+  function getItemActionState(runItemId, targetDate) {
+    var actionKey = buildChecklistItemActionKey(runItemId, targetDate);
+    if (!state.itemActions[actionKey]) {
+      state.itemActions[actionKey] = {
         desiredStatus: null,
         inFlight: false,
         lastSyncedAtMs: 0,
@@ -2151,7 +2192,7 @@
         retryAttempt: 0
       };
     }
-    return state.itemActions[runItemId];
+    return state.itemActions[actionKey];
   }
 
   function clearItemRetryTimer(actionState) {
@@ -2163,7 +2204,8 @@
   }
 
   function applyChecklistItemUpdate(updatedItem) {
-    var target = findChecklistItemById(updatedItem.id);
+    var targetDate = String(updatedItem.targetDate || '');
+    var target = findChecklistItemById(updatedItem.id, targetDate);
     if (!target) {
       return;
     }
@@ -2173,14 +2215,23 @@
     target.checkedByUserId = updatedItem.checkedByUserId;
     target.checkedAt = updatedItem.checkedAt;
     target.updatedAt = updatedItem.updatedAt;
+    if (Object.prototype.hasOwnProperty.call(updatedItem, 'targetDate')) {
+      target.targetDate = String(updatedItem.targetDate || '');
+    }
     if (Object.prototype.hasOwnProperty.call(updatedItem, 'templateItemId')) {
       target.templateItemId = updatedItem.templateItemId;
+    }
+    if (Object.prototype.hasOwnProperty.call(updatedItem, 'title') && updatedItem.title) {
+      target.title = updatedItem.title;
     }
     if (Object.prototype.hasOwnProperty.call(updatedItem, 'description')) {
       target.description = updatedItem.description;
     }
     if (Object.prototype.hasOwnProperty.call(updatedItem, 'period')) {
       target.period = normalizeTaskPeriod(updatedItem.period);
+    }
+    if (Object.prototype.hasOwnProperty.call(updatedItem, 'sortOrder')) {
+      target.sortOrder = Number(updatedItem.sortOrder || 0);
     }
     recomputeProgress();
     renderChecklist();
@@ -2194,10 +2245,12 @@
   function buildOptimisticCheckedItem(item) {
     return {
       id: item.id,
+      targetDate: resolveChecklistItemTargetDate(item, state.checklist),
       templateItemId: item.templateItemId,
       title: item.title,
       description: item.description,
       period: normalizeTaskPeriod(item.period),
+      sortOrder: Number(item.sortOrder || 0),
       status: 'checked',
       checkedBy: state.checklist && state.checklist.currentUser ? state.checklist.currentUser.name : 'LINEユーザー',
       checkedByUserId: state.checklist && state.checklist.currentUser ? state.checklist.currentUser.userId : '',
@@ -2209,10 +2262,12 @@
   function buildOptimisticUncheckedItem(item) {
     return {
       id: item.id,
+      targetDate: resolveChecklistItemTargetDate(item, state.checklist),
       templateItemId: item.templateItemId,
       title: item.title,
       description: item.description,
       period: normalizeTaskPeriod(item.period),
+      sortOrder: Number(item.sortOrder || 0),
       status: 'unchecked',
       checkedBy: null,
       checkedByUserId: null,
@@ -2221,13 +2276,13 @@
     };
   }
 
-  function applyOptimisticStatus(runItemId, desiredStatus) {
-    var currentItem = findChecklistItemById(runItemId);
+  function applyOptimisticStatus(runItemId, desiredStatus, targetDate) {
+    var currentItem = findChecklistItemById(runItemId, targetDate);
     if (!currentItem || currentItem.status === desiredStatus) {
       return;
     }
     if (desiredStatus === 'checked') {
-      recentlyCheckedIds.add(runItemId);
+      recentlyCheckedIds.add(buildChecklistItemActionKey(runItemId, targetDate));
       if (global.navigator && typeof global.navigator.vibrate === 'function') {
         global.navigator.vibrate(10);
       }
@@ -2304,18 +2359,24 @@
   }
 
   function getVisibleRunTargetDates() {
+    return getVisibleRunTargetDateCandidates().map(function (candidate) {
+      return candidate.targetDate;
+    });
+  }
+
+  function getVisibleRunTargetDateCandidates() {
     if (!state.checklist || !state.checklist.targetDate) {
       return [];
     }
-    var targetDates = [];
+    var candidates = [];
     var baseTargetDate = String(state.checklist.targetDate || '');
-    addUniqueTargetDate(targetDates, baseTargetDate);
-    addUniqueTargetDate(targetDates, getWeekStartDateForDate(baseTargetDate));
-    addUniqueTargetDate(targetDates, getMonthStartDateForDate(baseTargetDate));
+    addDateCandidatePeriod(candidates, baseTargetDate, 'daily');
+    addDateCandidatePeriod(candidates, getWeekStartDateForDate(baseTargetDate), 'weekly');
+    addDateCandidatePeriod(candidates, getMonthStartDateForDate(baseTargetDate), 'monthly');
     (state.checklist.items || []).forEach(function (item) {
-      addUniqueTargetDate(targetDates, item.targetDate);
+      addDateCandidatePeriod(candidates, resolveChecklistItemTargetDate(item, state.checklist), item.period);
     });
-    return targetDates;
+    return candidates;
   }
 
   function getRealtimeTargetInfos() {
@@ -2323,23 +2384,34 @@
     if (!targetInfo) {
       return [];
     }
-    return getVisibleRunTargetDates().map(function (targetDate) {
+    return getVisibleRunTargetDateCandidates().map(function (candidate) {
       return {
         storeId: targetInfo.storeId,
-        targetDate: targetDate,
-        runId: targetDate
+        targetDate: candidate.targetDate,
+        runId: candidate.targetDate,
+        periods: Object.assign({}, candidate.periods)
       };
     });
   }
 
+  function getRealtimeTargetInfoPeriodsKey(targetInfo) {
+    return Object.keys(targetInfo.periods || {}).filter(function (period) {
+      return targetInfo.periods[period] === true;
+    }).sort().join(',');
+  }
+
   function getRealtimeTargetInfoKey(targetInfos) {
     return (targetInfos || []).map(function (targetInfo) {
-      return [targetInfo.storeId, targetInfo.targetDate, targetInfo.runId].join(':');
+      return [targetInfo.storeId, targetInfo.targetDate, targetInfo.runId, getRealtimeTargetInfoPeriodsKey(targetInfo)].join(':');
     }).join('|');
   }
 
   function isVisibleRunTargetDate(targetDate) {
     return getVisibleRunTargetDates().indexOf(String(targetDate || '')) !== -1;
+  }
+
+  function isRealtimeTargetPeriodAllowed(targetInfo, period) {
+    return !!(targetInfo && targetInfo.periods && targetInfo.periods[normalizeTaskPeriod(period)] === true);
   }
 
   function initializeRealtimeClient() {
@@ -2890,6 +2962,7 @@
       title: String(item && item.title ? item.title : ''),
       description: String(item && item.description ? item.description : ''),
       period: normalizeTaskPeriod(item && item.period),
+      sortOrder: Number(item && item.sortOrder ? item.sortOrder : 0),
       status: 'unchecked',
       checkedBy: null,
       checkedByUserId: null,
@@ -2924,6 +2997,13 @@
     }).catch(function (error) {
       suspendFirestoreWrites(error);
       throw error;
+    });
+  }
+
+  function writeRealtimeEventBestEffort(updatedItem) {
+    return writeRealtimeEvent(updatedItem).catch(function (error) {
+      console.warn('[sync] realtime event write failed after item save', error);
+      return null;
     });
   }
 
@@ -2962,16 +3042,21 @@
     if (!runItemId) {
       return;
     }
-    var actionState = getItemActionState(runItemId);
+    var actionState = getItemActionState(runItemId, eventTargetDate);
     if (actionState.inFlight) {
       return;
     }
     if (emittedAtMs <= actionState.lastSyncedAtMs) {
       return;
     }
-    var currentItem = findChecklistItemById(runItemId);
+    var currentItem = findChecklistItemById(runItemId, eventTargetDate);
     var incomingUpdatedAtMs = parseTimestampMillis(eventPayload.updatedAt);
     if (incomingUpdatedAtMs <= 0) {
+      return;
+    }
+    if (isRealtimeStatusEventEquivalentToCurrentItem(eventPayload, currentItem)) {
+      actionState.lastSyncedAtMs = emittedAtMs;
+      actionState.confirmedItem = cloneChecklistItem(currentItem);
       return;
     }
     var latestKnownUpdatedAtMs = Math.max(
@@ -3000,21 +3085,34 @@
     actionState.confirmedItem = cloneChecklistItem(syncedItem);
   }
 
+  function isRealtimeStatusEventEquivalentToCurrentItem(eventPayload, currentItem) {
+    if (!eventPayload || !currentItem) {
+      return false;
+    }
+    return (
+      String(eventPayload.status || '') === String(currentItem.status || '') &&
+      String(eventPayload.checkedBy || '') === String(currentItem.checkedBy || '') &&
+      String(eventPayload.checkedByUserId || '') === String(currentItem.checkedByUserId || '') &&
+      String(eventPayload.checkedAt || '') === String(currentItem.checkedAt || '')
+    );
+  }
+
   function applyRunItemDeleteRealtimeEvent(eventPayload, emittedAtMs) {
     var sourceClientId = String(eventPayload.sourceClientId || '');
     if (sourceClientId && sourceClientId === getClientInstanceId()) {
       return;
     }
     var runItemId = String(eventPayload.itemId || '');
+    var targetDate = String(eventPayload.targetDate || eventPayload.runId || '');
     if (!runItemId || !Array.isArray(state.checklist.items)) {
       return;
     }
-    var actionState = getItemActionState(runItemId);
+    var actionState = getItemActionState(runItemId, targetDate);
     if (emittedAtMs <= actionState.lastSyncedAtMs) {
       return;
     }
     var nextItems = state.checklist.items.filter(function (item) {
-      return String(item.id || '') !== runItemId;
+      return !(String(item.id || '') === runItemId && String(item.targetDate || '') === targetDate);
     });
     if (nextItems.length === state.checklist.items.length) {
       return;
@@ -3028,6 +3126,116 @@
     renderIncomplete();
     writeChecklistCache(state.checklist);
     updateStatsFromCurrentChecklist();
+  }
+
+  function applyRealtimeItemRemoval(runItemId, targetDate, updatedAtMs) {
+    if (!runItemId || !targetDate || !state.checklist || !Array.isArray(state.checklist.items)) {
+      return;
+    }
+    var actionState = getItemActionState(runItemId, targetDate);
+    if (actionState.inFlight || updatedAtMs <= actionState.lastSyncedAtMs) {
+      return;
+    }
+    var nextItems = state.checklist.items.filter(function (item) {
+      return !(String(item.id || '') === runItemId && String(item.targetDate || '') === targetDate);
+    });
+    if (nextItems.length === state.checklist.items.length) {
+      return;
+    }
+    actionState.lastSyncedAtMs = updatedAtMs;
+    state.checklist.items = nextItems;
+    recomputeProgress();
+    renderChecklist();
+    renderSelectedTaskDetail({ focus: false });
+    renderOverview();
+    renderIncomplete();
+    writeChecklistCache(state.checklist);
+    updateStatsFromCurrentChecklist();
+  }
+
+  function areChecklistItemsDisplayEquivalent(left, right) {
+    if (!left || !right) {
+      return false;
+    }
+    return (
+      String(left.id || '') === String(right.id || '') &&
+      String(left.targetDate || '') === String(right.targetDate || '') &&
+      String(left.templateItemId || '') === String(right.templateItemId || '') &&
+      String(left.title || '') === String(right.title || '') &&
+      String(left.description || '') === String(right.description || '') &&
+      normalizeTaskPeriod(left.period) === normalizeTaskPeriod(right.period) &&
+      Number(left.sortOrder || 0) === Number(right.sortOrder || 0) &&
+      String(left.status || '') === String(right.status || '') &&
+      String(left.checkedBy || '') === String(right.checkedBy || '') &&
+      String(left.checkedByUserId || '') === String(right.checkedByUserId || '') &&
+      String(left.checkedAt || '') === String(right.checkedAt || '')
+    );
+  }
+
+  function appendRealtimeChecklistItem(newItem) {
+    state.checklist.items = (Array.isArray(state.checklist.items) ? state.checklist.items : []).concat([newItem]);
+    sortChecklistItemsBySortAndTitle(state.checklist.items);
+    recomputeProgress();
+    renderChecklist();
+    renderSelectedTaskDetail({ focus: false });
+    renderOverview();
+    renderIncomplete();
+    writeChecklistCache(state.checklist);
+    updateStatsFromCurrentChecklist();
+  }
+
+  function applyRealtimeItemDocument(doc, targetInfo) {
+    if (!doc || !targetInfo || !state.checklist) {
+      return;
+    }
+    var data = doc.data() || {};
+    var runItemId = String(doc.id || '');
+    var targetDate = String(targetInfo.targetDate || '');
+    if (!runItemId || !isVisibleRunTargetDate(targetDate)) {
+      return;
+    }
+    if (!isRealtimeTargetPeriodAllowed(targetInfo, data.period)) {
+      return;
+    }
+    var updatedAtMs = parseTimestampMillis(data.updatedAt);
+    if (updatedAtMs <= 0) {
+      return;
+    }
+    if (data.isActive === false) {
+      applyRealtimeItemRemoval(runItemId, targetDate, updatedAtMs);
+      return;
+    }
+    var incomingItem = normalizeFirestoreRunItem(doc, targetDate);
+    if (!incomingItem.title) {
+      return;
+    }
+    var actionState = getItemActionState(runItemId, targetDate);
+    if (actionState.inFlight || updatedAtMs <= actionState.lastSyncedAtMs) {
+      return;
+    }
+    var currentItem = findChecklistItemById(runItemId, targetDate);
+    if (!currentItem) {
+      actionState.lastSyncedAtMs = updatedAtMs;
+      appendRealtimeChecklistItem(incomingItem);
+      actionState.confirmedItem = cloneChecklistItem(incomingItem);
+      return;
+    }
+    var latestKnownUpdatedAtMs = Math.max(
+      resolveItemUpdatedAtMs(currentItem),
+      resolveItemUpdatedAtMs(actionState.confirmedItem)
+    );
+    if (updatedAtMs <= latestKnownUpdatedAtMs) {
+      actionState.lastSyncedAtMs = Math.max(actionState.lastSyncedAtMs, updatedAtMs);
+      return;
+    }
+    if (areChecklistItemsDisplayEquivalent(currentItem, incomingItem)) {
+      actionState.lastSyncedAtMs = updatedAtMs;
+      actionState.confirmedItem = cloneChecklistItem(incomingItem);
+      return;
+    }
+    actionState.lastSyncedAtMs = updatedAtMs;
+    applyChecklistItemUpdate(incomingItem);
+    actionState.confirmedItem = cloneChecklistItem(incomingItem);
   }
 
   function applyTemplateInsertRealtimeEvent(eventPayload) {
@@ -3045,21 +3253,22 @@
     var existingIds = {};
     var existingTemplateItemIds = {};
     existingItems.forEach(function (item) {
-      existingIds[item.id] = true;
+      existingIds[buildChecklistItemActionKey(item.id, item.targetDate)] = true;
       if (item.templateItemId) {
-        existingTemplateItemIds[item.templateItemId] = true;
+        existingTemplateItemIds[buildChecklistItemActionKey(item.templateItemId, item.targetDate)] = true;
       }
     });
     var newItems = incomingItems.filter(function (item) {
-      if (existingIds[item.id]) {
+      if (existingIds[buildChecklistItemActionKey(item.id, item.targetDate)]) {
         return false;
       }
-      return !(item.templateItemId && existingTemplateItemIds[item.templateItemId]);
+      return !(item.templateItemId && existingTemplateItemIds[buildChecklistItemActionKey(item.templateItemId, item.targetDate)]);
     });
     if (newItems.length === 0) {
       return;
     }
     state.checklist.items = existingItems.concat(newItems);
+    sortChecklistItemsBySortAndTitle(state.checklist.items);
     recomputeProgress();
     renderChecklist();
     renderSelectedTaskDetail({ focus: false });
@@ -3076,6 +3285,54 @@
     }
     state.syncUnsubscribe = null;
     state.realtimeEnabled = false;
+  }
+
+  function subscribeRealtimeEvents(targetInfo) {
+    var query = state.firestore
+      .collection('stores')
+      .doc(targetInfo.storeId)
+      .collection('runs')
+      .doc(targetInfo.targetDate)
+      .collection('events')
+      .orderBy('emittedAt', 'desc')
+      .limit(40);
+
+    return query.onSnapshot(function (snapshot) {
+      snapshot.docChanges().forEach(function (change) {
+        if (change.type !== 'added' && change.type !== 'modified') {
+          return;
+        }
+        var payload = change.doc.data() || {};
+        var emittedAtMs = parseTimestampMillis(payload.emittedAt);
+        applyRealtimeEvent(payload, emittedAtMs);
+      });
+    }, function (error) {
+      console.error('[sync] realtime event listener failed', error);
+    });
+  }
+
+  function subscribeRealtimeItems(targetInfo) {
+    var itemQuery = state.firestore
+      .collection('stores')
+      .doc(targetInfo.storeId)
+      .collection('runs')
+      .doc(targetInfo.targetDate)
+      .collection('items');
+
+    return itemQuery.onSnapshot(function (snapshot) {
+      snapshot.docChanges().forEach(function (change) {
+        if (change.type === 'removed') {
+          applyRealtimeItemRemoval(String(change.doc.id || ''), String(targetInfo.targetDate || ''), Date.now());
+          return;
+        }
+        if (change.type !== 'added' && change.type !== 'modified') {
+          return;
+        }
+        applyRealtimeItemDocument(change.doc, targetInfo);
+      });
+    }, function (error) {
+      console.error('[sync] realtime item listener failed', error);
+    });
   }
 
   function startRealtimeSync() {
@@ -3102,28 +3359,13 @@
         return;
       }
       var unsubscribers = targetInfos.map(function (targetInfo) {
-        var query = state.firestore
-          .collection('stores')
-          .doc(targetInfo.storeId)
-          .collection('runs')
-          .doc(targetInfo.targetDate)
-          .collection('events')
-          .orderBy('emittedAt', 'desc')
-          .limit(40);
-
-        return query.onSnapshot(function (snapshot) {
-          snapshot.docChanges().forEach(function (change) {
-            if (change.type !== 'added' && change.type !== 'modified') {
-              return;
-            }
-            var payload = change.doc.data() || {};
-            var emittedAtMs = parseTimestampMillis(payload.emittedAt);
-            applyRealtimeEvent(payload, emittedAtMs);
-          });
-        }, function (error) {
-          console.error('[sync] realtime listener failed', error);
-        });
-      });
+        return [
+          subscribeRealtimeEvents(targetInfo),
+          subscribeRealtimeItems(targetInfo)
+        ];
+      }).reduce(function (flattened, targetUnsubscribers) {
+        return flattened.concat(targetUnsubscribers);
+      }, []);
       state.syncUnsubscribe = function () {
         unsubscribers.forEach(function (unsubscribe) {
           unsubscribe();
@@ -3156,17 +3398,18 @@
     var serverItemIds = {};
     var serverPeriods = {};
     serverItems.forEach(function (item) {
-      serverItemIds[item.id] = true;
+      serverItemIds[buildChecklistItemActionKey(item.id, item.targetDate)] = true;
       serverPeriods[normalizeTaskPeriod(item.period)] = true;
     });
     localItems.forEach(function (item) {
-      if (serverItemIds[item.id]) {
+      var itemKey = buildChecklistItemActionKey(item.id, item.targetDate);
+      if (serverItemIds[itemKey]) {
         return;
       }
       if (serverPeriods[normalizeTaskPeriod(item.period)]) {
         return;
       }
-      serverItemIds[item.id] = true;
+      serverItemIds[itemKey] = true;
       serverItems.push(cloneChecklistItem(item));
     });
   }
@@ -3178,7 +3421,7 @@
     }
     var localItems = {};
     state.checklist.items.forEach(function (item) {
-      localItems[item.id] = item;
+      localItems[buildChecklistItemActionKey(item.id, item.targetDate)] = item;
     });
     var nextChecklist = serverChecklist || {};
     var nextItems = Array.isArray(nextChecklist.items) ? nextChecklist.items : [];
@@ -3189,11 +3432,12 @@
       appendMissingLocalItemsFromMissingPeriods(state.checklist.items, nextItems);
     }
     nextChecklist.items = nextItems.map(function (serverItem) {
-      var localItem = localItems[serverItem.id];
+      var itemKey = buildChecklistItemActionKey(serverItem.id, serverItem.targetDate);
+      var localItem = localItems[itemKey];
       if (!localItem) {
         return serverItem;
       }
-      var actionState = getItemActionState(serverItem.id);
+      var actionState = getItemActionState(serverItem.id, serverItem.targetDate);
       if (actionState.inFlight) {
         return cloneChecklistItem(localItem);
       }
@@ -3217,8 +3461,8 @@
     return nextChecklist;
   }
 
-  function scheduleItemStatusChange(runItemId) {
-    var actionState = getItemActionState(runItemId);
+  function scheduleItemStatusChange(runItemId, targetDate) {
+    var actionState = getItemActionState(runItemId, targetDate);
     if (actionState.inFlight) {
       return;
     }
@@ -3227,31 +3471,31 @@
     }
     actionState.dispatchTimerId = global.setTimeout(function () {
       actionState.dispatchTimerId = null;
-      processItemStatusChange(runItemId);
+      processItemStatusChange(runItemId, targetDate);
     }, ITEM_ACTION_DISPATCH_DEBOUNCE_MS);
   }
 
-  function requestItemStatusChange(runItemId, desiredStatus) {
+  function requestItemStatusChange(runItemId, desiredStatus, targetDate) {
     if (!ensureWritableSession()) {
       return;
     }
-    var currentItem = findChecklistItemById(runItemId);
+    var currentItem = findChecklistItemById(runItemId, targetDate);
     if (!currentItem) {
       return;
     }
-    var actionState = getItemActionState(runItemId);
+    var actionState = getItemActionState(runItemId, targetDate);
     if (!actionState.confirmedItem) {
       actionState.confirmedItem = cloneChecklistItem(currentItem);
     }
     clearItemRetryTimer(actionState);
     actionState.retryAttempt = 0;
     actionState.desiredStatus = desiredStatus;
-    applyOptimisticStatus(runItemId, desiredStatus);
-    scheduleItemStatusChange(runItemId);
+    applyOptimisticStatus(runItemId, desiredStatus, targetDate);
+    scheduleItemStatusChange(runItemId, targetDate);
   }
 
-  function scheduleItemStatusRetry(runItemId, requestError) {
-    var actionState = getItemActionState(runItemId);
+  function scheduleItemStatusRetry(runItemId, requestError, targetDate) {
+    var actionState = getItemActionState(runItemId, targetDate);
     if (actionState.inFlight || actionState.retryTimerId) {
       return;
     }
@@ -3268,15 +3512,15 @@
     var delayMs = Math.min(10000, 400 * Math.pow(2, actionState.retryAttempt - 1));
     actionState.retryTimerId = global.setTimeout(function () {
       actionState.retryTimerId = null;
-      processItemStatusChange(runItemId);
+      processItemStatusChange(runItemId, targetDate);
     }, delayMs);
     setStatus('通信遅延のため保存を再試行しています...');
   }
 
-  function writeItemStatusToFirestore(runItemId, desiredStatus, timeoutMs) {
+  function writeItemStatusToFirestore(runItemId, desiredStatus, timeoutMs, targetDate) {
     var requestPromise = desiredStatus === 'checked'
-      ? state.api.checkItem(state.idToken, state.accessToken, runItemId)
-      : state.api.uncheckItem(state.idToken, state.accessToken, runItemId);
+      ? state.api.checkItem(state.idToken, state.accessToken, runItemId, targetDate)
+      : state.api.uncheckItem(state.idToken, state.accessToken, runItemId, targetDate);
     return withTimeout(
       requestPromise,
       timeoutMs,
@@ -3284,8 +3528,8 @@
     );
   }
 
-  function processItemStatusChange(runItemId) {
-    var actionState = getItemActionState(runItemId);
+  function processItemStatusChange(runItemId, targetDate) {
+    var actionState = getItemActionState(runItemId, targetDate);
     if (actionState.dispatchTimerId) {
       global.clearTimeout(actionState.dispatchTimerId);
       actionState.dispatchTimerId = null;
@@ -3293,7 +3537,7 @@
     if (actionState.inFlight) {
       return;
     }
-    var currentItem = findChecklistItemById(runItemId);
+    var currentItem = findChecklistItemById(runItemId, targetDate);
     if (!currentItem) {
       return;
     }
@@ -3322,7 +3566,12 @@
       desiredStatus: desiredStatus
     });
 
-    var requestPromiseWithFallback = writeItemStatusToFirestore(runItemId, desiredStatus, ITEM_ACTION_REQUEST_TIMEOUT_MS);
+    var requestPromiseWithFallback = writeItemStatusToFirestore(
+      runItemId,
+      desiredStatus,
+      ITEM_ACTION_REQUEST_TIMEOUT_MS,
+      targetDate
+    );
 
     requestPromiseWithFallback.then(function (response) {
       if (!response || !response.item) {
@@ -3374,14 +3623,14 @@
       var latestDesiredStatus = actionState.desiredStatus;
       var latestConfirmedStatus = actionState.confirmedItem ? actionState.confirmedItem.status : '';
       if (requestFailed) {
-        scheduleItemStatusRetry(runItemId, requestError);
+        scheduleItemStatusRetry(runItemId, requestError, targetDate);
         renderChecklist();
         return;
       }
       clearItemRetryTimer(actionState);
       actionState.retryAttempt = 0;
       if (latestDesiredStatus && latestConfirmedStatus && latestDesiredStatus !== latestConfirmedStatus) {
-        processItemStatusChange(runItemId);
+        processItemStatusChange(runItemId, targetDate);
         return;
       }
       actionState.desiredStatus = latestConfirmedStatus;
@@ -3450,6 +3699,7 @@
 
   function hideTaskDetail() {
     state.selectedTaskDetailId = '';
+    state.selectedTaskDetailTargetDate = '';
     if (!elements.taskDetailPanel) {
       return;
     }
@@ -3481,7 +3731,7 @@
     if (!state.selectedTaskDetailId) {
       return;
     }
-    var selectedItem = findChecklistItemById(state.selectedTaskDetailId);
+    var selectedItem = findChecklistItemById(state.selectedTaskDetailId, state.selectedTaskDetailTargetDate);
     if (!selectedItem || normalizeTaskPeriod(selectedItem.period) !== state.activePeriod) {
       hideTaskDetail();
       return;
@@ -3489,12 +3739,13 @@
     renderTaskDetail(selectedItem, options);
   }
 
-  function openTaskDetail(runItemId) {
-    var item = findChecklistItemById(runItemId);
+  function openTaskDetail(runItemId, targetDate) {
+    var item = findChecklistItemById(runItemId, targetDate);
     if (!item) {
       return;
     }
     state.selectedTaskDetailId = item.id;
+    state.selectedTaskDetailTargetDate = String(item.targetDate || targetDate || '');
     renderTaskDetail(item);
   }
 
@@ -3530,18 +3781,17 @@
       return;
     }
 
-    var sortedItems = visibleItems.slice().sort(function (a, b) {
-      if (a.status === 'checked' && b.status !== 'checked') { return 1; }
-      if (a.status !== 'checked' && b.status === 'checked') { return -1; }
-      return 0;
-    });
+    var sortedItems = visibleItems.slice();
 
     sortedItems.forEach(function (item) {
       var listItem = document.createElement('li');
       listItem.className = 'todo-item';
       listItem.dataset.status = item.status;
       listItem.dataset.period = normalizeTaskPeriod(item.period);
-      var actionState = getItemActionState(item.id);
+      listItem.dataset.targetDate = String(item.targetDate || '');
+      var itemTargetDate = resolveChecklistItemTargetDate(item, checklist);
+      var itemActionKey = buildChecklistItemActionKey(item.id, itemTargetDate);
+      var actionState = getItemActionState(item.id, itemTargetDate);
       if (actionState.inFlight) {
         listItem.dataset.pending = 'true';
       }
@@ -3550,7 +3800,9 @@
       toggleButton.type = 'button';
       toggleButton.className = 'todo-toggle-button';
       toggleButton.dataset.itemId = item.id;
+      toggleButton.dataset.targetDate = itemTargetDate;
       toggleButton.dataset.action = item.status === 'checked' ? 'uncheck' : 'check';
+      toggleButton.setAttribute('aria-busy', actionState.inFlight ? 'true' : 'false');
       toggleButton.setAttribute(
         'aria-label',
         item.status === 'checked'
@@ -3558,38 +3810,31 @@
           : item.title + ' を完了にする'
       );
 
-      if (actionState.inFlight) {
-        var spinner = document.createElement('span');
-        spinner.className = 'todo-bullet-spinner';
-        spinner.setAttribute('aria-label', '更新中');
-        toggleButton.appendChild(spinner);
-      } else {
-        var bulletSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        bulletSvg.setAttribute('class', 'todo-bullet-svg');
-        bulletSvg.setAttribute('viewBox', '0 0 24 24');
-        bulletSvg.setAttribute('width', '24');
-        bulletSvg.setAttribute('height', '24');
-        bulletSvg.setAttribute('aria-hidden', 'true');
-        bulletSvg.dataset.status = 'unchecked';
-        var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('class', 'todo-bullet-circle');
-        circle.setAttribute('cx', '12');
-        circle.setAttribute('cy', '12');
-        circle.setAttribute('r', '10');
-        var checkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        checkPath.setAttribute('class', 'todo-bullet-check');
-        checkPath.setAttribute('d', 'M6 12 L10 16 L18 8');
-        bulletSvg.appendChild(circle);
-        bulletSvg.appendChild(checkPath);
-        toggleButton.appendChild(bulletSvg);
+      var bulletSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      bulletSvg.setAttribute('class', 'todo-bullet-svg');
+      bulletSvg.setAttribute('viewBox', '0 0 24 24');
+      bulletSvg.setAttribute('width', '24');
+      bulletSvg.setAttribute('height', '24');
+      bulletSvg.setAttribute('aria-hidden', 'true');
+      bulletSvg.dataset.status = 'unchecked';
+      var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('class', 'todo-bullet-circle');
+      circle.setAttribute('cx', '12');
+      circle.setAttribute('cy', '12');
+      circle.setAttribute('r', '10');
+      var checkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      checkPath.setAttribute('class', 'todo-bullet-check');
+      checkPath.setAttribute('d', 'M6 12 L10 16 L18 8');
+      bulletSvg.appendChild(circle);
+      bulletSvg.appendChild(checkPath);
+      toggleButton.appendChild(bulletSvg);
 
-        if (item.status === 'checked') {
-          if (recentlyCheckedIds.has(item.id)) {
-            recentlyCheckedIds.delete(item.id);
-            requestAnimationFrame(function () { bulletSvg.dataset.status = 'checked'; });
-          } else {
-            bulletSvg.dataset.status = 'checked';
-          }
+      if (item.status === 'checked') {
+        if (recentlyCheckedIds.has(itemActionKey)) {
+          recentlyCheckedIds.delete(itemActionKey);
+          requestAnimationFrame(function () { bulletSvg.dataset.status = 'checked'; });
+        } else {
+          bulletSvg.dataset.status = 'checked';
         }
       }
 
@@ -3619,22 +3864,23 @@
       detailButton.type = 'button';
       detailButton.className = 'todo-detail-button';
       detailButton.dataset.itemId = item.id;
+      detailButton.dataset.targetDate = itemTargetDate;
       detailButton.dataset.action = 'detail';
       detailButton.setAttribute('aria-label', item.title + ' の詳細を表示');
       detailButton.textContent = '›';
 
       var openDetailHandler = function () {
-        openTaskDetail(item.id);
+        openTaskDetail(item.id, itemTargetDate);
       };
       var toggleHandler = function () {
         clearError();
         clearStatus();
-        var latestItem = findChecklistItemById(item.id);
+        var latestItem = findChecklistItemById(item.id, itemTargetDate);
         if (!latestItem) {
           return;
         }
         var nextStatus = latestItem.status === 'unchecked' ? 'checked' : 'unchecked';
-        requestItemStatusChange(item.id, nextStatus);
+        requestItemStatusChange(item.id, nextStatus, itemTargetDate);
       };
       toggleButton.addEventListener('click', toggleHandler);
       detailButton.addEventListener('click', openDetailHandler);
