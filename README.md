@@ -57,6 +57,7 @@
 
 ## テスト
 - `npm test`
+- Firestore Rulesのallow/deny確認: `npm run test:firestore-rules`
 
 
 ## 必要な本番設定

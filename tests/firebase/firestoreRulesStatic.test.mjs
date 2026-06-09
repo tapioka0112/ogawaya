@@ -10,7 +10,8 @@ test('Firestore は Spark 前提の主系データを認証済みユーザーと
   assert.match(rules, /match \/tasks\/\{taskId\}/);
   assert.match(rules, /allow create, update: if isStoreAdmin\(storeId\) && isValidTaskData\(request\.resource\.data\);/);
   assert.match(rules, /match \/runs\/\{targetDate\}/);
-  assert.match(rules, /allow update: if \(isStoreAdmin\(storeId\) && isValidRunItemData\(request\.resource\.data\)\)\s+\|\| \(isSignedIn\(\) && isValidEmployeeItemUpdate\(\)\);/);
+  assert.match(rules, /allow create: if isStoreAdmin\(storeId\) && isValidRunItemData\(targetDate, request\.resource\.data\);/);
+  assert.match(rules, /allow update: if \(isStoreAdmin\(storeId\) && isValidRunItemData\(targetDate, request\.resource\.data\)\)\s+\|\| \(isSignedIn\(\) && isValidEmployeeItemUpdate\(targetDate\)\);/);
   assert.match(
     rules,
     /match \/events\/\{eventId\} \{\s+allow read: if isSignedIn\(\);/

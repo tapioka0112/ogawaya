@@ -96,9 +96,10 @@ service cloud.firestore {
         && isSafeText(data.status, 40);
     }
 
-    function isValidRunItemData(data) {
+    function isValidRunItemData(targetDate, data) {
       return data.keys().hasOnly([
           'id',
+          'targetDate',
           'templateItemId',
           'title',
           'description',
@@ -112,6 +113,7 @@ service cloud.firestore {
           'isActive'
         ])
         && isSafeText(data.id, 120)
+        && (!data.keys().hasAny(['targetDate']) || data.targetDate == targetDate)
         && isSafeText(data.templateItemId, 120)
         && isSafeText(data.title, 120)
         && isSafeText(data.description, 500)
@@ -125,7 +127,7 @@ service cloud.firestore {
         && data.isActive is bool;
     }
 
-    function isValidEmployeeItemUpdate() {
+    function isValidEmployeeItemUpdate(targetDate) {
       let data = request.resource.data;
       let before = resource.data;
       return data.diff(before).affectedKeys().hasOnly([
@@ -135,7 +137,7 @@ service cloud.firestore {
           'checkedAt',
           'updatedAt'
         ])
-        && isValidRunItemData(data)
+        && isValidRunItemData(targetDate, data)
         && (
           (data.status == 'checked'
             && data.checkedBy != ''
@@ -300,9 +302,9 @@ service cloud.firestore {
 
         match /items/{itemId} {
           allow read: if isSignedIn();
-          allow create: if isStoreAdmin(storeId) && isValidRunItemData(request.resource.data);
-          allow update: if (isStoreAdmin(storeId) && isValidRunItemData(request.resource.data))
-            || (isSignedIn() && isValidEmployeeItemUpdate());
+          allow create: if isStoreAdmin(storeId) && isValidRunItemData(targetDate, request.resource.data);
+          allow update: if (isStoreAdmin(storeId) && isValidRunItemData(targetDate, request.resource.data))
+            || (isSignedIn() && isValidEmployeeItemUpdate(targetDate));
           allow delete: if false;
         }
 

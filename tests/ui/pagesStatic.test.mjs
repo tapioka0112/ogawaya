@@ -193,6 +193,19 @@ test('GitHub Pages の check/uncheck は Firestore item と event を直接書�
   assert.doesNotMatch(appJs, /syncItemStatusViaGas/);
 });
 
+test('Firestore Rules は targetDate 付き run item の従業員更新を許可する', async () => {
+  const rules = await readFile('firebase/firestore.rules', 'utf8');
+  const documentedRules = await readFile('docs/operations/firestore.rules', 'utf8');
+
+  assert.match(rules, /function isValidRunItemData\(targetDate,\s*data\)/);
+  assert.match(rules, /function isValidEmployeeItemUpdate\(targetDate\)/);
+  assert.match(rules, /'targetDate'/);
+  assert.match(rules, /!\s*data\.keys\(\)\.hasAny\(\['targetDate'\]\) \|\| data\.targetDate == targetDate/);
+  assert.match(rules, /isValidRunItemData\(targetDate,\s*data\)/);
+  assert.match(rules, /isValidEmployeeItemUpdate\(targetDate\)/);
+  assert.equal(documentedRules, rules);
+});
+
 test('GitHub Pages の API 同期失敗は指数バックオフで再試行する', async () => {
   const appJs = await readFile('pages/app.js', 'utf8');
 
